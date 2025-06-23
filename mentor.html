@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Mentor - License Manager{% endblock %}
+{% block page_title %}Mentor License Servers{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Mentor License Servers</h5>
+                <button class="btn btn-primary btn-sm" onclick="refreshData()">
+                    <i class="fas fa-sync-alt me-1"></i>
+                    Refresh
+                </button>
+            </div>
+            <div class="card-body">
+                {% for server in servers %}
+                <div class="card mb-3">
+                    <div class="card-header bg-light">
+                        <h6 class="mb-0">
+                            <i class="fas fa-server me-2"></i>
+                            {{ server.name }}
+                            <span class="badge bg-success ms-2">{{ server.total_licenses }} Licenses</span>
+                        </h6>
+                    </div>
+                    <div class="card-body">
+                        {% if usage_data[server.id] %}
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Username</th>
+                                        <th>Device Name</th>
+                                        <th>In Time</th>
+                                        <th>Out Time</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for usage in usage_data[server.id] %}
+                                    <tr>
+                                        <td>{{ usage.username }}</td>
+                                        <td>{{ usage.device_name }}</td>
+                                        <td>{{ usage.in_time.strftime('%Y-%m-%d %H:%M:%S') if usage.in_time else '-' }}</td>
+                                        <td>{{ usage.out_time.strftime('%Y-%m-%d %H:%M:%S') if usage.out_time else '-' }}</td>
+                                        <td>
+                                            {% if usage.status == 'active' %}
+                                                <span class="badge bg-success">Active</span>
+                                            {% else %}
+                                                <span class="badge bg-secondary">Inactive</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center text-muted">
+                            <i class="fas fa-info-circle me-1"></i>
+                            No usage data available
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                
+                {% if not servers %}
+                <div class="text-center text-muted">
+                    <i class="fas fa-exclamation-circle fa-3x mb-3"></i>
+                    <h5>No Mentor servers configured</h5>
+                    <p>Contact your administrator to add Mentor license servers.</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function refreshData() {
+    location.reload();
+}
+
+// Auto-refresh every 30 seconds
+setInterval(refreshData, 30000);
+</script>
+{% endblock %}

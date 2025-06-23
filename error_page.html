@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Database Error - License Manager{% endblock %}
+{% block page_title %}Database Configuration Required{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card border-warning">
+            <div class="card-header bg-warning text-dark">
+                <h5 class="mb-0">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Database Update Required
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <h6><i class="fas fa-info-circle me-2"></i>What happened?</h6>
+                    <p class="mb-0">Your database schema needs to be updated to work with the latest version of the License Manager.</p>
+                </div>
+                
+                <h6>Quick Fix Options:</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card border-success">
+                            <div class="card-header bg-success text-white">
+                                <h6 class="mb-0">Option 1: Update Database</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="small">Keep all your existing data and add missing columns:</p>
+                                <code class="d-block bg-light p-2 rounded">python quick_fix.py</code>
+                                <p class="small text-muted mt-2">Recommended for existing installations</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card border-primary">
+                            <div class="card-header bg-primary text-white">
+                                <h6 class="mb-0">Option 2: Fresh Start</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="small">Delete database and start fresh:</p>
+                                <ol class="small">
+                                    <li>Stop the app (Ctrl+C)</li>
+                                    <li>Delete: <code>license_manager.db</code></li>
+                                    <li>Run: <code>python app.py</code></li>
+                                </ol>
+                                <p class="small text-muted">⚠️ This will delete all data</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-4">
+                    <h6>After fixing:</h6>
+                    <ol>
+                        <li>Stop the Flask application (Ctrl+C in terminal)</li>
+                        <li>Run the fix command above</li>
+                        <li>Restart: <code>python app.py</code></li>
+                        <li>Refresh this page</li>
+                    </ol>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">Need Help?</h6>
+            </div>
+            <div class="card-body">
+                <p>If you continue to have issues:</p>
+                <ul>
+                    <li>Check that you have write permissions to the database file</li>
+                    <li>Ensure no other applications are using the database</li>
+                    <li>Try running as administrator/sudo if needed</li>
+                </ul>
+                
+                <div class="alert alert-secondary">
+                    <strong>Default Login:</strong><br>
+                    Username: <code>admin</code><br>
+                    Password: <code>admin123</code>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

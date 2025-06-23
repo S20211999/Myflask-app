@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}MyApps - License Manager{% endblock %}
+{% block page_title %}Custom Applications{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center">
+                <h5 class="mb-2 mb-sm-0">Custom Applications</h5>
+                {% if current_user.is_admin %}
+                <a href="{{ url_for('add_app') }}" class="btn btn-primary btn-sm">
+                    <i class="fas fa-plus me-1"></i>
+                    Add Application
+                </a>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if apps %}
+                <div class="row">
+                    {% for app in apps %}
+                    <div class="col-xl-4 col-lg-6 col-md-6 mb-4">
+                        <div class="card h-100 border">
+                            <div class="card-body">
+                                <h5 class="card-title">
+                                    <i class="fas fa-mobile-alt me-2 text-primary"></i>
+                                    {{ app.name }}
+                                </h5>
+                                <p class="card-text text-muted mb-2">
+                                    <strong>License:</strong> {{ app.license_number }}
+                                </p>
+                                <p class="card-text">
+                                    <small class="text-muted">
+                                        <i class="fas fa-calendar me-1"></i>
+                                        Created: {{ app.created_at.strftime('%Y-%m-%d') }}
+                                    </small>
+                                </p>
+                            </div>
+                            <div class="card-footer bg-transparent">
+                                <div class="d-grid gap-2 d-md-flex">
+                                    {% if current_user.is_admin %}
+                                    <a href="{{ url_for('app_settings', app_id=app.id) }}" class="btn btn-outline-primary btn-sm flex-fill">
+                                        <i class="fas fa-cog me-1"></i>
+                                        <span class="d-none d-sm-inline">Settings</span>
+                                        <span class="d-sm-none">Config</span>
+                                    </a>
+                                    {% endif %}
+                                    <a href="{{ url_for('app_users', app_id=app.id) }}" class="btn btn-outline-success btn-sm flex-fill">
+                                        <i class="fas fa-users me-1"></i>
+                                        Users
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                
+                <!-- Pagination info for large datasets -->
+                {% if apps|length > 12 %}
+                <div class="row mt-4">
+                    <div class="col-12 text-center">
+                        <p class="text-muted">Showing {{ apps|length }} applications</p>
+                    </div>
+                </div>
+                {% endif %}
+                
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="fas fa-mobile-alt fa-3x mb-3 text-secondary"></i>
+                    <h5>No applications configured</h5>
+                    {% if current_user.is_admin %}
+                    <p class="mb-3">Click "Add Application" to create your first custom app.</p>
+                    <a href="{{ url_for('add_app') }}" class="btn btn-primary">
+                        <i class="fas fa-plus me-1"></i>
+                        Add Your First Application
+                    </a>
+                    {% else %}
+                    <p>Contact your administrator to add custom applications.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Stats Row -->
+{% if apps %}
+<div class="row">
+    <div class="col-md-4 mb-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h4 class="text-primary">{{ apps|length }}</h4>
+                <p class="mb-0 small text-muted">Total Applications</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h4 class="text-success">{{ apps|selectattr('license_number')|list|length }}</h4>
+                <p class="mb-0 small text-muted">Licensed Apps</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4 mb-3">
+        <div class="card bg-light">
+            <div class="card-body text-center">
+                <h4 class="text-info">{{ apps|length }}</h4>
+                <p class="mb-0 small text-muted">Active Apps</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Add any JavaScript for enhanced mobile experience
+document.addEventListener('DOMContentLoaded', function() {
+    // Auto-hide alerts after 5 seconds
+    const alerts = document.querySelectorAll('.alert');
+    alerts.forEach(alert => {
+        setTimeout(() => {
+            if (alert.classList.contains('show')) {
+                alert.classList.remove('show');
+                setTimeout(() => alert.remove(), 150);
+            }
+        }, 5000);
+    });
+});
+</script>
+{% endblock %}

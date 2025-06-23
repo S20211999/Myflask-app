@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - License Manager{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex flex-column flex-sm-row justify-content-between align-items-start align-items-sm-center">
+                <h5 class="mb-2 mb-sm-0">License Server Configuration</h5>
+                <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addServerModal">
+                    <i class="fas fa-plus me-1"></i>
+                    <span class="d-none d-sm-inline">Add </span>Server
+                </button>
+            </div>
+            <div class="card-body">
+                {% if servers %}
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>Server Name</th>
+                                <th class="d-none d-md-table-cell">Type</th>
+                                <th class="d-none d-lg-table-cell">Command</th>
+                                <th class="d-none d-sm-table-cell">Licenses</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for server in servers %}
+                            <tr>
+                                <td>
+                                    <div>
+                                        <strong>{{ server.name }}</strong>
+                                        <div class="d-md-none">
+                                            <small class="text-muted">
+                                                <span class="badge bg-{{ 'primary' if server.server_type == 'cadence' else 'success' if server.server_type == 'mentor' else 'warning' }}">
+                                                    {{ server.server_type.title() }}
+                                                </span>
+                                                • {{ server.total_licenses }} licenses
+                                            </small>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td class="d-none d-md-table-cell">
+                                    <span class="badge bg-{{ 'primary' if server.server_type == 'cadence' else 'success' if server.server_type == 'mentor' else 'warning' }}">
+                                        {{ server.server_type.title() }}
+                                    </span>
+                                </td>
+                                <td class="d-none d-lg-table-cell">
+                                    <code class="small">{{ server.command[:30] }}{% if server.command|length > 30 %}...{% endif %}</code>
+                                </td>
+                                <td class="d-none d-sm-table-cell">{{ server.total_licenses }}</td>
+                                <td>
+                                    {% if server.is_enabled %}
+                                        <span class="badge bg-success">Enabled</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Disabled</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-primary" onclick="editServer({{ server.id }}, '{{ server.name }}', '{{ server.server_type }}', '{{ server.command }}', {{ server.total_licenses }})" title="Edit">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <a href="{{ url_for('toggle_server', server_id=server.id) }}" class="btn btn-outline-{{ 'secondary' if server.is_enabled else 'success' }}" title="{{ 'Disable' if server.is_enabled else 'Enable' }}">
+                                            <i class="fas fa-{{ 'pause' if server.is_enabled else 'play' }}"></i>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center text-muted py-5">
+                    <i class="fas fa-server fa-3x mb-3 text-secondary"></i>
+                    <h5>No license servers configured</h5>
+                    <p class="mb-3">Click "Add Server" to configure your first license server.</p>
+                    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addServerModal">
+                        <i class="fas fa-plus me-1"></i>
+                        Add Your First Server
+                    </button>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Add Server Modal -->
+<div class="modal fade" id="addServerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add License Server</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" action="{{ url_for('add_server') }}">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="name" class="form-label">Server Name</label>
+                                <input type="text" class="form-control" id="name" name="name" required>
+                                <div class="form-text">Enter a descriptive name for the server</div>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="server_type" class="form-label">Server Type</label>
+                                <select class="form-select" id="server_type" name="server_type" required>
+                                    <option value="">Select Type</option>
+                                    <option value="cadence">Cadence</option>
+                                    <option value="mentor">Mentor</option>
+                                    <option value="altium">Altium</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="command" class="form-label">Terminal Command</label>
+                        <textarea class="form-control" id="command" name="command" rows="3" required placeholder="Enter the terminal command to check license usage"></textarea>
+                        <div class="form-text">This command will be executed to retrieve license information</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="total_licenses" class="form-label">Total Licenses</label>
+                        <input type="number" class="form-control" id="total_licenses" name="total_licenses" min="1" required>
+                        <div class="form-text">Total number of licenses available on this server</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Add Server</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Edit Server Modal -->
+<div class="modal fade" id="editServerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Edit License Server</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <form method="POST" id="editServerForm">
+                <div class="modal-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_name" class="form-label">Server Name</label>
+                                <input type="text" class="form-control" id="edit_name" name="name" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="mb-3">
+                                <label for="edit_server_type" class="form-label">Server Type</label>
+                                <select class="form-select" id="edit_server_type" name="server_type" required>
+                                    <option value="cadence">Cadence</option>
+                                    <option value="mentor">Mentor</option>
+                                    <option value="altium">Altium</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_command" class="form-label">Terminal Command</label>
+                        <textarea class="form-control" id="edit_command" name="command" rows="3" required></textarea>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="edit_total_licenses" class="form-label">Total Licenses</label>
+                        <input type="number" class="form-control" id="edit_total_licenses" name="total_licenses" min="1" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Update Server</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function editServer(serverId, name, serverType, command, totalLicenses) {
+    document.getElementById('edit_name').value = name;
+    document.getElementById('edit_server_type').value = serverType;
+    document.getElementById('edit_command').value = command;
+    document.getElementById('edit_total_licenses').value = totalLicenses;
+    document.getElementById('editServerForm').action = '/settings/edit_server/' + serverId;
+    
+    var editModal = new bootstrap.Modal(document.getElementById('editServerModal'));
+    editModal.show();
+}
+</script>
+{% endblock %}

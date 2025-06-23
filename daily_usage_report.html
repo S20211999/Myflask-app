@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+
+{% block title %}Daily Usage Report - License Manager{% endblock %}
+{% block page_title %}Daily Usage Report{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs" id="usageTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="cadence-tab" data-bs-toggle="tab" data-bs-target="#cadence" type="button" role="tab">
+                            <i class="fas fa-microchip me-1"></i>
+                            Cadence Usage
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="mentor-tab" data-bs-toggle="tab" data-bs-target="#mentor" type="button" role="tab">
+                            <i class="fas fa-cogs me-1"></i>
+                            Mentor Usage
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="altium-tab" data-bs-toggle="tab" data-bs-target="#altium" type="button" role="tab">
+                            <i class="fas fa-circuit-board me-1"></i>
+                            Altium Usage
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="myapps-tab" data-bs-toggle="tab" data-bs-target="#myapps" type="button" role="tab">
+                            <i class="fas fa-mobile-alt me-1"></i>
+                            MyApps Usage
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content" id="usageTabContent">
+                    <!-- Cadence Usage Tab -->
+                    <div class="tab-pane fade show active" id="cadence" role="tabpanel">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Username</th>
+                                        <th>Device</th>
+                                        <th>First In Time</th>
+                                        <th>Last Out Time</th>
+                                        <th>Total Hours</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for usage in cadence_usage %}
+                                    <tr>
+                                        <td>{{ usage.usage_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ usage.username }}</td>
+                                        <td>{{ usage.device_name }}</td>
+                                        <td>{{ usage.first_in_time.strftime('%H:%M:%S') if usage.first_in_time else '-' }}</td>
+                                        <td>{{ usage.last_out_time.strftime('%H:%M:%S') if usage.last_out_time else 'Active' }}</td>
+                                        <td>{{ "%.2f"|format(usage.total_hours) if usage.total_hours else '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Mentor Usage Tab -->
+                    <div class="tab-pane fade" id="mentor" role="tabpanel">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Username</th>
+                                        <th>Device</th>
+                                        <th>First In Time</th>
+                                        <th>Last Out Time</th>
+                                        <th>Total Hours</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for usage in mentor_usage %}
+                                    <tr>
+                                        <td>{{ usage.usage_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ usage.username }}</td>
+                                        <td>{{ usage.device_name }}</td>
+                                        <td>{{ usage.first_in_time.strftime('%H:%M:%S') if usage.first_in_time else '-' }}</td>
+                                        <td>{{ usage.last_out_time.strftime('%H:%M:%S') if usage.last_out_time else 'Active' }}</td>
+                                        <td>{{ "%.2f"|format(usage.total_hours) if usage.total_hours else '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- Altium Usage Tab -->
+                    <div class="tab-pane fade" id="altium" role="tabpanel">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Username</th>
+                                        <th>Device</th>
+                                        <th>First In Time</th>
+                                        <th>Last Out Time</th>
+                                        <th>Total Hours</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for usage in altium_usage %}
+                                    <tr>
+                                        <td>{{ usage.usage_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ usage.username }}</td>
+                                        <td>{{ usage.device_name }}</td>
+                                        <td>{{ usage.first_in_time.strftime('%H:%M:%S') if usage.first_in_time else '-' }}</td>
+                                        <td>{{ usage.last_out_time.strftime('%H:%M:%S') if usage.last_out_time else 'Active' }}</td>
+                                        <td>{{ "%.2f"|format(usage.total_hours) if usage.total_hours else '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
+                    <!-- MyApps Usage Tab -->
+                    <div class="tab-pane fade" id="myapps" role="tabpanel">
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Username</th>
+                                        <th>Email</th>
+                                        <th>First In Time</th>
+                                        <th>Last Out Time</th>
+                                        <th>Total Hours</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for usage in myapps_usage %}
+                                    <tr>
+                                        <td>{{ usage.usage_date.strftime('%Y-%m-%d') }}</td>
+                                        <td>{{ usage.username }}</td>
+                                        <td>{{ usage.email }}</td>
+                                        <td>{{ usage.first_in_time.strftime('%H:%M:%S') if usage.first_in_time else '-' }}</td>
+                                        <td>{{ usage.last_out_time.strftime('%H:%M:%S') if usage.last_out_time else 'Active' }}</td>
+                                        <td>{{ "%.2f"|format(usage.total_hours) if usage.total_hours else '-' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
