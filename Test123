@@ -1,1 +1,3974 @@
 
+import sys
+import json
+import os
+import math
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+QHBoxLayout, QGridLayout, QLabel, QLineEdit, QSizePolicy,
+QComboBox, QPushButton, QScrollArea, QFrame,
+QSpinBox, QDoubleSpinBox, QFileDialog, QMessageBox, QCheckBox,
+QSplitter, QGroupBox, QToolBar)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QRectF, QPointF
+from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QPolygonF, QAction,QPainterPath
+import threading
+import struct
+import os
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
+
+class LibSiennaFileFormat:
+    """Custom file format handler for LibSienna footprint files"""
+    MAGIC_HEADER = b'LSFP' # LibSienna FootPrint
+    VERSION = 1
+
+    @staticmethod
+    def save_footprint(data, filename):
+        """Save footprint data in custom LibSienna format"""
+        try:
+            with open(filename, 'wb') as f:
+                # Write magic header and version
+                f.write(LibSiennaFileFormat.MAGIC_HEADER)
+                f.write(struct.pack('<I', LibSiennaFileFormat.VERSION))
+                
+                # Convert data to JSON and write
+                json_data = json.dumps(data, indent=2)
+                json_bytes = json_data.encode('utf-8')
+                f.write(struct.pack('<I', len(json_bytes)))
+                f.write(json_bytes)
+            
+            return True
+        except Exception as e:
+            print(f"Error saving footprint: {e}")
+            return False
+
+    @staticmethod
+    def load_footprint(filename):
+        """Load footprint data from custom LibSienna format"""
+        try:
+            with open(filename, 'rb') as f:
+                # Read and verify magic header
+                magic = f.read(4)
+                if magic != LibSiennaFileFormat.MAGIC_HEADER:
+                    print("Invalid file format")
+                    return None
+                
+                # Read version
+                version = struct.unpack('<I', f.read(4))[0]
+                if version != LibSiennaFileFormat.VERSION:
+                    print(f"Unsupported version: {version}")
+                    return None
+                
+                # Read JSON data length and content
+                json_length = struct.unpack('<I', f.read(4))[0]
+                json_bytes = f.read(json_length)
+                json_data = json_bytes.decode('utf-8')
+                
+                return json.loads(json_data)
+        except Exception as e:
+            print(f"Error loading footprint: {e}")
+            return None
+
+class PolygonLineRow(QWidget):
+    data_changed = pyqtSignal()
+    delete_requested = pyqtSignal(object)
+
+    def __init__(self, line_number=1):
+        super().__init__()
+        self.line_number = line_number
+        self.setup_ui()
+        self.connect_signals()
+
+    def setup_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(5, 2, 5, 2)
+        layout.setSpacing(5)
+
+        # Line number label
+        self.line_label = QLabel(f"Line {self.line_number}:")
+        self.line_label.setMinimumWidth(60)
+        layout.addWidget(self.line_label)
+
+        # Line size
+        layout.addWidget(QLabel("Size:"))
+        self.line_size = QLineEdit()
+        self.line_size.setText("1.0")
+        self.line_size.setMaximumWidth(80)
+        layout.addWidget(self.line_size)
+
+        # Direction
+        layout.addWidget(QLabel("Direction:"))
+        self.direction = QComboBox()
+        self.direction.addItems(['right', 'down', 'left', 'up'])
+        self.direction.setMaximumWidth(80)
+        layout.addWidget(self.direction)
+
+        # Corner type
+        layout.addWidget(QLabel("Corner:"))
+        self.corner_type = QComboBox()
+        self.corner_type.addItems(['90-degree', 'chamfer', 'fillet'])
+        self.corner_type.setMaximumWidth(100)
+        layout.addWidget(self.corner_type)
+
+        # Corner size
+        layout.addWidget(QLabel("Corner Size:"))
+        self.corner_size = QLineEdit()
+        self.corner_size.setText("0")
+        self.corner_size.setMaximumWidth(80)
+        layout.addWidget(self.corner_size)
+
+        # Delete button
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setMaximumWidth(60)
+        layout.addWidget(self.delete_btn)
+
+        layout.addStretch()
+
+    def connect_signals(self):
+        self.line_size.textChanged.connect(self.data_changed.emit)
+        self.direction.currentTextChanged.connect(self.data_changed.emit)
+        self.corner_type.currentTextChanged.connect(self.data_changed.emit)
+        self.corner_size.textChanged.connect(self.data_changed.emit)
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
+
+    def get_data(self):
+        return {
+            'line_size': float(self.line_size.text()) if self.line_size.text() else 1.0,
+            'direction': self.direction.currentText(),
+            'corner_type': self.corner_type.currentText(),
+            'corner_size': float(self.corner_size.text()) if self.corner_size.text() else 0.0
+        }
+
+    def set_data(self, data):
+        self.line_size.setText(str(data.get('line_size', 1.0)))
+        self.direction.setCurrentText(data.get('direction', 'right'))
+        self.corner_type.setCurrentText(data.get('corner_type', '90-degree'))
+        self.corner_size.setText(str(data.get('corner_size', 0)))
+
+class CustomPolygonWidget(QWidget):
+    data_changed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.polygon_lines = []
+        self.setup_ui()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setSpacing(5)
+
+        # Header
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("Custom Polygon Definition:"))
+        
+        add_line_btn = QPushButton("+ Add Line")
+        add_line_btn.clicked.connect(self.add_polygon_line)
+        add_line_btn.setMaximumWidth(100)
+        header_layout.addWidget(add_line_btn)
+        header_layout.addStretch()
+        
+        layout.addLayout(header_layout)
+
+        # Lines container
+        self.lines_widget = QWidget()
+        self.lines_layout = QVBoxLayout(self.lines_widget)
+        self.lines_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.lines_widget)
+
+        # Add initial line
+        self.add_polygon_line()
+
+    def add_polygon_line(self):
+        line_row = PolygonLineRow(len(self.polygon_lines) + 1)
+        line_row.data_changed.connect(self.data_changed.emit)
+        line_row.delete_requested.connect(self.delete_polygon_line)
+        
+        self.polygon_lines.append(line_row)
+        self.lines_layout.addWidget(line_row)
+
+    def delete_polygon_line(self, line_row):
+        if len(self.polygon_lines) > 1: # Keep at least one line
+            self.polygon_lines.remove(line_row)
+            line_row.setParent(None)
+            self.update_line_numbers()
+
+    def update_line_numbers(self):
+        """Update line numbers after add/delete operations"""
+        for i, line_row in enumerate(self.polygon_lines):
+            line_row.line_number = i + 1
+            # Update the label text
+            line_row.layout().itemAt(0).widget().setText(f"Line {i + 1}:")
+
+    def get_data(self):
+        """Get polygon data"""
+        return {
+            'lines': [line.get_data() for line in self.polygon_lines]
+        }
+
+    def set_data(self, data):
+        """Set polygon data"""
+        # Clear existing lines
+        for line in self.polygon_lines[:]:
+            self.delete_polygon_line(line)
+        
+        # Add lines from data
+        lines_data = data.get('lines', [{'line_size': 1.0, 'direction': 'right', 'corner_type': '90-degree', 'corner_size': 0}])
+        for line_data in lines_data:
+            self.add_polygon_line()
+            self.polygon_lines[-1].set_data(line_data)
+
+class FootprintRenderer(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMinimumSize(400, 400)
+        self.footprint_data = {}
+        self.zoom_factor = 1.0
+        self.auto_fit = True
+        self.offset_x = 0.0
+        self.offset_y = 0.0
+        self.setStyleSheet("background-color: #2b2b2b; border: 1px solid #555;")
+        
+        # Pad selection for selective dimensioning
+        # Pad selection for selective dimensioning
+        self.selected_pads = set()
+        
+        # Dimension display flags
+        self.show_airgap = False
+        self.show_pitch = False
+        
+        # Add dimension control overlay widgets
+        self.setup_dimension_controls()
+
+    def mousePressEvent(self, event):
+        """Handle mouse clicks for pad selection"""
+        pos = event.position()
+        # Convert screen coordinates to world coordinates
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+        
+        # Account for zoom and offset
+        world_x = (pos.x() - center_x - self.offset_x) / self.zoom_factor
+        world_y = -(pos.y() - center_y - self.offset_y) / self.zoom_factor # Y-axis flipped
+
+        # Check if click is on any pad
+        pad_bounds_list = self.get_individual_pad_bounds_absolute()
+        clicked_pad = None
+        
+        for i, bounds in enumerate(pad_bounds_list):
+            if bounds:
+                min_x, min_y, max_x, max_y = bounds
+                if min_x <= world_x <= max_x and min_y <= world_y <= max_y:
+                    clicked_pad = i
+                    break
+
+        if clicked_pad is not None:
+            # Toggle pad selection
+            if clicked_pad in self.selected_pads:
+                self.selected_pads.remove(clicked_pad)
+            else:
+                # Limit to 2 pads maximum
+                if len(self.selected_pads) >= 2:
+                    # Remove oldest selection (FIFO)
+                    oldest_pad = next(iter(self.selected_pads))
+                    self.selected_pads.remove(oldest_pad)
+                self.selected_pads.add(clicked_pad)
+        else:
+            # Click outside pads - clear selection
+            self.selected_pads.clear()
+        
+        self.update() # Repaint to show selection changes
+
+    def setup_dimension_controls(self):
+        """Create overlay dimension control widgets"""
+        # NOTE: These will be hidden since they're now in the toolbar
+        # Keeping the structure for compatibility
+        pass
+    
+    def draw_all_airgap_dimensions(self, painter):
+        """Draw air gap dimensions only between selected pads (if exactly 2 selected)"""
+        if len(self.selected_pads) != 2:
+            return
+
+        pad_indices = list(self.selected_pads)
+        if len(pad_indices) < 2:
+            return
+
+        # FIXED: Use pad_indices[1] instead of pad_indices[1]
+        i, j = pad_indices, pad_indices[2]
+
+        pad_bounds_list = self.get_individual_pad_bounds_absolute()
+        if i >= len(pad_bounds_list) or j >= len(pad_bounds_list):
+            return
+
+        b1 = pad_bounds_list[i] # (x_min, y_min, x_max, y_max)
+        b2 = pad_bounds_list[j]
+
+        # Calculate horizontal gap (X)
+        h_start = h_end = None
+        x_gap = 0
+
+        if b1[2] < b2: # pad1 right edge < pad2 left edge
+            x_gap = b2 - b1[3]
+            h_start = QPointF(b1[3], (b1[2] + b1[4]) / 2)
+            h_end = QPointF(b2, (b2[2] + b2[4]) / 2)
+        elif b2[3] < b1: # pad2 right edge < pad1 left edge
+            x_gap = b1 - b2[3]
+            h_start = QPointF(b2[3], (b2[2] + b2[4]) / 2)
+            h_end = QPointF(b1, (b1[2] + b1[4]) / 2)
+
+        # Calculate vertical gap (Y)
+        v_start = v_end = None
+        y_gap = 0
+
+        if b1[4] < b2[2]: # pad1 top < pad2 bottom
+            y_gap = b2[2] - b1[4]
+            v_start = QPointF((b1 + b1[3]) / 2, b1[4])
+            v_end = QPointF((b2 + b2[3]) / 2, b2[2])
+        elif b2[4] < b1[2]: # pad2 top < pad1 bottom
+            y_gap = b1[2] - b2[4]
+            v_start = QPointF((b2 + b2[3]) / 2, b2[4])
+            v_end = QPointF((b1 + b1[3]) / 2, b1[2])
+
+        # Draw dimension lines
+        if h_start and h_end and x_gap > 0:
+            label_offset = QPointF(0, -15)
+            self.draw_dimension_line_with_label(
+                painter, h_start, h_end, x_gap, "X Gap", QColor("#00FFFF"), label_offset
+            )
+
+        if v_start and v_end and y_gap > 0:
+            label_offset = QPointF(15, 0)
+            self.draw_dimension_line_with_label(
+                painter, v_start, v_end, y_gap, "Y Gap", QColor("#FFFF00"), label_offset
+            )
+
+    def draw_all_pitch_dimensions(self, painter):
+        """Draw pitch dimensions only between selected pads (if exactly 2 selected)"""
+        if len(self.selected_pads) != 2:
+            return
+
+        pad_indices = list(self.selected_pads)
+        if len(pad_indices) < 2:
+            return
+
+        # FIXED: Use pad_indices[1] instead of any wrong index
+        i, j = pad_indices, pad_indices[2]
+
+        positions = self.calculate_pad_absolute_positions()
+        if i not in positions or j not in positions:
+            return
+
+        x1, y1 = positions[i]
+        x2, y2 = positions[j]
+
+        dx = abs(x2 - x1)
+        dy = abs(y2 - y1)
+
+        # Draw horizontal pitch if significant
+        if dx > 0.01:
+            start = QPointF(min(x1, x2), (y1 + y2) / 2)
+            end = QPointF(max(x1, x2), (y1 + y2) / 2)
+            label_offset = QPointF(0, -25) # Offset to avoid overlap
+            self.draw_dimension_line_with_label(
+                painter, start, end, dx, "Pitch X", QColor("#FFA500"), label_offset
+            )
+
+        # Draw vertical pitch if significant
+        if dy > 0.01:
+            start = QPointF((x1 + x2) / 2, min(y1, y2))
+            end = QPointF((x1 + x2) / 2, max(y1, y2))
+            label_offset = QPointF(25, 0) # Offset to avoid overlap
+            self.draw_dimension_line_with_label(
+                painter, start, end, dy, "Pitch Y", QColor("#FFA500"), label_offset
+            )
+
+
+    def draw_dimension_line_with_label(self, painter, start_point, end_point, value_mm, label_prefix, color, label_offset=QPointF(0,0)):
+        """Draw a dimension line with colored 'pill' label in mm with optional offset."""
+        if not start_point or not end_point or value_mm <= 0:
+            return
+
+        # 1) Dimension line
+        painter.setPen(QPen(color, 1.5/self.zoom_factor))
+        painter.drawLine(start_point, end_point)
+
+        # 2) End ticks
+        ext = 3/self.zoom_factor
+        v = QPointF(end_point.x() - start_point.x(), end_point.y() - start_point.y())
+        L = math.hypot(v.x(), v.y())
+        if L > 0:
+            n = QPointF(v.x()/L, v.y()/L)
+            p = QPointF(-n.y(), n.x())
+
+            painter.drawLine(QPointF(start_point.x()+p.x()*ext, start_point.y()+p.y()*ext),
+                            QPointF(start_point.x()-p.x()*ext, start_point.y()-p.y()*ext))
+            painter.drawLine(QPointF(end_point.x()+p.x()*ext, end_point.y()+p.y()*ext),
+                            QPointF(end_point.x()-p.x()*ext, end_point.y()-p.y()*ext))
+
+        # 3) Label (world midpoint -> screen) with offset
+        mid = QPointF((start_point.x()+end_point.x())/2, (start_point.y()+end_point.y())/2)
+        screen_mid = painter.worldTransform().map(mid)
+
+        # Apply offset to prevent label overlap
+        screen_mid += label_offset
+
+        label_text = f"{label_prefix}:{value_mm:.1f}mm"
+
+        painter.save()
+        painter.resetTransform()
+
+        font = QFont("Arial", 9)
+        font.setBold(True)
+        painter.setFont(font)
+
+        fm = painter.fontMetrics()
+        rect = fm.boundingRect(label_text)
+        rect.moveCenter(screen_mid.toPoint())
+        rect.adjust(-4, -2, 4, 2)
+
+        bg = QColor(color)
+        bg.setAlpha(200)
+        painter.setPen(QPen(QColor("#000000"), 1))
+        painter.setBrush(QBrush(bg))
+        painter.drawRoundedRect(rect, 4, 4)
+
+        painter.setPen(QPen(QColor("#000000"), 1))
+        painter.setBrush(QBrush())
+        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label_text)
+
+        painter.restore()
+
+
+    def update_footprint(self, data):
+        self.footprint_data = data
+        # Clear cached absolute positions when data changes
+        self._absolute_positions = None
+        if self.auto_fit:
+            self.fit_to_view()
+        self.update()
+
+    def fit_to_view(self):
+        if not self.footprint_data.get('padstacks') and not all(k in self.footprint_data for k in ['body_length', 'body_width']):
+            return
+
+        # Reset offsets for auto-fit
+        self.offset_x = 0.0
+        self.offset_y = 0.0
+
+        # Calculate body bounds
+        body_bounds = None
+        if all(k in self.footprint_data for k in ['body_length', 'body_width']):
+            try:
+                length = float(self.footprint_data['body_length'])
+                width = float(self.footprint_data['body_width'])
+                body_bounds = [-length/2, -width/2, length/2, width/2]
+            except (ValueError, TypeError):
+                pass
+
+        # Calculate pad bounds
+        pad_bounds = self.calculate_all_pads_bounds()
+
+        # Determine outermost bounds
+        if body_bounds and pad_bounds:
+            min_x = min(body_bounds[0], pad_bounds[0])
+            min_y = min(body_bounds[1], pad_bounds[1])
+            max_x = max(body_bounds[2], pad_bounds[2])
+            max_y = max(body_bounds[3], pad_bounds[3])
+        elif body_bounds:
+            min_x, min_y, max_x, max_y = body_bounds
+        elif pad_bounds:
+            min_x, min_y, max_x, max_y = pad_bounds
+        else:
+            return
+
+        # Add courtyard expansion
+        try:
+            courtyard = float(self.footprint_data.get('courtyard_expansion', 0.25))
+        except (ValueError, TypeError):
+            courtyard = 0.25
+            
+        min_x -= courtyard
+        max_x += courtyard
+        min_y -= courtyard
+        max_y += courtyard
+
+        # Calculate zoom to fit
+        if max_x > min_x and max_y > min_y:
+            margin = 20
+            zoom_x = (self.width() - 2 * margin) / (max_x - min_x)
+            zoom_y = (self.height() - 2 * margin) / (max_y - min_y)
+            self.zoom_factor = min(zoom_x, zoom_y, 110) # Max zoom limit
+
+        self.update()
+
+    def calculate_pad_bounds(self, pad):
+        """Calculate bounding box for a pad"""
+        try:
+            x = float(pad.get('x_offset', 0))
+            y = float(pad.get('y_offset', 0))
+        except (ValueError, TypeError):
+            x, y = 0, 0
+            
+        pad_type = pad['type']
+
+        if pad_type == 'square':
+            try:
+                size = float(pad.get('size', 1))
+                return [x - size/2, y - size/2, x + size/2, y + size/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type in ['rectangle', 'rounded_rectangle', 'SMD-oblong']:
+            try:
+                length = float(pad.get('length', 1))
+                width = float(pad.get('width', 1))
+                return [x - length/2, y - width/2, x + length/2, y + width/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type in ['round']:
+            try:
+                diameter = float(pad.get('diameter', 1))
+                return [x - diameter/2, y - diameter/2, x + diameter/2, y + diameter/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+            
+        elif pad_type == 'D-shape':
+            try:
+                length = float(pad.get('length', 1))
+                width = float(pad.get('width', 1))
+                return [x - length/2, y - width/2, x + length/2, y + width/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type == 'PTH_rectangle':
+            try:
+                pad_length = float(pad.get('pad_length', 2.0))
+                pad_width = float(pad.get('pad_width', 1.2))
+                return [x - pad_length/2, y - pad_width/2, x + pad_length/2, y + pad_width/2]
+            except (ValueError, TypeError):
+                return [x - 1.0, y - 0.6, x + 1.0, y + 0.6]
+
+
+        elif pad_type in ['PTH', 'NPTH']:
+            try:
+                if pad_type == 'PTH':
+                    diameter = float(pad.get('pad_diameter', 1.2))
+                else:
+                    diameter = float(pad.get('hole_diameter', 0.8))
+                return [x - diameter/2, y - diameter/2, x + diameter/2, y + diameter/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+            try:
+                if pad_type == 'PTH_oblong':
+                    length = float(pad.get('pad_length', 2.0))
+                    width = float(pad.get('pad_width', 1.2))
+                else:
+                    length = float(pad.get('hole_length', 1.5))
+                    width = float(pad.get('hole_width', 0.8))
+                return [x - length/2, y - width/2, x + length/2, y + width/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+            
+
+        elif pad_type == 'custom':
+            # Calculate bounds for custom polygon
+            polygon_points = self.calculate_polygon_points(pad)
+            if polygon_points:
+                xs = [p.x() for p in polygon_points]
+                ys = [p.y() for p in polygon_points]
+                return [min(xs), min(ys), max(xs), max(ys)]
+
+        return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+    def calculate_polygon_points(self, pad):
+        """Calculate polygon points from line definitions with proper corner handling"""
+        lines_data = pad.get('polygon_data', {}).get('lines', [])
+        if not lines_data:
+            return []
+
+        raw_points = []
+        try:
+            current_x = float(pad.get('x_offset', 0))
+            current_y = float(pad.get('y_offset', 0))
+        except (ValueError, TypeError):
+            current_x, current_y = 0, 0
+            
+        raw_points.append((current_x, current_y))
+
+        for line_data in lines_data:
+            try:
+                line_size = float(line_data.get('line_size', 1.0))
+            except (ValueError, TypeError):
+                line_size = 1.0
+                
+            direction = line_data.get('direction', 'right')
+
+            if direction == 'right':
+                current_x += line_size
+            elif direction == 'down':
+                current_y -= line_size
+            elif direction == 'left':
+                current_x -= line_size
+            elif direction == 'up':
+                current_y += line_size
+
+            raw_points.append((current_x, current_y))
+
+        final_points = []
+        final_points.append(QPointF(raw_points[0], raw_points[1]))
+
+        for i in range(1, len(raw_points) - 1):
+            prev_point = raw_points[i-1]
+            curr_point = raw_points[i]
+            next_point = raw_points[i+1]
+
+            line_data = lines_data[i-1]
+            corner_type = line_data.get('corner_type', '90-degree')
+            try:
+                corner_size = float(line_data.get('corner_size', 0))
+            except (ValueError, TypeError):
+                corner_size = 0
+
+            if corner_type == '90-degree' or corner_size == 0:
+                final_points.append(QPointF(curr_point[0], curr_point[1]))
+            elif corner_type == 'chamfer':
+                chamfer_points = self.calculate_chamfer_points(
+                    QPointF(prev_point[0], prev_point[1]),
+                    QPointF(curr_point, curr_point[1]),
+                    QPointF(next_point, next_point[1]),
+                    corner_size
+                )
+                final_points.extend(chamfer_points)
+            elif corner_type == 'fillet':
+                fillet_points = self.calculate_fillet_points(
+                    QPointF(prev_point[0], prev_point[1]),
+                    QPointF(curr_point, curr_point[1]),
+                    QPointF(next_point, next_point[1]),
+                    corner_size
+                )
+                final_points.extend(fillet_points)
+
+        final_points.append(QPointF(raw_points[-1][0], raw_points[-1][1]))
+        return final_points
+
+    def calculate_all_pads_bounds(self):
+        """Calculate bounding box for all copper pads"""
+        if not self.footprint_data.get('padstacks'):
+            return None
+
+        min_x = min_y = float('inf')
+        max_x = max_y = float('-inf')
+
+        for pad in self.footprint_data['padstacks']:
+            pad_bounds = self.calculate_pad_bounds(pad)
+            if pad_bounds:
+                min_x = min(min_x, pad_bounds[0])
+                min_y = min(min_y, pad_bounds[1])
+                max_x = max(max_x, pad_bounds[2])
+                max_y = max(max_y, pad_bounds[3])
+        if min_x == float('inf'):
+            return None
+
+        return [min_x, min_y, max_x, max_y]
+
+    def get_individual_pad_bounds_absolute(self):
+        """Get bounding box for each individual pad using absolute positions"""
+        if not self.footprint_data.get('padstacks'):
+            return []
+
+        pad_bounds_list = []
+        for i, pad in enumerate(self.footprint_data['padstacks']):
+            pad_bounds = self.calculate_pad_bounds_absolute(pad, i)
+            if pad_bounds:
+                pad_bounds_list.append(pad_bounds)
+        
+        return pad_bounds_list
+
+    def calculate_pad_bounds_absolute(self, pad, pad_index):
+        """Calculate bounding box for a pad using absolute position"""
+        absolute_positions = getattr(self, '_absolute_positions', None)
+        if absolute_positions is None:
+            absolute_positions = self.calculate_pad_absolute_positions()
+            self._absolute_positions = absolute_positions
+
+        if pad_index in absolute_positions:
+            x, y = absolute_positions[pad_index]
+        else:
+            try:
+                x = float(pad.get('x_offset', 0))
+                y = float(pad.get('y_offset', 0))
+            except (ValueError, TypeError):
+                x, y = 0, 0
+
+        pad_type = pad['type']
+
+        if pad_type == 'square':
+            try:
+                size = float(pad.get('size', 1))
+                return [x - size/2, y - size/2, x + size/2, y + size/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type in ['rectangle', 'rounded_rectangle', 'SMD-oblong', 'PTH_rectangle']:
+            try:
+                length = float(pad.get('length', 1))
+                width = float(pad.get('width', 1))
+                return [x - length/2, y - width/2, x + length/2, y + width/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type in ['round', 'D-shape']:
+            try:
+                diameter = float(pad.get('diameter', 1))
+                return [x - diameter/2, y - diameter/2, x + diameter/2, y + diameter/2]
+            except (ValueError, TypeError):
+                return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+        elif pad_type in ['PTH', 'NPTH']:
+            try:
+                if pad_type == 'PTH':
+                    diameter = float(pad.get('pad_diameter', 1.2))
+                else:
+                    diameter = float(pad.get('hole_diameter', 0.8))
+                return [x - diameter/2, y - diameter/2, x + diameter/2, y + diameter/2]
+            except (ValueError, TypeError):
+                return [x - 0.6, y - 0.6, x + 0.6, y + 0.6]
+
+        elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+            try:
+                if pad_type == 'PTH_oblong':
+                    length = float(pad.get('pad_length', 2.0))
+                    width = float(pad.get('pad_width', 1.2))
+                else:
+                    length = float(pad.get('hole_length', 1.5))
+                    width = float(pad.get('hole_width', 0.8))
+                return [x - length/2, y - width/2, x + length/2, y + width/2]
+            except (ValueError, TypeError):
+                return [x - 1.0, y - 0.6, x + 1.0, y + 0.6]
+
+        elif pad_type == 'custom':
+            # Handle custom polygon pads with absolute positioning
+            polygon_points = self.calculate_polygon_points_absolute(pad, x, y)
+            if polygon_points:
+                xs = [p.x() for p in polygon_points]
+                ys = [p.y() for p in polygon_points]
+                return [min(xs), min(ys), max(xs), max(ys)]
+
+        return [x - 0.5, y - 0.5, x + 0.5, y + 0.5]
+
+    def calculate_polygon_points_absolute(self, pad, abs_x, abs_y):
+        """Calculate polygon points using absolute position"""
+        lines_data = pad.get('polygon_data', {}).get('lines', [])
+        if not lines_data:
+            return []
+
+        raw_points = []
+        current_x = abs_x
+        current_y = abs_y
+        raw_points.append((current_x, current_y))
+
+        for line_data in lines_data:
+            try:
+                line_size = float(line_data.get('line_size', 1.0))
+            except (ValueError, TypeError):
+                line_size = 1.0
+                
+            direction = line_data.get('direction', 'right')
+
+            if direction == 'right':
+                current_x += line_size
+            elif direction == 'down':
+                current_y -= line_size
+            elif direction == 'left':
+                current_x -= line_size
+            elif direction == 'up':
+                current_y += line_size
+
+            raw_points.append((current_x, current_y))
+
+        final_points = []
+        final_points.append(QPointF(raw_points[0][0], raw_points[0][1]))
+
+        for i in range(1, len(raw_points) - 1):
+            prev_point = raw_points[i-1]
+            curr_point = raw_points[i]
+            next_point = raw_points[i+1]
+
+            line_data = lines_data[i-1]
+            corner_type = line_data.get('corner_type', '90-degree')
+            try:
+                corner_size = float(line_data.get('corner_size', 0))
+            except (ValueError, TypeError):
+                corner_size = 0
+
+            if corner_type == '90-degree' or corner_size == 0:
+                final_points.append(QPointF(curr_point[0], curr_point[1]))
+            elif corner_type == 'chamfer':
+                chamfer_points = self.calculate_chamfer_points(
+                    QPointF(prev_point[0], prev_point[1]),
+                    QPointF(curr_point, curr_point[1]),
+                    QPointF(next_point, next_point[1]),
+                    corner_size
+                )
+                final_points.extend(chamfer_points)
+            elif corner_type == 'fillet':
+                fillet_points = self.calculate_fillet_points(
+                    QPointF(prev_point[0], prev_point[1]),
+                    QPointF(curr_point, curr_point[1]),
+                    QPointF(next_point, next_point[1]),
+                    corner_size
+                )
+                final_points.extend(fillet_points)
+
+        final_points.append(QPointF(raw_points[-1][0], raw_points[-1][1]))
+        return final_points
+
+    def calculate_pad_absolute_positions(self):
+        """Calculate absolute positions for all pads considering offset_from"""
+        if not self.footprint_data.get('padstacks'):
+            return {}
+
+        pads = self.footprint_data['padstacks']
+        resolver = PadPositionResolver(pads)
+        positions = {}
+
+        for i, pad in enumerate(pads):
+            abs_x, abs_y = resolver.get_absolute_position(pad)
+            positions[i] = (abs_x, abs_y)
+
+        return positions
+
+    def calculate_chamfer_points(self, p1, p2, p3, chamfer_size):
+        """Calculate chamfer points for corner at p2"""
+        def point_along_line(p_start, p_end, dist):
+            vx = p_end.x() - p_start.x()
+            vy = p_end.y() - p_start.y()
+            length = math.sqrt(vx*vx + vy*vy)
+            if length == 0:
+                return p_start
+            scale = dist / length
+            return QPointF(p_start.x() + vx*scale, p_start.y() + vy*scale)
+
+        cp1 = point_along_line(p2, p1, chamfer_size)
+        cp2 = point_along_line(p2, p3, chamfer_size)
+        return [cp1, cp2]
+
+    def calculate_fillet_points(self, p1, p2, p3, radius, segments=8):
+        """Calculate arc points for fillet at corner p2"""
+        def normalize(v):
+            length = math.sqrt(v[0]**2 + v[1]**2)
+            if length == 0:
+                return (0.0, 0.0)
+            return (v / length, v[1] / length)
+
+        v1 = (p1.x() - p2.x(), p1.y() - p2.y())
+        v2 = (p3.x() - p2.x(), p3.y() - p2.y())
+
+        n1 = normalize(v1)
+        n2 = normalize(v2)
+
+        # Dot product
+        dot = max(min(n1[0] * n2 + n1[1] * n2[1], 1), -1)
+        angle = math.acos(dot)
+
+        if angle < 0.01:
+            return [p2]
+
+        tangent_length = radius / math.tan(angle / 2)
+
+        tp1 = QPointF(p2.x() + n1[0] * tangent_length, p2.y() + n1[1] * tangent_length)
+        tp2 = QPointF(p2.x() + n2 * tangent_length, p2.y() + n2[1] * tangent_length)
+
+        # Bisector
+        bisector = normalize(((n1 + n2) / 2, (n1[1] + n2[1]) / 2))
+        dist_to_center = radius / math.sin(angle / 2)
+        center = QPointF(p2.x() + bisector * dist_to_center,
+                        p2.y() + bisector[1] * dist_to_center)
+
+        start_angle = math.atan2(tp1.y() - center.y(), tp1.x() - center.x())
+        end_angle = math.atan2(tp2.y() - center.y(), tp2.x() - center.x())
+
+        cross = (tp1.x() - center.x()) * (tp2.y() - center.y()) - (tp1.y() - center.y()) * (tp2.x() - center.x())
+
+        points = []
+        for i in range(segments + 1):
+            t = i / segments
+            if cross > 0:
+                angle_t = start_angle + t * (end_angle - start_angle)
+            else:
+                if end_angle > start_angle:
+                    end_angle -= 2 * math.pi
+                angle_t = start_angle + t * (end_angle - start_angle)
+
+            x = center.x() + radius * math.cos(angle_t)
+            y = center.y() + radius * math.sin(angle_t)
+            points.append(QPointF(x, y))
+
+        return points
+
+    def draw_selected_pads_highlight(self, painter):
+        """Draw selection highlights on selected pads"""
+        if not self.selected_pads:
+            return
+
+        # Draw selection highlights
+        painter.setPen(QPen(QColor("#FF00FF"), 3/self.zoom_factor)) # Magenta highlight
+        painter.setBrush(QBrush()) # No fill
+
+        pad_bounds_list = self.get_individual_pad_bounds_absolute()
+        for pad_index in self.selected_pads:
+            if pad_index < len(pad_bounds_list):
+                bounds = pad_bounds_list[pad_index]
+                if bounds:
+                    min_x, min_y, max_x, max_y = bounds
+                    # Draw highlight rectangle slightly larger than pad
+                    margin = 0.1 # mm
+                    painter.drawRect(QRectF(
+                        min_x - margin, min_y - margin,
+                        max_x - min_x + 2*margin, max_y - min_y + 2*margin
+                    ))
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        # Get center point and apply offset
+        center_x = self.width() // 2
+        center_y = self.height() // 2
+
+        # Apply translation with offset for cursor-centered zoom
+        painter.translate(center_x + self.offset_x, center_y + self.offset_y)
+        painter.scale(self.zoom_factor, -self.zoom_factor) # Flip Y axis
+
+        # Clear cached positions when data changes
+        self._absolute_positions = None
+
+        # Draw origin first
+        self.draw_origin(painter)
+
+        # Draw body outline with shape support
+        body_bounds = None
+        if all(k in self.footprint_data for k in ['body_length', 'body_width']):
+            try:
+                length = float(self.footprint_data['body_length'])
+                width = float(self.footprint_data['body_width'])
+                body_shape = self.footprint_data.get('body_shape', 'rectangle')
+
+                painter.setPen(QPen(QColor("#FF69B4"), 2/self.zoom_factor)) # Pink
+                painter.setBrush(QBrush()) # No fill
+
+                if body_shape == 'rectangle':
+                    painter.drawRect(QRectF(-length/2, -width/2, length, width))
+                    body_bounds = [-length/2, -width/2, length/2, width/2]
+                elif body_shape == 'round':
+                    # Use the larger dimension as diameter for round body
+                    diameter = max(length, width)
+                    painter.drawEllipse(QRectF(-diameter/2, -diameter/2, diameter, diameter))
+                    body_bounds = [-diameter/2, -diameter/2, diameter/2, diameter/2]
+            except (ValueError, TypeError):
+                pass
+
+        # Get individual pad bounds for silkscreen calculation
+        individual_pad_bounds = self.get_individual_pad_bounds_absolute()
+
+        # Calculate overall pad bounds for courtyard
+        pad_bounds = self.calculate_all_pads_bounds_absolute()
+
+        # Draw silkscreen layer with gaps where pads overlap
+        if body_bounds and self.footprint_data.get('silkscreen_enabled', True):
+            try:
+                airgap = float(self.footprint_data.get('silkscreen_airgap', 0.15))
+            except (ValueError, TypeError):
+                airgap = 0.15
+            self.draw_silkscreen(painter, body_bounds, individual_pad_bounds, airgap)
+
+        # Draw courtyard based on outermost bounds
+        self.draw_courtyard(painter, body_bounds, pad_bounds)
+
+        # Draw pads with absolute positioning
+        for i, pad in enumerate(self.footprint_data.get('padstacks', [])):
+            self.draw_pad(painter, pad, i)
+
+        # Draw selection highlights
+        self.draw_selected_pads_highlight(painter)
+
+        # NEW: Draw dimensions based on toggle states
+        if self.show_airgap:
+            self.draw_all_airgap_dimensions(painter)
+        
+        if self.show_pitch:
+            self.draw_all_pitch_dimensions(painter)
+
+    def calculate_all_pads_bounds_absolute(self):
+        """Calculate the outer bounding box of all pads using absolute pad bounds"""
+        pad_bounds_list = self.get_individual_pad_bounds_absolute()
+        if not pad_bounds_list:
+            return None
+
+        min_x = min(pb[0] for pb in pad_bounds_list)
+        min_y = min(pb[1] for pb in pad_bounds_list)
+        max_x = max(pb[2] for pb in pad_bounds_list)
+        max_y = max(pb[3] for pb in pad_bounds_list)
+
+        return [min_x, min_y, max_x, max_y]
+
+    def draw_courtyard(self, painter, body_bounds, pad_bounds):
+        """Draw courtyard based on outermost bounds of body or pads"""
+        try:
+            expansion = float(self.footprint_data.get('courtyard_expansion', 0.25))
+        except (ValueError, TypeError):
+            expansion = 0.25
+
+        # Determine outermost bounds
+        outermost_bounds = None
+        if body_bounds and pad_bounds:
+            # Use whichever is outermost
+            outermost_bounds = [
+                min(body_bounds[0], pad_bounds[0]),  # min_x
+                min(body_bounds[1], pad_bounds[1]),  # min_y
+                max(body_bounds[2], pad_bounds[2]),  # max_x
+                max(body_bounds[3], pad_bounds[3])   # max_y
+            ]
+        elif body_bounds:
+            outermost_bounds = body_bounds
+        elif pad_bounds:
+            outermost_bounds = pad_bounds
+
+        if outermost_bounds:
+            # Apply courtyard expansion
+            courtyard_bounds = [
+                outermost_bounds[0] - expansion,  # min_x
+                outermost_bounds[1] - expansion,  # min_y
+                outermost_bounds[2] + expansion,  # max_x
+                outermost_bounds[3] + expansion   # max_y
+            ]
+
+            # Draw courtyard rectangle
+            painter.setPen(QPen(QColor("#00FF00"), 1/self.zoom_factor)) # Green
+            painter.setBrush(QBrush()) # No fill
+
+            courtyard_width = courtyard_bounds[2] - courtyard_bounds[0]
+            courtyard_height = courtyard_bounds[3] - courtyard_bounds[1]
+
+            painter.drawRect(QRectF(courtyard_bounds[0], courtyard_bounds[1],
+                                   courtyard_width, courtyard_height))
+
+    def draw_silkscreen(self, painter, body_bounds, individual_pad_bounds, airgap=0.15):
+        """Draw silkscreen exactly along body outline with gaps only where pads overlap with airgap"""
+        if not body_bounds:
+            return
+
+        min_x, min_y, max_x, max_y = body_bounds
+        body_shape = self.footprint_data.get('body_shape', 'rectangle')
+
+        # Set silkscreen line properties
+        line_width = 4/self.zoom_factor
+        painter.setPen(QPen(QColor("#FFF305"), line_width))
+
+        if body_shape == 'rectangle':
+            self.draw_rectangle_silkscreen(painter, body_bounds, individual_pad_bounds, airgap)
+        elif body_shape == 'round':
+            self.draw_round_silkscreen(painter, body_bounds, individual_pad_bounds, airgap)
+
+    def draw_rectangle_silkscreen(self, painter, body_bounds, individual_pad_bounds, airgap):
+        """Draw rectangular silkscreen with gaps where pads overlap"""
+        min_x, min_y, max_x, max_y = body_bounds
+
+        # Helper function to merge overlapping intervals
+        def merge_intervals(intervals):
+            """Merge overlapping intervals in the form [(start, end), ...]"""
+            if not intervals:
+                return []
+            
+            # Sort intervals by start coordinate
+            intervals = sorted(intervals, key=lambda x: x[0])
+            merged = [intervals[0]]
+            
+            for current in intervals[1:]:
+                last = merged[-1]
+                if current <= last[1]: # compare start of current with end of last
+                    merged[-1] = (last, max(last[1], current[1]))
+                else:
+                    merged.append(current)
+            
+            return merged
+
+        # Helper function to draw line segments with gaps where pads interfere
+        def draw_line_with_pad_gaps(x1, y1, x2, y2, pad_bounds_list, gap, orientation):
+            """Draw line segment with gaps where pads (+ airgap) would overlap"""
+            if orientation == 'horizontal':
+                start_pos = min(x1, x2)
+                end_pos = max(x1, x2)
+                line_y = y1
+
+                # Find all pad intersections with this horizontal line
+                intersections = []
+                for pad_bounds in pad_bounds_list:
+                    if not pad_bounds:
+                        continue
+                    
+                    px_min, py_min, px_max, py_max = pad_bounds
+                    
+                    # Expand pad bounds by airgap
+                    pad_min_x = px_min - gap
+                    pad_max_x = px_max + gap
+                    pad_min_y = py_min - gap
+                    pad_max_y = py_max + gap
+
+                    # Check if this horizontal line intersects with expanded pad
+                    if (line_y >= pad_min_y and line_y <= pad_max_y and
+                        pad_max_x >= start_pos and pad_min_x <= end_pos):
+                        
+                        # Calculate intersection range
+                        inter_start = max(start_pos, pad_min_x)
+                        inter_end = min(end_pos, pad_max_x)
+                        intersections.append((inter_start, inter_end))
+
+                # Sort and merge overlapping intersections
+                merged = merge_intervals(intersections)
+
+                # Draw line segments between gaps
+                current_pos = start_pos
+                for gap_start, gap_end in merged:
+                    if current_pos < gap_start:
+                        painter.drawLine(QPointF(current_pos, line_y), QPointF(gap_start, line_y))
+                    current_pos = gap_end
+
+                # Draw final segment if needed
+                if current_pos < end_pos:
+                    painter.drawLine(QPointF(current_pos, line_y), QPointF(end_pos, line_y))
+
+            else: # vertical
+                start_pos = min(y1, y2)
+                end_pos = max(y1, y2)
+                line_x = x1
+
+                # Find all pad intersections with this vertical line
+                intersections = []
+                for pad_bounds in pad_bounds_list:
+                    if not pad_bounds:
+                        continue
+                    
+                    px_min, py_min, px_max, py_max = pad_bounds
+                    
+                    # Expand pad bounds by airgap
+                    pad_min_x = px_min - gap
+                    pad_max_x = px_max + gap
+                    pad_min_y = py_min - gap
+                    pad_max_y = py_max + gap
+
+                    # Check if this vertical line intersects with expanded pad
+                    if (line_x >= pad_min_x and line_x <= pad_max_x and
+                        pad_max_y >= start_pos and pad_min_y <= end_pos):
+                        
+                        # Calculate intersection range
+                        inter_start = max(start_pos, pad_min_y)
+                        inter_end = min(end_pos, pad_max_y)
+                        intersections.append((inter_start, inter_end))
+
+                # Sort and merge overlapping intersections
+                merged = merge_intervals(intersections)
+
+                # Draw line segments between gaps
+                current_pos = start_pos
+                for gap_start, gap_end in merged:
+                    if current_pos < gap_start:
+                        painter.drawLine(QPointF(line_x, current_pos), QPointF(line_x, gap_start))
+                    current_pos = gap_end
+
+                # Draw final segment if needed
+                if current_pos < end_pos:
+                    painter.drawLine(QPointF(line_x, current_pos), QPointF(line_x, end_pos))
+
+        # Draw all four sides of rectangular body outline with gaps where pads interfere
+        # Top line
+        draw_line_with_pad_gaps(min_x, max_y, max_x, max_y, individual_pad_bounds, airgap, 'horizontal')
+        # Bottom line
+        draw_line_with_pad_gaps(min_x, min_y, max_x, min_y, individual_pad_bounds, airgap, 'horizontal')
+        # Left line
+        draw_line_with_pad_gaps(min_x, min_y, min_x, max_y, individual_pad_bounds, airgap, 'vertical')
+        # Right line
+        draw_line_with_pad_gaps(max_x, min_y, max_x, max_y, individual_pad_bounds, airgap, 'vertical')
+
+    def draw_round_silkscreen(self, painter, body_bounds, individual_pad_bounds, airgap):
+        """Draw round silkscreen with gaps where pads overlap"""
+        min_x, min_y, max_x, max_y = body_bounds
+
+        # Calculate circle parameters
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        radius = (max_x - min_x) / 2
+
+        # Check if any pads overlap with the circle outline
+        has_pad_overlaps = False
+        for pad_bounds in individual_pad_bounds:
+            if not pad_bounds:
+                continue
+            
+            px_min, py_min, px_max, py_max = pad_bounds
+            
+            # Expand pad bounds by airgap
+            pad_min_x = px_min - airgap
+            pad_max_x = px_max + airgap
+            pad_min_y = py_min - airgap
+            pad_max_y = py_max + airgap
+
+            # Simple check: if pad rectangle intersects with circle bounds
+            circle_left = center_x - radius
+            circle_right = center_x + radius
+            circle_top = center_y + radius
+            circle_bottom = center_y - radius
+
+            if (pad_max_x >= circle_left and pad_min_x <= circle_right and
+                pad_max_y >= circle_bottom and pad_min_y <= circle_top):
+                has_pad_overlaps = True
+                break
+
+        if not has_pad_overlaps:
+            # No pad overlaps, draw complete circle
+            painter.drawEllipse(QRectF(min_x, min_y, max_x - min_x, max_y - min_y))
+        else:
+            # Draw circle with gaps - simplified approach using small arc segments
+            num_segments = 72 # 5-degree segments
+            angle_step = 360.0 / num_segments
+
+            for i in range(num_segments):
+                start_angle = i * angle_step
+                end_angle = (i + 1) * angle_step
+
+                # Calculate midpoint of this arc segment
+                mid_angle = math.radians((start_angle + end_angle) / 2)
+                mid_x = center_x + radius * math.cos(mid_angle)
+                mid_y = center_y + radius * math.sin(mid_angle)
+
+                # Check if this segment overlaps with any expanded pad
+                segment_overlaps = False
+                for pad_bounds in individual_pad_bounds:
+                    if not pad_bounds:
+                        continue
+                    
+                    px_min, py_min, px_max, py_max = pad_bounds
+                    
+                    # Expand pad bounds by airgap
+                    pad_min_x = px_min - airgap
+                    pad_max_x = px_max + airgap
+                    pad_min_y = py_min - airgap
+                    pad_max_y = py_max + airgap
+
+                    # Check if segment midpoint is inside expanded pad rectangle
+                    if (mid_x >= pad_min_x and mid_x <= pad_max_x and
+                        mid_y >= pad_min_y and mid_y <= pad_max_y):
+                        segment_overlaps = True
+                        break
+
+                # Draw this segment if it doesn't overlap with pads
+                if not segment_overlaps:
+                    # Use drawArc for precise arc drawing
+                    # drawArc takes (rect, startAngle*16, spanAngle*16) in 1/16th degrees
+                    arc_rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y)
+                    start_angle_16 = int(start_angle * 16)
+                    span_angle_16 = int(angle_step * 16)
+                    painter.drawArc(arc_rect, start_angle_16, span_angle_16)
+
+    def draw_pad(self, painter, pad, pad_index=None):
+        """Draw pad using absolute position with proper layer handling for TH pads"""
+        # Get absolute positions
+        absolute_positions = getattr(self, '_absolute_positions', None)
+        if absolute_positions is None:
+            absolute_positions = self.calculate_pad_absolute_positions()
+            self._absolute_positions = absolute_positions
+
+        # Use absolute position if available, otherwise fall back to direct offsets
+        if pad_index is not None and pad_index in absolute_positions:
+            x, y = absolute_positions[pad_index]
+        else:
+            try:
+                x = float(pad.get('x_offset', 0))
+                y = float(pad.get('y_offset', 0))
+            except (ValueError, TypeError):
+                x, y = 0, 0
+
+        pin_num = pad.get('pin_number', '1')
+
+        # Define through hole pad types (no paste layer)
+        through_hole_types = ['PTH', 'NPTH', 'PTH_oblong', 'NPTH_oblong', 'PTH_rectangle']
+        smd_types = ['square', 'rectangle', 'rounded_rectangle', 'round', 'SMD-oblong', 'D-shape', 'custom']
+
+        # Draw paste layer (silver) - SKIP FOR THROUGH HOLE PADS
+        if pad['type'] not in through_hole_types:
+            # Check if paste is enabled for SMD pads
+            paste_enabled = pad.get('paste_enabled', True)
+            if paste_enabled:
+                try:
+                    paste_exp = float(pad.get('paste_expansion', 0))
+                except (ValueError, TypeError):
+                    paste_exp = 0
+                    
+                if paste_exp != 0:
+                    painter.setPen(QPen(QColor("#C0C0C0"), 1/self.zoom_factor))
+                    painter.setBrush(QBrush()) # No fill - outline only
+                    self.draw_pad_shape(painter, pad, x, y, paste_exp)
+
+        # Draw mask layer (purple #8A2BE2) - outline only
+        mask_enabled = pad.get('mask_enabled', True)
+        if mask_enabled:
+            try:
+                mask_exp = float(pad.get('mask_expansion', 0))
+            except (ValueError, TypeError):
+                mask_exp = 0
+                
+            if mask_exp != 0:
+                painter.setPen(QPen(QColor("#8A2BE2"), 1/self.zoom_factor))
+                painter.setBrush(QBrush()) # No fill - outline only
+                self.draw_pad_shape(painter, pad, x, y, mask_exp)
+
+        # Draw copper pad (red) - outline only
+        painter.setPen(QPen(QColor("#FF0000"), 2/self.zoom_factor))
+        painter.setBrush(QBrush()) # No fill - outline only
+        self.draw_pad_shape(painter, pad, x, y, 0)
+
+        # Draw pin number with correct orientation
+        self.draw_pin_number(painter, pad, x, y, pin_num)
+
+    def draw_pin_number(self, painter, pad, x, y, pin_num):
+        """Draw pin number in screen space with correct orientation and ultra-small size"""
+        # Save current state
+        painter.save()
+
+        # Get current transform matrix
+        transform = painter.worldTransform()
+
+        # Map pad center to screen coordinates
+        screen_pos = transform.map(QPointF(x, y))
+
+        # Reset transform to draw in screen space (ensures upright text)
+        painter.resetTransform()
+
+        # Calculate font size based on pad size and zoom for ultra-small text
+        pad_type = pad['type']
+        try:
+            if pad_type == 'square':
+                pad_size = float(pad.get('size', 1))
+                base_font_size = max(6, min(pad_size * self.zoom_factor * 0.12, 12))
+            elif pad_type in ['rectangle', 'rounded_rectangle', 'SMD-oblong', 'PTH_rectangle']:
+                min_dim = min(float(pad.get('length', 1)), float(pad.get('width', 1)))
+                base_font_size = max(6, min(min_dim * self.zoom_factor * 0.1, 12))
+            elif pad_type in ['round', 'D-shape']:
+                diameter = float(pad.get('diameter', 1))
+                base_font_size = max(6, min(diameter * self.zoom_factor * 0.12, 12))
+            else:
+                base_font_size = max(6, min(8, 12))
+        except (ValueError, TypeError):
+            base_font_size = 8
+
+        # Set text properties for screen space
+        painter.setPen(QPen(QColor("#FFFFFF"), 1))
+        font = QFont("Arial", int(base_font_size))
+        font.setBold(True) # Make bold for better visibility at small sizes
+        painter.setFont(font)
+
+        # Calculate text area based on font size
+        text_width = base_font_size * 1.5
+        text_height = base_font_size * 1.2
+
+        # Draw text in screen coordinates (always upright)
+        text_rect = QRectF(screen_pos.x() - text_width/2, screen_pos.y() - text_height/2,
+                          text_width, text_height)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignCenter, pin_num)
+
+        # Restore transform
+        painter.restore()
+
+    def draw_pad_shape(self, painter, pad, x, y, expansion):
+        """Draw pad shape as outline only (no fill) - PRESERVES CALLER'S PEN COLOR"""
+        pad_type = pad['type']
+
+        # Ensure no fill - outline only
+        painter.setBrush(QBrush())
+
+        if pad_type == 'square':
+            try:
+                size = float(pad.get('size', 1)) + 2*expansion
+                painter.drawRect(QRectF(x-size/2, y-size/2, size, size))
+            except (ValueError, TypeError):
+                painter.drawRect(QRectF(x-0.5, y-0.5, 1, 1))
+
+        elif pad_type == 'rectangle':
+            try:
+                length = float(pad.get('length', 1)) + 2*expansion
+                width = float(pad.get('width', 1)) + 2*expansion
+                painter.drawRect(QRectF(x-length/2, y-width/2, length, width))
+            except (ValueError, TypeError):
+                painter.drawRect(QRectF(x-0.5, y-0.5, 1, 1))
+
+        elif pad_type == 'SMD-oblong':
+            # SMD-oblong is a racetrack/pill shape (rectangle with semicircle ends)
+            try:
+                length = float(pad.get('length', 1)) + 2*expansion
+                width = float(pad.get('width', 1)) + 2*expansion
+                
+                # Draw as rounded rectangle with radius = width/2 to create pill shape
+                radius = width / 2
+                painter.drawRoundedRect(QRectF(x-length/2, y-width/2, length, width), radius, radius)
+            except (ValueError, TypeError):
+                painter.drawRoundedRect(QRectF(x-0.5, y-0.5, 1, 1), 0.5, 0.5)
+
+        elif pad_type == 'rounded_rectangle':
+            try:
+                length = float(pad.get('length', 1)) + 2*expansion
+                width = float(pad.get('width', 1)) + 2*expansion
+                radius = float(pad.get('corner_radius', 0.2))
+                painter.drawRoundedRect(QRectF(x-length/2, y-width/2, length, width), radius, radius)
+            except (ValueError, TypeError):
+                painter.drawRoundedRect(QRectF(x-0.5, y-0.5, 1, 1), 0.2, 0.2)
+
+        elif pad_type == 'round':
+            try:
+                diameter = float(pad.get('diameter', 1)) + 2*expansion
+                painter.drawEllipse(QRectF(x-diameter/2, y-diameter/2, diameter, diameter))
+            except (ValueError, TypeError):
+                painter.drawEllipse(QRectF(x-0.5, y-0.5, 1, 1))
+
+        elif pad_type == 'D-shape':
+            # D-shape is rounded rectangle with one side corner radius
+            try:
+                length = float(pad.get('length', 1)) + 2*expansion
+                width = float(pad.get('width', 1)) + 2*expansion
+                corner_radius = float(pad.get('corner_radius', 0.2))
+                rotation = float(pad.get('rotation', 0)) if pad.get('rotation') else 0
+            except (ValueError, TypeError):
+                length, width, corner_radius, rotation = 1, 1, 0.2, 0
+
+            painter.save()
+            if rotation != 0:
+                painter.translate(x, y)
+                painter.rotate(rotation)
+                painter.translate(-x, -y)
+
+            # Create D-shape path (rounded rectangle with rounded corners on one side)
+            path = QPainterPath()
+            half_length = length / 2
+            half_width = width / 2
+            r = corner_radius
+
+            # Start from left-top corner
+            path.moveTo(x - half_length, y - half_width)
+            # Top line to rounded corner
+            path.lineTo(x + half_length - r, y - half_width)
+            # Top-right rounded corner
+            path.quadTo(x + half_length, y - half_width, x + half_length, y - half_width + r)
+            # Right side line
+            path.lineTo(x + half_length, y + half_width - r)
+            # Bottom-right rounded corner
+            path.quadTo(x + half_length, y + half_width, x + half_length - r, y + half_width)
+            # Bottom line
+            path.lineTo(x - half_length, y + half_width)
+            # Close path (left side straight)
+            path.closeSubpath()
+
+            painter.drawPath(path)
+            painter.restore()
+
+        elif pad_type in ['PTH', 'NPTH']:
+            if expansion == 0: # Drawing the actual copper pad/hole
+                # Save current pen color
+                saved_pen = painter.pen()
+                
+                try:
+                    hole_diameter = float(pad.get('hole_diameter', 0.8))
+                except (ValueError, TypeError):
+                    hole_diameter = 0.8
+                    
+                # Draw hole (black circle)
+                painter.setPen(QPen(QColor("#FF6600"), 2/self.zoom_factor))
+                painter.setBrush(QBrush(QColor("#000000")))
+                painter.drawEllipse(QRectF(x-hole_diameter/2, y-hole_diameter/2, hole_diameter, hole_diameter))
+
+                # Draw pad for PTH only
+                if pad_type == 'PTH':
+                    painter.setPen(QPen(QColor("#FF0000"), 2/self.zoom_factor)) # Red for copper
+                    painter.setBrush(QBrush()) # No fill for pad outline
+                    try:
+                        pad_diameter = float(pad.get('pad_diameter', 1.2))
+                    except (ValueError, TypeError):
+                        pad_diameter = 1.2
+                    painter.drawEllipse(QRectF(x-pad_diameter/2, y-pad_diameter/2, pad_diameter, pad_diameter))
+
+                # Restore original pen
+                painter.setPen(saved_pen)
+            else: # Drawing mask/paste expansion - PRESERVE CALLER'S PEN COLOR
+                if pad_type == 'PTH':
+                    try:
+                        pad_diameter = float(pad.get('pad_diameter', 1.2)) + 2*expansion
+                        painter.drawEllipse(QRectF(x-pad_diameter/2, y-pad_diameter/2, pad_diameter, pad_diameter))
+                    except (ValueError, TypeError):
+                        painter.drawEllipse(QRectF(x-0.6, y-0.6, 1.2, 1.2))
+                else: # NPTH
+                    try:
+                        hole_diameter = float(pad.get('hole_diameter', 0.8)) + 2*expansion
+                        painter.drawEllipse(QRectF(x-hole_diameter/2, y-hole_diameter/2, hole_diameter, hole_diameter))
+                    except (ValueError, TypeError):
+                        painter.drawEllipse(QRectF(x-0.4, y-0.4, 0.8, 0.8))
+
+        elif pad_type == 'PTH_rectangle':
+            # PTH_rectangle is like PTH_oblong but with sharp rectangular corners
+            # Apply rotation if specified
+            rotation = pad.get('rotation', 0)
+            painter.save()
+            
+            # Convert rotation to float if it's a string
+            try:
+                rotation_value = float(rotation) if rotation else 0
+            except (ValueError, TypeError):
+                rotation_value = 0
+            
+            if rotation_value != 0:
+                painter.translate(x, y)
+                painter.rotate(rotation_value)
+                painter.translate(-x, -y)
+            
+            if expansion == 0: # Drawing the actual copper pad/hole
+                # Save current pen color
+                saved_pen = painter.pen()
+                
+                try:
+                    hole_length = float(pad.get('hole_length', 1.5))
+                    hole_width = float(pad.get('hole_width', 0.8))
+                except (ValueError, TypeError):
+                    hole_length, hole_width = 1.5, 0.8
+                    
+                # Draw rectangular hole (black) - NO ROUNDING
+                painter.setPen(QPen(QColor("#FF6600"), 2/self.zoom_factor))
+                painter.setBrush(QBrush(QColor("#000000")))
+                # Draw rectangle (not rounded rectangle)
+                painter.drawRect(QRectF(x-hole_length/2, y-hole_width/2, hole_length, hole_width))
+
+                # Draw rectangular pad (sharp corners)
+                painter.setPen(QPen(QColor("#FF0000"), 2/self.zoom_factor)) # Red for copper
+                painter.setBrush(QBrush()) # No fill for pad outline
+                try:
+                    pad_length = float(pad.get('pad_length', 2.0))
+                    pad_width = float(pad.get('pad_width', 1.2))
+                except (ValueError, TypeError):
+                    pad_length, pad_width = 2.0, 1.2
+                # Draw rectangle (not rounded rectangle)
+                painter.drawRect(QRectF(x-pad_length/2, y-pad_width/2, pad_length, pad_width))
+
+                # Restore original pen
+                painter.setPen(saved_pen)
+            else: # Drawing mask/paste expansion - PRESERVE CALLER'S PEN COLOR
+                try:
+                    pad_length = float(pad.get('pad_length', 2.0)) + 2*expansion
+                    pad_width = float(pad.get('pad_width', 1.2)) + 2*expansion
+                except (ValueError, TypeError):
+                    pad_length, pad_width = 2.0, 1.2
+                # Draw rectangle (not rounded rectangle)
+                painter.drawRect(QRectF(x-pad_length/2, y-pad_width/2, pad_length, pad_width))
+            
+            painter.restore()
+
+        elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+            # Apply rotation if specified
+            rotation = pad.get('rotation', 0)
+            painter.save()
+            
+            # Convert rotation to float if it's a string
+            try:
+                rotation_value = float(rotation) if rotation else 0
+            except (ValueError, TypeError):
+                rotation_value = 0
+            
+            if rotation_value != 0:
+                painter.translate(x, y)
+                painter.rotate(rotation_value)
+                painter.translate(-x, -y)
+            
+            if expansion == 0: # Drawing the actual copper pad/hole
+                # Save current pen color
+                saved_pen = painter.pen()
+                
+                try:
+                    hole_length = float(pad.get('hole_length', 1.5))
+                    hole_width = float(pad.get('hole_width', 0.8))
+                except (ValueError, TypeError):
+                    hole_length, hole_width = 1.5, 0.8
+                    
+                # Draw oblong hole (black)
+                painter.setPen(QPen(QColor("#FF6600"), 2/self.zoom_factor))
+                painter.setBrush(QBrush(QColor("#000000")))
+                # Draw oblong as rounded rectangle
+                radius = hole_width / 2
+                painter.drawRoundedRect(QRectF(x-hole_length/2, y-hole_width/2, hole_length, hole_width), radius, radius)
+
+                # Draw pad for PTH oblong only
+                if pad_type == 'PTH_oblong':
+                    painter.setPen(QPen(QColor("#FF0000"), 2/self.zoom_factor)) # Red for copper
+                    painter.setBrush(QBrush()) # No fill for pad outline
+                    try:
+                        pad_length = float(pad.get('pad_length', 2.0))
+                        pad_width = float(pad.get('pad_width', 1.2))
+                    except (ValueError, TypeError):
+                        pad_length, pad_width = 2.0, 1.2
+                    pad_radius = pad_width / 2
+                    painter.drawRoundedRect(QRectF(x-pad_length/2, y-pad_width/2, pad_length, pad_width), pad_radius, pad_radius)
+
+                # Restore original pen
+                painter.setPen(saved_pen)
+            else: # Drawing mask/paste expansion - PRESERVE CALLER'S PEN COLOR
+                if pad_type == 'PTH_oblong':
+                    try:
+                        pad_length = float(pad.get('pad_length', 2.0)) + 2*expansion
+                        pad_width = float(pad.get('pad_width', 1.2)) + 2*expansion
+                    except (ValueError, TypeError):
+                        pad_length, pad_width = 2.0, 1.2
+                    pad_radius = pad_width / 2
+                    painter.drawRoundedRect(QRectF(x-pad_length/2, y-pad_width/2, pad_length, pad_width), pad_radius, pad_radius)
+                else: # NPTH_oblong
+                    try:
+                        hole_length = float(pad.get('hole_length', 1.5)) + 2*expansion
+                        hole_width = float(pad.get('hole_width', 0.8)) + 2*expansion
+                    except (ValueError, TypeError):
+                        hole_length, hole_width = 1.5, 0.8
+                    radius = hole_width / 2
+                    painter.drawRoundedRect(QRectF(x-hole_length/2, y-hole_width/2, hole_length, hole_width), radius, radius)
+            
+            painter.restore()
+
+        elif pad_type == 'PTH_rectangle':
+            # PTH_rectangle is rectangular through-hole with rotation
+            try:
+                rotation = float(pad.get('rotation', 0)) if pad.get('rotation') else 0
+            except (ValueError, TypeError):
+                rotation = 0
+
+            painter.save()
+            if rotation != 0:
+                painter.translate(x, y)
+                painter.rotate(rotation)
+                painter.translate(-x, -y)
+
+            if expansion == 0: # Drawing the actual copper pad/hole
+                # Save current pen color
+                saved_pen = painter.pen()
+                
+                try:
+                    hole_length = float(pad.get('hole_length', 1.5))
+                    hole_width = float(pad.get('hole_width', 0.8))
+                    pad_length = float(pad.get('pad_length', 2.0))
+                    pad_width = float(pad.get('pad_width', 1.2))
+                except (ValueError, TypeError):
+                    hole_length, hole_width = 1.5, 0.8
+                    pad_length, pad_width = 2.0, 1.2
+                    
+                # Draw rectangular hole (black)
+                painter.setPen(QPen(QColor("#FF6600"), 2/self.zoom_factor))
+                painter.setBrush(QBrush(QColor("#000000")))
+                painter.drawRect(QRectF(x-hole_length/2, y-hole_width/2, hole_length, hole_width))
+
+                # Draw rectangular pad (red outline)
+                painter.setPen(QPen(QColor("#FF0000"), 2/self.zoom_factor))
+                painter.setBrush(QBrush()) # No fill for pad outline
+                painter.drawRect(QRectF(x-pad_length/2, y-pad_width/2, pad_length, pad_width))
+
+                # Restore original pen
+                painter.setPen(saved_pen)
+            else: # Drawing mask/paste expansion
+                try:
+                    pad_length = float(pad.get('pad_length', 2.0)) + 2*expansion
+                    pad_width = float(pad.get('pad_width', 1.2)) + 2*expansion
+                except (ValueError, TypeError):
+                    pad_length, pad_width = 2.0, 1.2
+                painter.drawRect(QRectF(x-pad_length/2, y-pad_width/2, pad_length, pad_width))
+            
+            painter.restore()
+
+        elif pad_type == 'custom':
+            # Draw custom polygon using absolute position
+            polygon_points = self.calculate_polygon_points_absolute(pad, x, y)
+            if polygon_points:
+                # Apply expansion to polygon (simplified - just scale from center)
+                if expansion != 0:
+                    center_x = sum(p.x() for p in polygon_points) / len(polygon_points)
+                    center_y = sum(p.y() for p in polygon_points) / len(polygon_points)
+                    scale_factor = 1 + expansion / 1.0 # Approximate scaling
+
+                    expanded_points = []
+                    for point in polygon_points:
+                        dx = point.x() - center_x
+                        dy = point.y() - center_y
+                        new_x = center_x + dx * scale_factor
+                        new_y = center_y + dy * scale_factor
+                        expanded_points.append(QPointF(new_x, new_y))
+                    
+                    polygon_points = expanded_points
+
+                polygon = QPolygonF(polygon_points)
+                painter.drawPolygon(polygon)
+
+
+    def draw_origin(self, painter):
+        """Draw origin crosshair"""
+        # Draw origin crosshair
+        painter.setPen(QPen(QColor("#FFFF00"), 2/self.zoom_factor)) # Yellow crosshair
+
+        # Crosshair size
+        cross_size = 10 / self.zoom_factor
+
+        # Horizontal line
+        painter.drawLine(QPointF(-cross_size, 0), QPointF(cross_size, 0))
+
+        # Vertical line
+        painter.drawLine(QPointF(0, -cross_size), QPointF(0, cross_size))
+
+        # Origin circle
+        painter.setPen(QPen(QColor("#FFFF00"), 1/self.zoom_factor))
+        painter.setBrush(QBrush()) # No fill
+        painter.drawEllipse(QPointF(0, 0), 3/self.zoom_factor, 3/self.zoom_factor)
+
+    def wheelEvent(self, event):
+        """Handle mouse wheel events with cursor-centered zoom - FIXED VERSION"""
+        zoom_in_factor = 1.2
+        zoom_out_factor = 1 / zoom_in_factor
+
+        # Get mouse position
+        mouse_pos = event.position()
+
+        # Store old zoom factor
+        old_zoom = self.zoom_factor
+
+        # Determine zoom direction
+        if event.angleDelta().y() > 0:
+            zoom_factor = zoom_in_factor
+        else:
+            zoom_factor = zoom_out_factor
+
+        # Update zoom factor with limits
+        new_zoom = self.zoom_factor * zoom_factor
+        new_zoom = max(0.1, min(new_zoom, 1000)) # Clamp zoom
+        self.zoom_factor = new_zoom
+
+        # Calculate widget center
+        center_x = self.width() / 2
+        center_y = self.height() / 2
+
+        # Mouse position relative to center (in widget coordinates)
+        mouse_rel_x = mouse_pos.x() - center_x
+        mouse_rel_y = mouse_pos.y() - center_y
+
+        # Calculate scene coordinates more accurately
+        # Convert mouse position to scene coordinates BEFORE zoom change
+        scene_x = (mouse_rel_x - self.offset_x) / old_zoom
+        scene_y = (mouse_rel_y - self.offset_y) / (-old_zoom) # Note: negative for Y-flip
+
+        # Calculate new offsets to keep the scene point under the mouse
+        self.offset_x = mouse_rel_x - scene_x * self.zoom_factor
+        self.offset_y = mouse_rel_y - scene_y * (-self.zoom_factor) # Note: negative for Y-flip
+
+        # Disable auto fit when manually zooming
+        self.auto_fit = False
+        self.update()
+
+class PadPositionResolver:
+    def __init__(self, pads):
+        self.pads = pads
+        self.cache = {}
+        self.resolved_positions = {}
+
+    def clear_cache(self):
+        self.cache.clear()
+        self.resolved_positions.clear()
+
+    def get_pad_by_pin(self, pin_number):
+        for pad in self.pads:
+            if pad.get('pin_number', None) == pin_number:
+                return pad
+        return None
+
+    def get_absolute_position(self, pad):
+        pad_pin = pad.get('pin_number', '')
+        if pad_pin in self.cache:
+            return self.cache[pad_pin]
+
+        offset_from = pad.get('offset_from', 'origin')
+        try:
+            x_offset = float(pad.get('x_offset', 0))
+            y_offset = float(pad.get('y_offset', 0))
+        except (ValueError, TypeError):
+            x_offset, y_offset = 0, 0
+
+        if offset_from == 'origin':
+            abs_x, abs_y = x_offset, y_offset
+            self.resolved_positions[pad_pin] = (abs_x, abs_y)
+        else:
+            # Direct pin reference - much simpler!
+            ref_pad = self.get_pad_by_pin(offset_from)
+            if ref_pad and ref_pad != pad:
+                ref_x, ref_y = self.get_absolute_position(ref_pad)
+                abs_x = ref_x + x_offset
+                abs_y = ref_y + y_offset
+                self.resolved_positions[pad_pin] = (abs_x, abs_y)
+            else:
+                # Fallback to origin if reference not found
+                abs_x, abs_y = x_offset, y_offset
+                self.resolved_positions[pad_pin] = (abs_x, abs_y)
+
+        self.cache[pad_pin] = (abs_x, abs_y)
+        return abs_x, abs_y
+
+    def resolve_all_positions(self):
+        self.clear_cache()
+        
+        # Resolve origin-based pads first
+        for pad in self.pads:
+            if pad.get('offset_from', 'origin') == 'origin':
+                self.get_absolute_position(pad)
+
+        # Iteratively resolve referenced pads
+        max_iterations = len(self.pads) * 2
+        for _ in range(max_iterations):
+            resolved_any = False
+            for pad in self.pads:
+                pad_pin = pad.get('pin_number', '')
+                if pad_pin not in self.resolved_positions:
+                    try:
+                        self.get_absolute_position(pad)
+                        resolved_any = True
+                    except:
+                        continue
+            
+            if not resolved_any:
+                break
+
+        return self.resolved_positions
+
+class PadStackRow(QWidget):
+    delete_requested = pyqtSignal(object)
+    data_changed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.setup_ui()
+        self.connect_signals()
+
+    def setup_ui(self):
+        # Main container with grouped sections
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
+
+        # Create group box for this padstack
+        self.group_box = QGroupBox("Padstack Configuration")
+        group_layout = QVBoxLayout(self.group_box)
+        group_layout.setSpacing(5)
+
+        # ===== ROW 1: Pad Type and Geometry =====
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(10)
+
+        # Pad Type Group
+        type_group = QGroupBox("Pad Type")
+        type_layout = QHBoxLayout(type_group)
+        type_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems([
+            'square', 'rectangle', 'rounded_rectangle', 'round', 'custom',
+            'SMD-oblong', 'D-shape', 'PTH', 'NPTH', 'PTH_oblong', 'NPTH_oblong', 'PTH_rectangle'
+        ])
+        type_layout.addWidget(self.type_combo)
+
+        row1_layout.addWidget(type_group)
+
+        # Geometry Group (Dynamic based on pad type)
+        self.geometry_group = QGroupBox("Geometry")
+        self.geometry_layout = QHBoxLayout(self.geometry_group)
+        self.geometry_layout.setContentsMargins(5, 5, 5, 5)
+        row1_layout.addWidget(self.geometry_group)
+
+        # Action Buttons Group
+        actions_group = QGroupBox("Actions")
+        actions_layout = QHBoxLayout(actions_group)
+        actions_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.duplicate_btn = QPushButton("Duplicate")
+        self.duplicate_btn.setMaximumWidth(80)
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setMaximumWidth(60)
+
+        actions_layout.addWidget(self.duplicate_btn)
+        actions_layout.addWidget(self.delete_btn)
+        row1_layout.addWidget(actions_group)
+
+        group_layout.addLayout(row1_layout)
+
+        # ===== ROW 2: Position and Layer Properties =====
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(10)
+
+        # Position Group
+        position_group = QGroupBox("Position")
+        position_layout = QGridLayout(position_group)
+        position_layout.setContentsMargins(5, 5, 5, 5)
+
+        position_layout.addWidget(QLabel("X Offset:"), 0, 0)
+        self.x_offset = QLineEdit()
+        self.x_offset.setText("0")
+        self.x_offset.setMaximumWidth(100)
+        position_layout.addWidget(self.x_offset, 0, 1)
+
+        position_layout.addWidget(QLabel("Y Offset:"), 0, 2)
+        self.y_offset = QLineEdit()
+        self.y_offset.setText("0")
+        self.y_offset.setMaximumWidth(100)
+        position_layout.addWidget(self.y_offset, 0, 3)
+
+        position_layout.addWidget(QLabel("Offset From:"), 1, 0)
+        # Dynamic dropdown instead of fixed directional options
+        self.offset_from = QComboBox()
+        self.offset_from.setMaximumWidth(100)
+        position_layout.addWidget(self.offset_from, 1, 1, 1, 2)
+
+        position_layout.addWidget(QLabel("Pin:"), 1, 2)
+        self.pin_number = QLineEdit()
+        self.pin_number.setMaximumWidth(50)
+        position_layout.addWidget(self.pin_number, 1, 3)
+
+        row2_layout.addWidget(position_group)
+
+        # Layer Properties Group
+        layers_group = QGroupBox("Layer Properties")
+        layers_layout = QGridLayout(layers_group)
+        layers_layout.setContentsMargins(5, 5, 5, 5)
+
+        layers_layout.addWidget(QLabel("Mask Expansion:"), 0, 0)
+        self.mask_expansion = QLineEdit()
+        self.mask_expansion.setText("0")
+        self.mask_expansion.setMaximumWidth(100)
+        layers_layout.addWidget(self.mask_expansion, 0, 1)
+
+        layers_layout.addWidget(QLabel("Paste Expansion:"), 1, 0)
+        self.paste_expansion = QLineEdit()
+        self.paste_expansion.setText("0")
+        self.paste_expansion.setMaximumWidth(100)
+        layers_layout.addWidget(self.paste_expansion, 1, 1)
+
+        # Add checkboxes for enabling/disabling mask and paste layers
+        self.mask_enabled = QCheckBox("Enable Mask")
+        self.mask_enabled.setChecked(True)
+        layers_layout.addWidget(self.mask_enabled, 0, 2)
+
+        self.paste_enabled = QCheckBox("Enable Paste")
+        self.paste_enabled.setChecked(True)
+        layers_layout.addWidget(self.paste_enabled, 1, 2)
+
+        row2_layout.addWidget(layers_group)
+
+        group_layout.addLayout(row2_layout)
+
+        # Custom polygon widget (initially hidden)
+        self.polygon_widget = CustomPolygonWidget()
+        self.polygon_widget.data_changed.connect(self.data_changed.emit)
+        self.polygon_widget.setVisible(False)
+        group_layout.addWidget(self.polygon_widget)
+
+        main_layout.addWidget(self.group_box)
+        self.setLayout(main_layout)
+
+        # Initialize geometry inputs
+        self.update_geometry_inputs()
+
+    def connect_signals(self):
+        self.type_combo.currentTextChanged.connect(self.update_geometry_inputs)
+        self.type_combo.currentTextChanged.connect(self.update_layer_visibility)
+        self.type_combo.currentTextChanged.connect(self.data_changed.emit)
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
+
+        # Connect all input signals
+        self.x_offset.textChanged.connect(self.data_changed.emit)
+        self.y_offset.textChanged.connect(self.data_changed.emit)
+        self.mask_expansion.textChanged.connect(self.data_changed.emit)
+        self.paste_expansion.textChanged.connect(self.data_changed.emit)
+        self.mask_enabled.stateChanged.connect(self.data_changed.emit)
+        self.paste_enabled.stateChanged.connect(self.data_changed.emit)
+
+        self.offset_from.currentTextChanged.connect(self.data_changed.emit)
+        
+        # Update dropdown when pin numbers change
+        self.pin_number.textChanged.connect(self.update_offset_from_options)
+        self.pin_number.textChanged.connect(self.data_changed.emit)
+
+    def update_layer_visibility(self):
+        """Show/hide layer checkboxes based on pad type"""
+        pad_type = self.type_combo.currentText()
+        smd_types = ['square', 'rectangle', 'rounded_rectangle', 'round', 'SMD-oblong', 'D-shape', 'custom']
+        
+        # Show checkboxes only for SMD pad types
+        is_smd = pad_type in smd_types
+        self.mask_enabled.setVisible(is_smd)
+        self.paste_enabled.setVisible(is_smd)
+
+    def update_offset_from_options(self):
+        """Update the offset_from dropdown with all available pin numbers"""
+        # Get the parent FootprintDesigner to access all padstack rows
+        parent_designer = self.get_parent_designer()
+        if not parent_designer:
+            return
+
+        # Collect all pin numbers except the current one
+        available_pins = []
+        current_pin = self.pin_number.text().strip()
+
+        for row in parent_designer.padstack_rows:
+            if row != self: # Don't include self
+                pin_text = row.pin_number.text().strip()
+                if pin_text and pin_text != current_pin:
+                    available_pins.append(pin_text)
+
+        # Update the dropdown
+        current_selection = self.offset_from.currentText()
+        self.offset_from.blockSignals(True)
+        self.offset_from.clear()
+        self.offset_from.addItem('origin') # Always include origin
+
+        # Sort pin numbers numerically if possible, otherwise alphabetically
+        try:
+            available_pins.sort(key=lambda x: int(x) if x.isdigit() else float('inf'))
+        except:
+            available_pins.sort()
+
+        self.offset_from.addItems(available_pins)
+
+        # Restore previous selection if still valid
+        index = self.offset_from.findText(current_selection)
+        if index >= 0:
+            self.offset_from.setCurrentIndex(index)
+        else:
+            self.offset_from.setCurrentText('origin')
+
+        self.offset_from.blockSignals(False)
+
+    def get_parent_designer(self):
+        """Find the parent FootprintDesigner instance"""
+        parent = self.parent()
+        while parent:
+            if hasattr(parent, 'padstack_rows'):
+                return parent
+            parent = parent.parent()
+        return None
+
+    def update_geometry_inputs(self):
+        # Clear existing geometry inputs
+        for i in reversed(range(self.geometry_layout.count())):
+            item = self.geometry_layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None)
+
+        pad_type = self.type_combo.currentText()
+
+        # Show/hide polygon widget
+        self.polygon_widget.setVisible(pad_type == 'custom')
+        
+        # Update layer visibility
+        self.update_layer_visibility()
+
+        if pad_type == 'square':
+            self.geometry_layout.addWidget(QLabel("Size:"))
+            self.size_input = QLineEdit()
+            self.size_input.setText("1.0")
+            self.size_input.setMaximumWidth(100)
+            self.size_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.size_input)
+
+        elif pad_type in ['rectangle', 'SMD-oblong']:
+            self.geometry_layout.addWidget(QLabel("Length:"))
+            self.length_input = QLineEdit()
+            self.length_input.setText("1.0")
+            self.length_input.setMaximumWidth(100)
+            self.length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.length_input)
+
+            self.geometry_layout.addWidget(QLabel("Width:"))
+            self.width_input = QLineEdit()
+            self.width_input.setText("1.0")
+            self.width_input.setMaximumWidth(100)
+            self.width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.width_input)
+
+        elif pad_type == 'rounded_rectangle':
+            self.geometry_layout.addWidget(QLabel("Length:"))
+            self.length_input = QLineEdit()
+            self.length_input.setText("1.0")
+            self.length_input.setMaximumWidth(100)
+            self.length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.length_input)
+
+            self.geometry_layout.addWidget(QLabel("Width:"))
+            self.width_input = QLineEdit()
+            self.width_input.setText("1.0")
+            self.width_input.setMaximumWidth(100)
+            self.width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.width_input)
+
+            self.geometry_layout.addWidget(QLabel("Corner Radius:"))
+            self.corner_radius_input = QLineEdit()
+            self.corner_radius_input.setText("0.2")
+            self.corner_radius_input.setMaximumWidth(100)
+            self.corner_radius_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.corner_radius_input)
+
+        elif pad_type in ['round']:
+            self.geometry_layout.addWidget(QLabel("Diameter:"))
+            self.diameter_input = QLineEdit()
+            self.diameter_input.setText("1.0")
+            self.diameter_input.setMaximumWidth(100)
+            self.diameter_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.diameter_input)
+
+        elif pad_type in ['PTH', 'NPTH']:
+            # Round through hole
+            self.geometry_layout.addWidget(QLabel("Hole Diameter:"))
+            self.hole_diameter_input = QLineEdit()
+            self.hole_diameter_input.setText("0.8")
+            self.hole_diameter_input.setMaximumWidth(100)
+            self.hole_diameter_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.hole_diameter_input)
+
+            if pad_type == 'PTH':
+                # PTH needs pad diameter
+                self.geometry_layout.addWidget(QLabel("Pad Diameter:"))
+                self.pad_diameter_input = QLineEdit()
+                self.pad_diameter_input.setText("1.2")
+                self.pad_diameter_input.setMaximumWidth(100)
+                self.pad_diameter_input.textChanged.connect(self.data_changed.emit)
+                self.geometry_layout.addWidget(self.pad_diameter_input)
+
+        elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+            # Oblong through hole
+            self.geometry_layout.addWidget(QLabel("Hole Length:"))
+            self.hole_length_input = QLineEdit()
+            self.hole_length_input.setText("1.5")
+            self.hole_length_input.setMaximumWidth(100)
+            self.hole_length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.hole_length_input)
+
+            self.geometry_layout.addWidget(QLabel("Hole Width:"))
+            self.hole_width_input = QLineEdit()
+            self.hole_width_input.setText("0.8")
+            self.hole_width_input.setMaximumWidth(100)
+            self.hole_width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.hole_width_input)
+
+            if pad_type == 'PTH_oblong':
+                # PTH oblong needs pad dimensions
+                self.geometry_layout.addWidget(QLabel("Pad Length:"))
+                self.pad_length_input = QLineEdit()
+                self.pad_length_input.setText("2.0")
+                self.pad_length_input.setMaximumWidth(100)
+                self.pad_length_input.textChanged.connect(self.data_changed.emit)
+                self.geometry_layout.addWidget(self.pad_length_input)
+
+                self.geometry_layout.addWidget(QLabel("Pad Width:"))
+                self.pad_width_input = QLineEdit()
+                self.pad_width_input.setText("1.2")
+                self.pad_width_input.setMaximumWidth(100)
+                self.pad_width_input.textChanged.connect(self.data_changed.emit)
+                self.geometry_layout.addWidget(self.pad_width_input)
+
+            # Add rotation control for oblong pads
+            self.geometry_layout.addWidget(QLabel("Rotation:"))
+            self.rotation_input = QLineEdit()
+            self.rotation_input.setText("0")
+            self.rotation_input.setMaximumWidth(80)
+            self.rotation_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.rotation_input)
+
+        elif pad_type == 'D-shape':
+            self.geometry_layout.addWidget(QLabel("Pad Length:"))
+            self.length_input = QLineEdit()
+            self.length_input.setText("1.0")
+            self.length_input.setMaximumWidth(100)
+            self.length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.length_input)
+
+            self.geometry_layout.addWidget(QLabel("Pad Width:"))
+            self.width_input = QLineEdit()
+            self.width_input.setText("1.0")
+            self.width_input.setMaximumWidth(100)
+            self.width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.width_input)
+
+            self.geometry_layout.addWidget(QLabel("Corner Radius:"))
+            self.corner_radius_input = QLineEdit()
+            self.corner_radius_input.setText("0.2")
+            self.corner_radius_input.setMaximumWidth(100)
+            self.corner_radius_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.corner_radius_input)
+
+            self.geometry_layout.addWidget(QLabel("Rotation:"))
+            self.rotation_input = QLineEdit()
+            self.rotation_input.setText("0")
+            self.rotation_input.setMaximumWidth(80)
+            self.rotation_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.rotation_input)
+
+        elif pad_type == 'PTH_rectangle':
+            self.geometry_layout.addWidget(QLabel("Hole Length:"))
+            self.hole_length_input = QLineEdit()
+            self.hole_length_input.setText("1.5")
+            self.hole_length_input.setMaximumWidth(100)
+            self.hole_length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.hole_length_input)
+
+            self.geometry_layout.addWidget(QLabel("Hole Width:"))
+            self.hole_width_input = QLineEdit()
+            self.hole_width_input.setText("0.8")
+            self.hole_width_input.setMaximumWidth(100)
+            self.hole_width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.hole_width_input)
+
+            self.geometry_layout.addWidget(QLabel("Pad Length:"))
+            self.pad_length_input = QLineEdit()
+            self.pad_length_input.setText("2.0")
+            self.pad_length_input.setMaximumWidth(100)
+            self.pad_length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.pad_length_input)
+
+            self.geometry_layout.addWidget(QLabel("Pad Width:"))
+            self.pad_width_input = QLineEdit()
+            self.pad_width_input.setText("1.2")
+            self.pad_width_input.setMaximumWidth(100)
+            self.pad_width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.pad_width_input)
+
+            self.geometry_layout.addWidget(QLabel("Rotation:"))
+            self.rotation_input = QLineEdit()
+            self.rotation_input.setText("0")
+            self.rotation_input.setMaximumWidth(80)
+            self.rotation_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.rotation_input)
+
+
+        elif pad_type == 'custom':
+            # Custom polygon inputs handled by polygon_widget
+            self.geometry_layout.addWidget(QLabel("Custom Polygon (see below)"))
+
+        # Add stretch to push everything to the left
+        self.geometry_layout.addStretch()
+
+    def get_data(self):
+        data = {
+            'type': self.type_combo.currentText(),
+            'x_offset': self.x_offset.text(),
+            'y_offset': self.y_offset.text(),
+            'offset_from': self.offset_from.currentText(),
+            'mask_expansion': self.mask_expansion.text(),
+            'paste_expansion': self.paste_expansion.text(),
+            'mask_enabled': self.mask_enabled.isChecked(),
+            'paste_enabled': self.paste_enabled.isChecked(),
+            'pin_number': self.pin_number.text()
+        }
+
+        pad_type = self.type_combo.currentText()
+
+        if pad_type == 'square' and hasattr(self, 'size_input'):
+            data['size'] = self.size_input.text()
+
+        elif pad_type in ['rectangle', 'rounded_rectangle', 'SMD-oblong']:
+            if hasattr(self, 'length_input'):
+                data['length'] = self.length_input.text()
+            if hasattr(self, 'width_input'):
+                data['width'] = self.width_input.text()
+            if pad_type == 'rounded_rectangle' and hasattr(self, 'corner_radius_input'):
+                data['corner_radius'] = self.corner_radius_input.text()
+
+        elif pad_type in ['round'] and hasattr(self, 'diameter_input'):
+            data['diameter'] = self.diameter_input.text()
+
+        elif pad_type in ['D-shape']:
+            if hasattr(self, 'length_input'):
+                data['length'] = self.length_input.text()
+            if hasattr(self, 'width_input'):
+                data['width'] = self.width_input.text()
+            if hasattr(self, 'corner_radius_input'):
+                data['corner_radius'] = self.corner_radius_input.text()
+            if hasattr(self, 'rotation_input'):
+                data['rotation'] = self.rotation_input.text()
+
+        elif pad_type in ['PTH', 'NPTH']:
+            if hasattr(self, 'hole_diameter_input'):
+                data['hole_diameter'] = self.hole_diameter_input.text()
+            if pad_type == 'PTH' and hasattr(self, 'pad_diameter_input'):
+                data['pad_diameter'] = self.pad_diameter_input.text()
+
+        elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+            if hasattr(self, 'hole_length_input'):
+                data['hole_length'] = self.hole_length_input.text()
+            if hasattr(self, 'hole_width_input'):
+                data['hole_width'] = self.hole_width_input.text()
+            if hasattr(self, 'rotation_input'):
+                data['rotation'] = self.rotation_input.text()
+            if pad_type == 'PTH_oblong':
+                if hasattr(self, 'pad_length_input'):
+                    data['pad_length'] = self.pad_length_input.text()
+                if hasattr(self, 'pad_width_input'):
+                    data['pad_width'] = self.pad_width_input.text()
+
+        elif pad_type == 'PTH_rectangle':
+            if hasattr(self, 'hole_length_input'):
+                data['hole_length'] = self.hole_length_input.text()
+            if hasattr(self, 'hole_width_input'):
+                data['hole_width'] = self.hole_width_input.text()
+            if hasattr(self, 'pad_length_input'):
+                data['pad_length'] = self.pad_length_input.text()
+            if hasattr(self, 'pad_width_input'):
+                data['pad_width'] = self.pad_width_input.text()
+            if hasattr(self, 'rotation_input'):
+                data['rotation'] = self.rotation_input.text()
+
+        elif pad_type == 'custom':
+            data['polygon_data'] = self.polygon_widget.get_data()
+
+        return data
+
+    def set_data(self, data):
+        self.type_combo.setCurrentText(data.get('type', 'square'))
+        self.x_offset.setText(str(data.get('x_offset', 0)))
+        self.y_offset.setText(str(data.get('y_offset', 0)))
+        self.mask_expansion.setText(str(data.get('mask_expansion', 0)))
+        self.paste_expansion.setText(str(data.get('paste_expansion', 0)))
+        self.mask_enabled.setChecked(data.get('mask_enabled', True))
+        self.paste_enabled.setChecked(data.get('paste_enabled', True))
+        self.pin_number.setText(str(data.get('pin_number', '1')))
+
+        # Update options first, then set the selection
+        self.update_offset_from_options()
+        self.offset_from.setCurrentText(data.get('offset_from', 'origin'))
+
+        # Set type-specific data
+        pad_type = data.get('type', 'square')
+
+        if pad_type == 'square' and hasattr(self, 'size_input'):
+            self.size_input.setText(str(data.get('size', '1.0')))
+
+        elif pad_type in ['rectangle', 'rounded_rectangle', 'SMD-oblong']:
+            if hasattr(self, 'length_input'):
+                self.length_input.setText(str(data.get('length', '1.0')))
+            if hasattr(self, 'width_input'):
+                self.width_input.setText(str(data.get('width', '1.0')))
+            if pad_type == 'rounded_rectangle' and hasattr(self, 'corner_radius_input'):
+                self.corner_radius_input.setText(str(data.get('corner_radius', '0.2')))
+
+        elif pad_type in ['round'] and hasattr(self, 'diameter_input'):
+            self.diameter_input.setText(str(data.get('diameter', '1.0')))
+
+        elif pad_type == 'D-shape':
+            if hasattr(self, 'length_input'):
+                self.length_input.setText(str(data.get('length', '1.0')))
+            if hasattr(self, 'width_input'):
+                self.width_input.setText(str(data.get('width', '1.0')))
+            if hasattr(self, 'corner_radius_input'):
+                self.corner_radius_input.setText(str(data.get('corner_radius', '0.2')))
+            if hasattr(self, 'rotation_input'):
+                self.rotation_input.setText(str(data.get('rotation', '0')))
+
+        elif pad_type in ['PTH', 'NPTH']:
+            if hasattr(self, 'hole_diameter_input'):
+                self.hole_diameter_input.setText(str(data.get('hole_diameter', '0.8')))
+            if pad_type == 'PTH' and hasattr(self, 'pad_diameter_input'):
+                self.pad_diameter_input.setText(str(data.get('pad_diameter', '1.2')))
+
+        elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+            if hasattr(self, 'hole_length_input'):
+                self.hole_length_input.setText(str(data.get('hole_length', '1.5')))
+            if hasattr(self, 'hole_width_input'):
+                self.hole_width_input.setText(str(data.get('hole_width', '0.8')))
+            if hasattr(self, 'rotation_input'):
+                self.rotation_input.setText(str(data.get('rotation', '0')))
+            if pad_type == 'PTH_oblong':
+                if hasattr(self, 'pad_length_input'):
+                    self.pad_length_input.setText(str(data.get('pad_length', '2.0')))
+                if hasattr(self, 'pad_width_input'):
+                    self.pad_width_input.setText(str(data.get('pad_width', '1.2')))
+
+        elif pad_type == 'PTH_rectangle':
+            if hasattr(self, 'hole_length_input'):
+                self.hole_length_input.setText(str(data.get('hole_length', '1.5')))
+            if hasattr(self, 'hole_width_input'):
+                self.hole_width_input.setText(str(data.get('hole_width', '0.8')))
+            if hasattr(self, 'pad_length_input'):
+                self.pad_length_input.setText(str(data.get('pad_length', '2.0')))
+            if hasattr(self, 'pad_width_input'):
+                self.pad_width_input.setText(str(data.get('pad_width', '1.2')))
+            if hasattr(self, 'rotation_input'):
+                self.rotation_input.setText(str(data.get('rotation', '0')))
+
+        elif pad_type == 'custom':
+            self.polygon_widget.set_data(data.get('polygon_data', {}))
+
+class CustomLayerRow(QWidget):
+    delete_requested = pyqtSignal(object)
+    data_changed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.setup_ui()
+        self.connect_signals()
+
+    def setup_ui(self):
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
+
+        # Create group box for this custom layer
+        self.group_box = QGroupBox("Custom Layer Configuration")
+        group_layout = QVBoxLayout(self.group_box)
+        group_layout.setSpacing(5)
+
+        # Row 1: Shape and Geometry
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(10)
+
+        # Shape Group
+        shape_group = QGroupBox("Shape")
+        shape_layout = QHBoxLayout(shape_group)
+        shape_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.shape_combo = QComboBox()
+        self.shape_combo.addItems(['rectangle', 'rounded_rectangle', 'oblong', 'custom_polygon'])
+        shape_layout.addWidget(self.shape_combo)
+        row1_layout.addWidget(shape_group)
+
+        # Geometry Group (Dynamic based on shape)
+        self.geometry_group = QGroupBox("Geometry")
+        self.geometry_layout = QHBoxLayout(self.geometry_group)
+        self.geometry_layout.setContentsMargins(5, 5, 5, 5)
+        row1_layout.addWidget(self.geometry_group)
+
+        # Actions Group
+        actions_group = QGroupBox("Actions")
+        actions_layout = QHBoxLayout(actions_group)
+        actions_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.duplicate_btn = QPushButton("Duplicate")
+        self.duplicate_btn.setMaximumWidth(80)
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setMaximumWidth(60)
+
+        actions_layout.addWidget(self.duplicate_btn)
+        actions_layout.addWidget(self.delete_btn)
+        row1_layout.addWidget(actions_group)
+
+        group_layout.addLayout(row1_layout)
+
+        # Row 2: Layer and Position
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(10)
+
+        # Layer Group
+        layer_group = QGroupBox("Layer")
+        layer_layout = QHBoxLayout(layer_group)
+        layer_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.layer_combo = QComboBox()
+        self.layer_combo.addItems(['mask', 'paste', 'keepout'])
+        layer_layout.addWidget(self.layer_combo)
+        row2_layout.addWidget(layer_group)
+
+        # Position Group
+        position_group = QGroupBox("Position")
+        position_layout = QGridLayout(position_group)
+        position_layout.setContentsMargins(5, 5, 5, 5)
+
+        position_layout.addWidget(QLabel("X Offset:"), 0, 0)
+        self.x_offset = QLineEdit()
+        self.x_offset.setText("0")
+        self.x_offset.setMaximumWidth(100)
+        position_layout.addWidget(self.x_offset, 0, 1)
+
+        position_layout.addWidget(QLabel("Y Offset:"), 0, 2)
+        self.y_offset = QLineEdit()
+        self.y_offset.setText("0")
+        self.y_offset.setMaximumWidth(100)
+        position_layout.addWidget(self.y_offset, 0, 3)
+
+        position_layout.addWidget(QLabel("Offset From:"), 1, 0)
+        self.offset_from = QComboBox()
+        self.offset_from.setMaximumWidth(100)
+        position_layout.addWidget(self.offset_from, 1, 1, 1, 2)
+
+        row2_layout.addWidget(position_group)
+        group_layout.addLayout(row2_layout)
+
+        # Custom polygon widget (initially hidden)
+        self.polygon_widget = CustomPolygonWidget()
+        self.polygon_widget.data_changed.connect(self.data_changed.emit)
+        self.polygon_widget.setVisible(False)
+        group_layout.addWidget(self.polygon_widget)
+
+        main_layout.addWidget(self.group_box)
+        self.setLayout(main_layout)
+
+        # Initialize geometry inputs
+        self.update_geometry_inputs()
+
+    def connect_signals(self):
+        self.shape_combo.currentTextChanged.connect(self.update_geometry_inputs)
+        self.shape_combo.currentTextChanged.connect(self.data_changed.emit)
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
+
+        # Connect all input signals
+        self.x_offset.textChanged.connect(self.data_changed.emit)
+        self.y_offset.textChanged.connect(self.data_changed.emit)
+        self.layer_combo.currentTextChanged.connect(self.data_changed.emit)
+        self.offset_from.currentTextChanged.connect(self.data_changed.emit)
+
+    def update_geometry_inputs(self):
+        # Clear existing geometry inputs
+        for i in reversed(range(self.geometry_layout.count())):
+            item = self.geometry_layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None)
+
+        shape = self.shape_combo.currentText()
+
+        # Show/hide polygon widget
+        self.polygon_widget.setVisible(shape == 'custom_polygon')
+
+        if shape == 'rectangle':
+            self.geometry_layout.addWidget(QLabel("Length:"))
+            self.length_input = QLineEdit()
+            self.length_input.setText("1.0")
+            self.length_input.setMaximumWidth(100)
+            self.length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.length_input)
+
+            self.geometry_layout.addWidget(QLabel("Width:"))
+            self.width_input = QLineEdit()
+            self.width_input.setText("1.0")
+            self.width_input.setMaximumWidth(100)
+            self.width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.width_input)
+
+        elif shape == 'rounded_rectangle':
+            self.geometry_layout.addWidget(QLabel("Length:"))
+            self.length_input = QLineEdit()
+            self.length_input.setText("1.0")
+            self.length_input.setMaximumWidth(100)
+            self.length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.length_input)
+
+            self.geometry_layout.addWidget(QLabel("Width:"))
+            self.width_input = QLineEdit()
+            self.width_input.setText("1.0")
+            self.width_input.setMaximumWidth(100)
+            self.width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.width_input)
+
+            self.geometry_layout.addWidget(QLabel("Corner Radius:"))
+            self.corner_radius_input = QLineEdit()
+            self.corner_radius_input.setText("0.2")
+            self.corner_radius_input.setMaximumWidth(100)
+            self.corner_radius_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.corner_radius_input)
+
+        elif shape == 'oblong':
+            self.geometry_layout.addWidget(QLabel("Length:"))
+            self.length_input = QLineEdit()
+            self.length_input.setText("2.0")
+            self.length_input.setMaximumWidth(100)
+            self.length_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.length_input)
+
+            self.geometry_layout.addWidget(QLabel("Width:"))
+            self.width_input = QLineEdit()
+            self.width_input.setText("1.0")
+            self.width_input.setMaximumWidth(100)
+            self.width_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.width_input)
+
+        elif shape == 'custom_polygon':
+            self.geometry_layout.addWidget(QLabel("Custom Polygon (see below)"))
+
+        # Add stretch to push everything to the left
+        self.geometry_layout.addStretch()
+
+    def get_data(self):
+        data = {
+            'shape': self.shape_combo.currentText(),
+            'layer': self.layer_combo.currentText(),
+            'x_offset': self.x_offset.text(),
+            'y_offset': self.y_offset.text(),
+            'offset_from': self.offset_from.currentText()
+        }
+
+        shape = self.shape_combo.currentText()
+
+        if shape in ['rectangle', 'rounded_rectangle', 'oblong']:
+            if hasattr(self, 'length_input'):
+                data['length'] = self.length_input.text()
+            if hasattr(self, 'width_input'):
+                data['width'] = self.width_input.text()
+            if shape == 'rounded_rectangle' and hasattr(self, 'corner_radius_input'):
+                data['corner_radius'] = self.corner_radius_input.text()
+
+        elif shape == 'custom_polygon':
+            data['polygon_data'] = self.polygon_widget.get_data()
+
+        return data
+
+    def set_data(self, data):
+        self.shape_combo.setCurrentText(data.get('shape', 'rectangle'))
+        self.layer_combo.setCurrentText(data.get('layer', 'mask'))
+        self.x_offset.setText(str(data.get('x_offset', '0')))
+        self.y_offset.setText(str(data.get('y_offset', '0')))
+        self.offset_from.setCurrentText(data.get('offset_from', 'origin'))
+
+        # Set shape-specific data
+        shape = data.get('shape', 'rectangle')
+
+        if shape in ['rectangle', 'rounded_rectangle', 'oblong']:
+            if hasattr(self, 'length_input'):
+                self.length_input.setText(str(data.get('length', '1.0')))
+            if hasattr(self, 'width_input'):
+                self.width_input.setText(str(data.get('width', '1.0')))
+            if shape == 'rounded_rectangle' and hasattr(self, 'corner_radius_input'):
+                self.corner_radius_input.setText(str(data.get('corner_radius', '0.2')))
+
+        elif shape == 'custom_polygon':
+            self.polygon_widget.set_data(data.get('polygon_data', {}))
+
+class ThermalViaRow(QWidget):
+    delete_requested = pyqtSignal(object)
+    data_changed = pyqtSignal()
+
+    def __init__(self):
+        super().__init__()
+        self.setup_ui()
+        self.connect_signals()
+
+    def setup_ui(self):
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
+
+        # Create group box for this thermal via
+        self.group_box = QGroupBox("Thermal Via Configuration")
+        group_layout = QVBoxLayout(self.group_box)
+        group_layout.setSpacing(5)
+
+        # Row 1: Type and Geometry
+        row1_layout = QHBoxLayout()
+        row1_layout.setSpacing(10)
+
+        # Type Group
+        type_group = QGroupBox("Type")
+        type_layout = QHBoxLayout(type_group)
+        type_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.type_combo = QComboBox()
+        self.type_combo.addItems(['grid_array', 'single'])
+        type_layout.addWidget(self.type_combo)
+        row1_layout.addWidget(type_group)
+
+        # Geometry Group (Dynamic based on type)
+        self.geometry_group = QGroupBox("Geometry")
+        self.geometry_layout = QHBoxLayout(self.geometry_group)
+        self.geometry_layout.setContentsMargins(5, 5, 5, 5)
+        row1_layout.addWidget(self.geometry_group)
+
+        # Actions Group
+        actions_group = QGroupBox("Actions")
+        actions_layout = QHBoxLayout(actions_group)
+        actions_layout.setContentsMargins(5, 5, 5, 5)
+
+        self.duplicate_btn = QPushButton("Duplicate")
+        self.duplicate_btn.setMaximumWidth(80)
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.setMaximumWidth(60)
+
+        actions_layout.addWidget(self.duplicate_btn)
+        actions_layout.addWidget(self.delete_btn)
+        row1_layout.addWidget(actions_group)
+
+        group_layout.addLayout(row1_layout)
+
+        # Row 2: Position
+        row2_layout = QHBoxLayout()
+        row2_layout.setSpacing(10)
+
+        # Position Group
+        position_group = QGroupBox("Position")
+        position_layout = QGridLayout(position_group)
+        position_layout.setContentsMargins(5, 5, 5, 5)
+
+        position_layout.addWidget(QLabel("X Offset:"), 0, 0)
+        self.x_offset = QLineEdit()
+        self.x_offset.setText("0")
+        self.x_offset.setMaximumWidth(100)
+        position_layout.addWidget(self.x_offset, 0, 1)
+
+        position_layout.addWidget(QLabel("Y Offset:"), 0, 2)
+        self.y_offset = QLineEdit()
+        self.y_offset.setText("0")
+        self.y_offset.setMaximumWidth(100)
+        position_layout.addWidget(self.y_offset, 0, 3)
+
+        position_layout.addWidget(QLabel("Offset From:"), 1, 0)
+        self.offset_from = QComboBox()
+        self.offset_from.setMaximumWidth(100)
+        position_layout.addWidget(self.offset_from, 1, 1, 1, 2)
+
+        row2_layout.addWidget(position_group)
+        group_layout.addLayout(row2_layout)
+
+        main_layout.addWidget(self.group_box)
+        self.setLayout(main_layout)
+
+        # Initialize geometry inputs
+        self.update_geometry_inputs()
+
+    def connect_signals(self):
+        self.type_combo.currentTextChanged.connect(self.update_geometry_inputs)
+        self.type_combo.currentTextChanged.connect(self.data_changed.emit)
+        self.delete_btn.clicked.connect(lambda: self.delete_requested.emit(self))
+
+        # Connect all input signals
+        self.x_offset.textChanged.connect(self.data_changed.emit)
+        self.y_offset.textChanged.connect(self.data_changed.emit)
+        self.offset_from.currentTextChanged.connect(self.data_changed.emit)
+
+    def update_geometry_inputs(self):
+        # Clear existing geometry inputs
+        for i in reversed(range(self.geometry_layout.count())):
+            item = self.geometry_layout.itemAt(i)
+            if item:
+                widget = item.widget()
+                if widget:
+                    widget.setParent(None)
+
+        via_type = self.type_combo.currentText()
+
+        if via_type == 'single':
+            self.geometry_layout.addWidget(QLabel("Via Diameter:"))
+            self.via_diameter_input = QLineEdit()
+            self.via_diameter_input.setText("0.2")
+            self.via_diameter_input.setMaximumWidth(100)
+            self.via_diameter_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.via_diameter_input)
+
+            self.geometry_layout.addWidget(QLabel("Drill Diameter:"))
+            self.drill_diameter_input = QLineEdit()
+            self.drill_diameter_input.setText("0.1")
+            self.drill_diameter_input.setMaximumWidth(100)
+            self.drill_diameter_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.drill_diameter_input)
+
+        elif via_type == 'grid_array':
+            self.geometry_layout.addWidget(QLabel("Rows:"))
+            self.rows_input = QLineEdit()
+            self.rows_input.setText("2")
+            self.rows_input.setMaximumWidth(80)
+            self.rows_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.rows_input)
+
+            self.geometry_layout.addWidget(QLabel("Columns:"))
+            self.columns_input = QLineEdit()
+            self.columns_input.setText("2")
+            self.columns_input.setMaximumWidth(80)
+            self.columns_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.columns_input)
+
+            self.geometry_layout.addWidget(QLabel("Row Spacing:"))
+            self.row_spacing_input = QLineEdit()
+            self.row_spacing_input.setText("1.0")
+            self.row_spacing_input.setMaximumWidth(100)
+            self.row_spacing_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.row_spacing_input)
+
+            self.geometry_layout.addWidget(QLabel("Col Spacing:"))
+            self.col_spacing_input = QLineEdit()
+            self.col_spacing_input.setText("1.0")
+            self.col_spacing_input.setMaximumWidth(100)
+            self.col_spacing_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.col_spacing_input)
+
+            self.geometry_layout.addWidget(QLabel("Via Diameter:"))
+            self.via_diameter_input = QLineEdit()
+            self.via_diameter_input.setText("0.2")
+            self.via_diameter_input.setMaximumWidth(100)
+            self.via_diameter_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.via_diameter_input)
+
+            self.geometry_layout.addWidget(QLabel("Drill Diameter:"))
+            self.drill_diameter_input = QLineEdit()
+            self.drill_diameter_input.setText("0.1")
+            self.drill_diameter_input.setMaximumWidth(100)
+            self.drill_diameter_input.textChanged.connect(self.data_changed.emit)
+            self.geometry_layout.addWidget(self.drill_diameter_input)
+
+        # Add stretch to push everything to the left
+        self.geometry_layout.addStretch()
+
+    def get_data(self):
+        data = {
+            'type': self.type_combo.currentText(),
+            'x_offset': self.x_offset.text(),
+            'y_offset': self.y_offset.text(),
+            'offset_from': self.offset_from.currentText()
+        }
+
+        via_type = self.type_combo.currentText()
+
+        if via_type == 'single':
+            if hasattr(self, 'via_diameter_input'):
+                data['via_diameter'] = self.via_diameter_input.text()
+            if hasattr(self, 'drill_diameter_input'):
+                data['drill_diameter'] = self.drill_diameter_input.text()
+
+        elif via_type == 'grid_array':
+            if hasattr(self, 'rows_input'):
+                data['rows'] = self.rows_input.text()
+            if hasattr(self, 'columns_input'):
+                data['columns'] = self.columns_input.text()
+            if hasattr(self, 'row_spacing_input'):
+                data['row_spacing'] = self.row_spacing_input.text()
+            if hasattr(self, 'col_spacing_input'):
+                data['col_spacing'] = self.col_spacing_input.text()
+            if hasattr(self, 'via_diameter_input'):
+                data['via_diameter'] = self.via_diameter_input.text()
+            if hasattr(self, 'drill_diameter_input'):
+                data['drill_diameter'] = self.drill_diameter_input.text()
+
+        return data
+
+    def set_data(self, data):
+        self.type_combo.setCurrentText(data.get('type', 'single'))
+        self.x_offset.setText(str(data.get('x_offset', '0')))
+        self.y_offset.setText(str(data.get('y_offset', '0')))
+        self.offset_from.setCurrentText(data.get('offset_from', 'origin'))
+
+        # Set type-specific data
+        via_type = data.get('type', 'single')
+
+        if via_type == 'single':
+            if hasattr(self, 'via_diameter_input'):
+                self.via_diameter_input.setText(str(data.get('via_diameter', '0.2')))
+            if hasattr(self, 'drill_diameter_input'):
+                self.drill_diameter_input.setText(str(data.get('drill_diameter', '0.1')))
+
+        elif via_type == 'grid_array':
+            if hasattr(self, 'rows_input'):
+                self.rows_input.setText(str(data.get('rows', '2')))
+            if hasattr(self, 'columns_input'):
+                self.columns_input.setText(str(data.get('columns', '2')))
+            if hasattr(self, 'row_spacing_input'):
+                self.row_spacing_input.setText(str(data.get('row_spacing', '1.0')))
+            if hasattr(self, 'col_spacing_input'):
+                self.col_spacing_input.setText(str(data.get('col_spacing', '1.0')))
+            if hasattr(self, 'via_diameter_input'):
+                self.via_diameter_input.setText(str(data.get('via_diameter', '0.2')))
+            if hasattr(self, 'drill_diameter_input'):
+                self.drill_diameter_input.setText(str(data.get('drill_diameter', '0.1')))
+
+class SettingsPanel(QWidget):
+    settings_changed = pyqtSignal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.current_user = None
+        self.setup_ui()
+        self.setup_styling()
+
+    def setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(15)
+
+        # Title
+        title = QLabel("Settings")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #ffffff; margin-bottom: 10px;")
+        layout.addWidget(title)
+
+        # User Login Section
+        self.setup_user_section(layout)
+
+        # Separator
+        separator1 = QFrame()
+        separator1.setFrameShape(QFrame.Shape.HLine)
+        separator1.setStyleSheet("color: #555;")
+        layout.addWidget(separator1)
+
+        # Body Settings
+        self.setup_body_settings(layout)
+
+        # Separator
+        separator2 = QFrame()
+        separator2.setFrameShape(QFrame.Shape.HLine)
+        separator2.setStyleSheet("color: #555;")
+        layout.addWidget(separator2)
+
+        # Courtyard Settings
+        self.setup_courtyard_settings(layout)
+
+        # Separator
+        separator3 = QFrame()
+        separator3.setFrameShape(QFrame.Shape.HLine)
+        separator3.setStyleSheet("color: #555;")
+        layout.addWidget(separator3)
+
+        # Silkscreen Settings
+        self.setup_silkscreen_settings(layout)
+
+        # Separator
+        separator4 = QFrame()
+        separator4.setFrameShape(QFrame.Shape.HLine)
+        separator4.setStyleSheet("color: #555;")
+        layout.addWidget(separator4)
+
+        # Script Output Settings
+        self.setup_script_settings(layout)
+
+        layout.addStretch()
+
+    def setup_user_section(self, layout):
+        user_group = QGroupBox("User Account")
+        user_layout = QVBoxLayout(user_group)
+
+        # User display/login
+        self.user_display = QLabel("Not logged in")
+        self.user_display.setStyleSheet("color: #ffffff; margin: 5px;")
+        user_layout.addWidget(self.user_display)
+
+        # Login form (initially visible)
+        self.login_frame = QFrame()
+        login_layout = QGridLayout(self.login_frame)
+
+        login_layout.addWidget(QLabel("Username:"), 0, 0)
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter username")
+        login_layout.addWidget(self.username_input, 0, 1)
+
+        login_layout.addWidget(QLabel("Password:"), 1, 0)
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setPlaceholderText("Enter password")
+        login_layout.addWidget(self.password_input, 1, 1)
+
+        self.login_btn = QPushButton("Login")
+        self.login_btn.clicked.connect(self.handle_login)
+        login_layout.addWidget(self.login_btn, 2, 0, 1, 2)
+
+        user_layout.addWidget(self.login_frame)
+
+        # Logout button (initially hidden)
+        self.logout_btn = QPushButton("Logout")
+        self.logout_btn.clicked.connect(self.handle_logout)
+        self.logout_btn.setVisible(False)
+        user_layout.addWidget(self.logout_btn)
+
+        layout.addWidget(user_group)
+
+    def setup_body_settings(self, layout):
+        body_group = QGroupBox("Body Settings")
+        body_layout = QGridLayout(body_group)
+
+        body_layout.addWidget(QLabel("Body Line Width:"), 0, 0)
+        self.body_line_width = QLineEdit()
+        self.body_line_width.setText("1.5")
+        self.body_line_width.textChanged.connect(self.settings_changed.emit)
+        body_layout.addWidget(self.body_line_width, 0, 1)
+
+        layout.addWidget(body_group)
+
+    def setup_courtyard_settings(self, layout):
+        courtyard_group = QGroupBox("Courtyard Settings")
+        courtyard_layout = QGridLayout(courtyard_group)
+
+        courtyard_layout.addWidget(QLabel("Courtyard Expansion:"), 0, 0)
+        self.courtyard_expansion = QLineEdit()
+        self.courtyard_expansion.setText("0.25")
+        self.courtyard_expansion.textChanged.connect(self.settings_changed.emit)
+        courtyard_layout.addWidget(self.courtyard_expansion, 0, 1)
+
+        courtyard_layout.addWidget(QLabel("Courtyard Line Width:"), 1, 0)
+        self.courtyard_line_width = QLineEdit()
+        self.courtyard_line_width.setText("0.1")
+        self.courtyard_line_width.textChanged.connect(self.settings_changed.emit)
+        courtyard_layout.addWidget(self.courtyard_line_width, 1, 1)
+
+        layout.addWidget(courtyard_group)
+
+    def setup_silkscreen_settings(self, layout):
+        silkscreen_group = QGroupBox("Silkscreen Settings")
+        silkscreen_layout = QGridLayout(silkscreen_group)
+
+        silkscreen_layout.addWidget(QLabel("Silkscreen Airgap:"), 0, 0)
+        self.silkscreen_airgap = QLineEdit()
+        self.silkscreen_airgap.setText("0.15")
+        self.silkscreen_airgap.textChanged.connect(self.settings_changed.emit)
+        silkscreen_layout.addWidget(self.silkscreen_airgap, 0, 1)
+
+        silkscreen_layout.addWidget(QLabel("Silkscreen Line Width:"), 1, 0)
+        self.silkscreen_line_width = QLineEdit()
+        self.silkscreen_line_width.setText("0.15")
+        self.silkscreen_line_width.textChanged.connect(self.settings_changed.emit)
+        silkscreen_layout.addWidget(self.silkscreen_line_width, 1, 1)
+
+        layout.addWidget(silkscreen_group)
+
+    def setup_script_settings(self, layout):
+        script_group = QGroupBox("Script Output Settings")
+        script_layout = QGridLayout(script_group)
+
+        script_layout.addWidget(QLabel("Altium Script Output Path:"), 0, 0)
+        path_layout = QHBoxLayout()
+
+        self.script_output_path = QLineEdit()
+        self.script_output_path.setPlaceholderText("Select output directory...")
+        self.script_output_path.setText(os.path.expanduser("~/Documents"))
+        path_layout.addWidget(self.script_output_path)
+
+        browse_btn = QPushButton("Browse...")
+        browse_btn.clicked.connect(self.browse_output_path)
+        browse_btn.setMaximumWidth(80)
+        path_layout.addWidget(browse_btn)
+
+        script_layout.addLayout(path_layout, 0, 1)
+        layout.addWidget(script_group)
+
+    def browse_output_path(self):
+        path = QFileDialog.getExistingDirectory(
+            self,
+            "Select Script Output Directory",
+            self.script_output_path.text()
+        )
+
+        if path:
+            self.script_output_path.setText(path)
+            self.settings_changed.emit()
+
+    def handle_login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text().strip()
+
+        if not username or not password:
+            QMessageBox.warning(self, "Login", "Please enter both username and password")
+            return
+
+        # Simple mock authentication - replace with real authentication
+        if username and password: # Accept any non-empty credentials for demo
+            self.current_user = username
+            self.user_display.setText(f"Welcome, {username}")
+            self.login_frame.setVisible(False)
+            self.logout_btn.setVisible(True)
+
+            # Clear password for security
+            self.password_input.clear()
+            QMessageBox.information(self, "Login", f"Successfully logged in as {username}")
+        else:
+            QMessageBox.warning(self, "Login", "Invalid credentials")
+
+    def handle_logout(self):
+        self.current_user = None
+        self.user_display.setText("Not logged in")
+        self.login_frame.setVisible(True)
+        self.logout_btn.setVisible(False)
+        self.username_input.clear()
+        self.password_input.clear()
+
+    def setup_styling(self):
+        self.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QLabel {
+                color: #ffffff;
+            }
+            QPushButton {
+                background-color: #4a4a4a;
+                border: 1px solid #666;
+                padding: 5px 10px;
+                border-radius: 3px;
+                color: #ffffff;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+        """)
+
+    def get_settings(self):
+        return {
+            'body_line_width': self.body_line_width.text(),
+            'courtyard_expansion': self.courtyard_expansion.text(),
+            'courtyard_line_width': self.courtyard_line_width.text(),
+            'silkscreen_airgap': self.silkscreen_airgap.text(),
+            'silkscreen_line_width': self.silkscreen_line_width.text(),
+            'script_output_path': self.script_output_path.text(),
+            'current_user': self.current_user
+        }
+
+    def set_settings(self, settings):
+        self.body_line_width.setText(str(settings.get('body_line_width', '1.5')))
+        self.courtyard_expansion.setText(str(settings.get('courtyard_expansion', '0.25')))
+        self.courtyard_line_width.setText(str(settings.get('courtyard_line_width', '0.1')))
+        self.silkscreen_airgap.setText(str(settings.get('silkscreen_airgap', '0.15')))
+        self.silkscreen_line_width.setText(str(settings.get('silkscreen_line_width', '0.15')))
+        self.script_output_path.setText(str(settings.get('script_output_path', os.path.expanduser("~/Documents"))))
+
+        user = settings.get('current_user')
+        if user:
+            self.current_user = user
+            self.user_display.setText(f"Welcome, {user}")
+            self.login_frame.setVisible(False)
+            self.logout_btn.setVisible(True)
+
+class UpdateThread(QThread):
+    update_signal = pyqtSignal(dict)
+
+    def __init__(self, main_window):
+        super().__init__()
+        self.main_window = main_window
+        self.running = True
+
+    def run(self):
+        while self.running:
+            data = self.main_window.get_footprint_data()
+            self.update_signal.emit(data)
+            self.msleep(100) # Update every 100ms
+
+    def stop(self):
+        self.running = False
+
+class FootprintDesigner(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.padstack_rows = []
+        self.custom_layer_rows = []
+        self.thermal_via_rows = []
+        self.current_save_file = None
+        self.show_airgap = False
+        self.show_pitch = False
+        self.setup_ui()
+        self.setup_dark_theme()
+        self.start_update_thread()
+
+    def setup_dark_theme(self):
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QWidget {
+                background-color: #2b2b2b;
+                color: #ffffff;
+            }
+            QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox {
+                background-color: #3c3c3c;
+                border: 1px solid #555;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QPushButton {
+                background-color: #4a4a4a;
+                border: 1px solid #666;
+                padding: 5px 10px;
+                border-radius: 3px;
+            }
+            QPushButton:hover {
+                background-color: #5a5a5a;
+            }
+            QScrollArea {
+                background-color: #2b2b2b;
+                border: none;
+            }
+            QFrame {
+                border: 1px solid #555;
+            }
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #555;
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+                background-color: #2b2b2b;
+            }
+            QToolBar {
+                background-color: #3c3c3c;
+                border: 1px solid #555;
+                spacing: 3px;
+            }
+            QToolBar::separator {
+                width: 2px;
+                background-color: #555;
+                margin: 0 5px;
+            }
+        """)
+
+    def setup_ui(self):
+        self.setWindowTitle("Footprint Designer")
+        self.setGeometry(100, 100, 1800, 900)
+
+        # Create toolbar
+        self.create_toolbar()
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        # Main splitter (3 panels: left, center, right)
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        central_widget.setLayout(QHBoxLayout())
+        central_widget.layout().addWidget(main_splitter)
+
+        # Left panel
+        left_panel = self.create_left_panel()
+        main_splitter.addWidget(left_panel)
+
+        # Center panel (renderer)
+        self.renderer = FootprintRenderer()
+        main_splitter.addWidget(self.renderer)
+        self.renderer.footprint_designer_ref = self
+
+        # Initialize renderer flags with designer state
+        self.renderer.show_airgap = self.show_airgap
+        self.renderer.show_pitch = self.show_pitch
+
+        # Right panel (settings) - initially hidden
+        self.settings_panel = SettingsPanel()
+        self.settings_panel.settings_changed.connect(self.on_settings_changed)
+        self.settings_panel.setVisible(False)
+        self.settings_panel.setMaximumWidth(350)
+        self.settings_panel.setMinimumWidth(300)
+        main_splitter.addWidget(self.settings_panel)
+
+        # Set initial splitter proportions
+        main_splitter.setSizes([800, 700, 0]) # Left, Center, Right (hidden)
+
+    def create_toolbar(self):
+        """Create toolbar with left and right aligned buttons"""
+        toolbar = QToolBar()
+        self.addToolBar(toolbar)
+
+        # Left side buttons
+        toolbar.addAction("New", self.new_footprint)
+        toolbar.addAction("Save", self.save_data)
+        toolbar.addAction("Save As", self.save_data_as)
+        toolbar.addAction("Open", self.load_data)
+        
+        toolbar.addSeparator()
+        
+        # Show Silkscreen toggle action
+        self.silkscreen_action = toolbar.addAction("Show Silkscreen", self.toggle_silkscreen)
+        self.silkscreen_action.setCheckable(True)
+        self.silkscreen_action.setChecked(True)
+        
+        toolbar.addSeparator()
+        
+        toolbar.addAction("+ Add Padstack", self.add_padstack_row)
+        toolbar.addAction("+ Custom Layer", self.add_custom_layer_row)
+        toolbar.addAction("+ Thermal Via", self.add_thermal_via_row)
+        
+        toolbar.addSeparator()
+        
+        # Dimension controls
+        self.airgap_action = toolbar.addAction("Show Air Gap Dimensions", self.toggle_airgap_dimensions)
+        self.airgap_action.setCheckable(True)
+        
+        self.pitch_action = toolbar.addAction("Show Pitch Dimensions", self.toggle_pitch_dimensions)
+        self.pitch_action.setCheckable(True)
+        
+        toolbar.addAction("Clear All Dimensions", self.clear_all_dimensions)
+        toolbar.addAction("Fit to View", self.fit_to_view)
+
+        # Add stretch to push Settings to the right
+        spacer = QWidget()
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+
+        toolbar.addWidget(spacer)
+
+        # Right side button
+        toolbar.addAction("Settings", self.toggle_settings_panel)
+
+    def toggle_silkscreen(self):
+        """Toggle silkscreen visibility"""
+        self.on_data_changed()
+
+    def toggle_airgap_dimensions(self):
+        """Toggle air gap dimensions display"""
+        self.show_airgap = self.airgap_action.isChecked()
+        # Update the renderer's state and trigger repaint
+        if hasattr(self, 'renderer'):
+            self.renderer.show_airgap = self.show_airgap
+            self.renderer.update()
+
+    def toggle_pitch_dimensions(self):
+        """Toggle pitch dimensions display"""
+        self.show_pitch = self.pitch_action.isChecked()
+        # Update the renderer's state and trigger repaint
+        if hasattr(self, 'renderer'):
+            self.renderer.show_pitch = self.show_pitch
+            self.renderer.update()
+
+    def clear_all_dimensions(self):
+        """Clear all dimension displays and selections"""
+        self.airgap_action.setChecked(False)
+        self.pitch_action.setChecked(False)
+        self.show_airgap = False
+        self.show_pitch = False
+        if hasattr(self, 'renderer'):
+            self.renderer.show_airgap = False
+            self.renderer.show_pitch = False
+            self.renderer.selected_pads.clear()
+            self.renderer.update()
+
+
+    def toggle_settings_panel(self):
+        """Toggle the visibility of settings panel"""
+        is_visible = self.settings_panel.isVisible()
+        self.settings_panel.setVisible(not is_visible)
+
+        # Adjust splitter sizes
+        if not is_visible:
+            # Show settings panel
+            self.centralWidget().layout().itemAt(0).widget().setSizes([700, 600, 300])
+        else:
+            # Hide settings panel
+            self.centralWidget().layout().itemAt(0).widget().setSizes([800, 700, 0])
+
+    def on_settings_changed(self):
+        """Handle settings changes"""
+        # Update renderer with new settings
+        self.renderer.update()
+
+    def create_left_panel(self):
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Header section
+        header_frame = QFrame()
+        header_frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        header_layout = QGridLayout(header_frame)
+
+        # Header inputs
+        header_layout.addWidget(QLabel("Part Number:"), 0, 0)
+        self.part_number = QLineEdit()
+        header_layout.addWidget(self.part_number, 0, 1)
+
+        header_layout.addWidget(QLabel("Footprint Name:"), 0, 2)
+        self.footprint_name = QLineEdit()
+        header_layout.addWidget(self.footprint_name, 0, 3)
+
+        header_layout.addWidget(QLabel("Body Length:"), 1, 0)
+        self.body_length = QLineEdit()
+        self.body_length.setText("5.0")
+        header_layout.addWidget(self.body_length, 1, 1)
+
+        header_layout.addWidget(QLabel("Body Width:"), 1, 2)
+        self.body_width = QLineEdit()
+        self.body_width.setText("3.0")
+        header_layout.addWidget(self.body_width, 1, 3)
+
+        header_layout.addWidget(QLabel("Body Height:"), 2, 0)
+        self.body_height = QLineEdit()
+        self.body_height.setText("1.0")
+        header_layout.addWidget(self.body_height, 2, 1)
+
+        # Body Shape
+        header_layout.addWidget(QLabel("Body Shape:"), 2, 2)
+        self.body_shape_combobox = QComboBox()
+        self.body_shape_combobox.addItems(["rectangle", "round"])
+        self.body_shape_combobox.setCurrentIndex(0)
+        header_layout.addWidget(self.body_shape_combobox, 2, 3)
+
+        layout.addWidget(header_frame)
+
+        # Scroll area for padstacks, custom layers, and thermal vias
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        self.container = QWidget()
+        self.container_layout = QVBoxLayout(self.container)
+        self.container_layout.addStretch()
+
+        scroll_area.setWidget(self.container)
+        layout.addWidget(scroll_area)
+
+        # Add initial padstack
+        self.add_padstack_row()
+
+        return widget
+
+    def new_footprint(self):
+        """Create a new footprint (reset all fields)"""
+        reply = QMessageBox.question(
+            self,
+            'New Footprint',
+            'Are you sure you want to create a new footprint? All current data will be lost.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            # Clear current file path
+            self.current_save_file = None
+
+            # Clear all input fields
+            self.part_number.setText('')
+            self.footprint_name.setText('')
+            self.body_length.setText('5.0')
+            self.body_width.setText('3.0')
+            self.body_height.setText('1.0')
+            self.body_shape_combobox.setCurrentIndex(0)
+            
+            # Reset silkscreen action
+            self.silkscreen_action.setChecked(True)
+
+            # Reset settings panel to defaults
+            default_settings = {
+                'body_line_width': '1.5',
+                'courtyard_expansion': '0.25',
+                'courtyard_line_width': '0.1',
+                'silkscreen_airgap': '0.15',
+                'silkscreen_line_width': '0.15',
+                'script_output_path': os.path.expanduser("~/Documents"),
+                'current_user': None
+            }
+            self.settings_panel.set_settings(default_settings)
+
+            # Clear all padstacks
+            for row in self.padstack_rows[:]:
+                self.delete_padstack_row(row)
+
+            # Clear all custom layers
+            for row in self.custom_layer_rows[:]:
+                self.delete_custom_layer_row(row)
+
+            # Clear all thermal vias
+            for row in self.thermal_via_rows[:]:
+                self.delete_thermal_via_row(row)
+
+            # Add one default padstack
+            self.add_padstack_row()
+
+    def save_data_as(self):
+        """Save footprint data with a new filename (always prompts)"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Footprint As",
+            "",
+            "LibSienna Footprint Files (*.LibSienna);;All Files (*)"
+        )
+
+        if filename:
+            # Automatically add .LibSienna extension if not present
+            if not filename.lower().endswith('.libsienna'):
+                filename += '.LibSienna'
+
+            # Update current file path
+            self.current_save_file = filename
+
+            # Save the data
+            data = self.get_footprint_data()
+            success = LibSiennaFileFormat.save_footprint(data, filename)
+
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Footprint saved successfully as {os.path.basename(filename)}!"
+                )
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save footprint file!")
+
+    def save_data(self):
+        """Save footprint data - prompts for filename only if not previously saved"""
+        if self.current_save_file is None:
+            # No file currently open, act like "Save As"
+            self.save_data_as()
+        else:
+            # File already exists, just update it
+            data = self.get_footprint_data()
+            success = LibSiennaFileFormat.save_footprint(data, self.current_save_file)
+
+            if success:
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Footprint updated successfully!\n{os.path.basename(self.current_save_file)}"
+                )
+            else:
+                QMessageBox.critical(self, "Error", "Failed to save footprint file!")
+
+    def load_data(self):
+        """Load footprint data from custom LibSienna format"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Footprint",
+            "",
+            "LibSienna Footprint Files (*.LibSienna);;All Files (*)"
+        )
+
+        if filename:
+            data = LibSiennaFileFormat.load_footprint(filename)
+            if data:
+                self.set_footprint_data(data)
+                # Set current file path so Save will work
+                self.current_save_file = filename
+
+                QMessageBox.information(
+                    self,
+                    "Success",
+                    f"Footprint loaded successfully from {os.path.basename(filename)}!"
+                )
+            else:
+                QMessageBox.critical(self, "Error", "Failed to load footprint file!")
+
+    def fit_to_view(self):
+        self.renderer.auto_fit = True
+        self.renderer.fit_to_view()
+        self.renderer.update()
+
+    def add_padstack_row(self):
+        row = PadStackRow()
+        row.delete_requested.connect(self.delete_padstack_row)
+        row.data_changed.connect(self.on_data_changed)
+        row.duplicate_btn.clicked.connect(lambda: self.duplicate_padstack_row(row))
+
+        self.padstack_rows.append(row)
+        self.container_layout.insertWidget(len(self.padstack_rows) + len(self.custom_layer_rows) + len(self.thermal_via_rows) - 1, row)
+
+        # Set pin number automatically
+        row.pin_number.setText(str(len(self.padstack_rows)))
+
+        # Update all offset_from dropdowns
+        self.update_all_offset_dropdowns()
+
+    def delete_padstack_row(self, row):
+        if len(self.padstack_rows) > 0:
+            self.padstack_rows.remove(row)
+            row.setParent(None)
+            # Update all remaining offset_from dropdowns
+            self.update_all_offset_dropdowns()
+
+    def duplicate_padstack_row(self, original_row):
+        new_row = PadStackRow()
+        new_row.delete_requested.connect(self.delete_padstack_row)
+        new_row.data_changed.connect(self.on_data_changed)
+        new_row.duplicate_btn.clicked.connect(lambda: self.duplicate_padstack_row(new_row))
+
+        # Copy data from original
+        data = original_row.get_data()
+        data['pin_number'] = str(len(self.padstack_rows) + 1)
+
+        # Add to layout FIRST so update_offset_from_options can find all rows
+        self.padstack_rows.append(new_row)
+        self.container_layout.insertWidget(len(self.padstack_rows) + len(self.custom_layer_rows) + len(self.thermal_via_rows) - 1, new_row)
+
+        # Update all dropdowns to include the new pin numbers
+        self.update_all_offset_dropdowns()
+
+        # NOW set the data - the dropdown will have the correct options
+        new_row.set_data(data)
+
+    def add_custom_layer_row(self):
+        row = CustomLayerRow()
+        row.delete_requested.connect(self.delete_custom_layer_row)
+        row.data_changed.connect(self.on_data_changed)
+        row.duplicate_btn.clicked.connect(lambda: self.duplicate_custom_layer_row(row))
+
+        self.custom_layer_rows.append(row)
+        self.container_layout.insertWidget(len(self.padstack_rows) + len(self.custom_layer_rows) + len(self.thermal_via_rows) - 1, row)
+
+        # Update all offset_from dropdowns
+        self.update_all_offset_dropdowns()
+
+    def delete_custom_layer_row(self, row):
+        if row in self.custom_layer_rows:
+            self.custom_layer_rows.remove(row)
+            row.setParent(None)
+            self.update_all_offset_dropdowns()
+
+    def duplicate_custom_layer_row(self, original_row):
+        new_row = CustomLayerRow()
+        new_row.delete_requested.connect(self.delete_custom_layer_row)
+        new_row.data_changed.connect(self.on_data_changed)
+        new_row.duplicate_btn.clicked.connect(lambda: self.duplicate_custom_layer_row(new_row))
+
+        # Copy data from original
+        data = original_row.get_data()
+
+        # Add to layout
+        self.custom_layer_rows.append(new_row)
+        self.container_layout.insertWidget(len(self.padstack_rows) + len(self.custom_layer_rows) + len(self.thermal_via_rows) - 1, new_row)
+
+        # Update dropdowns and set data
+        self.update_all_offset_dropdowns()
+        new_row.set_data(data)
+
+    def add_thermal_via_row(self):
+        row = ThermalViaRow()
+        row.delete_requested.connect(self.delete_thermal_via_row)
+        row.data_changed.connect(self.on_data_changed)
+        row.duplicate_btn.clicked.connect(lambda: self.duplicate_thermal_via_row(row))
+
+        self.thermal_via_rows.append(row)
+        self.container_layout.insertWidget(len(self.padstack_rows) + len(self.custom_layer_rows) + len(self.thermal_via_rows) - 1, row)
+
+        # Update all offset_from dropdowns
+        self.update_all_offset_dropdowns()
+
+    def delete_thermal_via_row(self, row):
+        if row in self.thermal_via_rows:
+            self.thermal_via_rows.remove(row)
+            row.setParent(None)
+            self.update_all_offset_dropdowns()
+
+    def duplicate_thermal_via_row(self, original_row):
+        new_row = ThermalViaRow()
+        new_row.delete_requested.connect(self.delete_thermal_via_row)
+        new_row.data_changed.connect(self.on_data_changed)
+        new_row.duplicate_btn.clicked.connect(lambda: self.duplicate_thermal_via_row(new_row))
+
+        # Copy data from original
+        data = original_row.get_data()
+
+        # Add to layout
+        self.thermal_via_rows.append(new_row)
+        self.container_layout.insertWidget(len(self.padstack_rows) + len(self.custom_layer_rows) + len(self.thermal_via_rows) - 1, new_row)
+
+        # Update dropdowns and set data
+        self.update_all_offset_dropdowns()
+        new_row.set_data(data)
+
+    def update_all_offset_dropdowns(self):
+        """Update all offset_from dropdowns when pads are added/removed"""
+        # Collect all available pin numbers
+        available_pins = []
+        for row in self.padstack_rows:
+            pin_text = row.pin_number.text().strip()
+            if pin_text:
+                available_pins.append(pin_text)
+
+        # Update padstack dropdowns
+        for row in self.padstack_rows:
+            row.update_offset_from_options()
+
+        # Update custom layer dropdowns
+        for row in self.custom_layer_rows:
+            current_selection = row.offset_from.currentText()
+            row.offset_from.blockSignals(True)
+            row.offset_from.clear()
+            row.offset_from.addItem('origin')
+            row.offset_from.addItems(available_pins)
+            
+            # Restore previous selection if still valid
+            index = row.offset_from.findText(current_selection)
+            if index >= 0:
+                row.offset_from.setCurrentIndex(index)
+            else:
+                row.offset_from.setCurrentText('origin')
+            
+            row.offset_from.blockSignals(False)
+
+        # Update thermal via dropdowns
+        for row in self.thermal_via_rows:
+            current_selection = row.offset_from.currentText()
+            row.offset_from.blockSignals(True)
+            row.offset_from.clear()
+            row.offset_from.addItem('origin')
+            row.offset_from.addItems(available_pins)
+            
+            # Restore previous selection if still valid
+            index = row.offset_from.findText(current_selection)
+            if index >= 0:
+                row.offset_from.setCurrentIndex(index)
+            else:
+                row.offset_from.setCurrentText('origin')
+            
+            row.offset_from.blockSignals(False)
+
+    def on_data_changed(self):
+        # This will be handled by the update thread
+        pass
+
+    def get_footprint_data(self):
+        settings = self.settings_panel.get_settings()
+
+        data = {
+            'part_number': self.part_number.text(),
+            'footprint_name': self.footprint_name.text(),
+            'body_length': self.body_length.text(),
+            'body_width': self.body_width.text(),
+            'body_height': self.body_height.text(),
+            'body_shape': self.body_shape_combobox.currentText(),
+            'courtyard_expansion': settings['courtyard_expansion'],
+            'silkscreen_airgap': settings['silkscreen_airgap'],
+            'silkscreen_enabled': self.silkscreen_action.isChecked(),
+            'padstacks': [row.get_data() for row in self.padstack_rows],
+            'custom_layers': [row.get_data() for row in self.custom_layer_rows],
+            'thermal_vias': [row.get_data() for row in self.thermal_via_rows],
+            # Add new settings
+            'body_line_width': settings['body_line_width'],
+            'courtyard_line_width': settings['courtyard_line_width'],
+            'silkscreen_line_width': settings['silkscreen_line_width'],
+            'script_output_path': settings['script_output_path']
+        }
+
+        return data
+
+    def set_footprint_data(self, data):
+        self.part_number.setText(data.get('part_number', ''))
+        self.footprint_name.setText(data.get('footprint_name', ''))
+        self.body_length.setText(str(data.get('body_length', '5.0')))
+        self.body_width.setText(str(data.get('body_width', '3.0')))
+        self.body_height.setText(str(data.get('body_height', '1.0')))
+        self.body_shape_combobox.setCurrentText(data.get('body_shape', 'rectangle'))
+        self.silkscreen_action.setChecked(data.get('silkscreen_enabled', True))
+
+        # Update settings panel
+        settings = {
+            'body_line_width': data.get('body_line_width', '1.5'),
+            'courtyard_expansion': data.get('courtyard_expansion', '0.25'),
+            'courtyard_line_width': data.get('courtyard_line_width', '0.1'),
+            'silkscreen_airgap': data.get('silkscreen_airgap', '0.15'),
+            'silkscreen_line_width': data.get('silkscreen_line_width', '0.15'),
+            'script_output_path': data.get('script_output_path', os.path.expanduser("~/Documents")),
+            'current_user': data.get('current_user', None)
+        }
+        self.settings_panel.set_settings(settings)
+
+        # Clear existing rows
+        for row in self.padstack_rows[:]:
+            self.delete_padstack_row(row)
+        for row in self.custom_layer_rows[:]:
+            self.delete_custom_layer_row(row)
+        for row in self.thermal_via_rows[:]:
+            self.delete_thermal_via_row(row)
+
+        # Add padstacks from data
+        for pad_data in data.get('padstacks', []):
+            self.add_padstack_row()
+            self.padstack_rows[-1].set_data(pad_data)
+
+        # Add custom layers from data
+        for layer_data in data.get('custom_layers', []):
+            self.add_custom_layer_row()
+            self.custom_layer_rows[-1].set_data(layer_data)
+
+        # Add thermal vias from data
+        for via_data in data.get('thermal_vias', []):
+            self.add_thermal_via_row()
+            self.thermal_via_rows[-1].set_data(via_data)
+
+    def generate_footprint_script(self):
+        """Generate footprint script from current data and save to a text file"""
+        data = self.get_footprint_data()
+        settings = self.settings_panel.get_settings()
+
+        lines = []
+
+        # Scale factor for unit conversion (mm to mils)
+        SCALE = 39.37
+
+        # Footprint name
+        footprint_name = data.get('footprint_name', 'Unnamed')
+        lines.append(f"StartFootprints\n\nFootprint (Name \"{footprint_name}\"),")
+
+        # Body dimensions
+        try:
+            body_length = float(data.get('body_length', 0))
+            body_width = float(data.get('body_width', 0))
+        except (ValueError, TypeError):
+            body_length = body_width = 0
+
+        half_length = body_length / 2
+        half_width = body_width / 2
+
+        # Define corners of body rectangle
+        bl = (-half_length, -half_width)
+        tl = (-half_length, half_width)
+        tr = (half_length, half_width)
+        br = (half_length, -half_width)
+
+        # Body shape generation
+        body_shape = data.get('body_shape', 'rectangle')
+        if body_shape == 'rectangle':
+            lines.append(f"Line (Width 1.7) (Start {tl[0]*SCALE:.2f}, {tl[1]*SCALE:.2f}) (End {tr*SCALE:.2f}, {tr[1]*SCALE:.2f}) (Layer Mechanical13)")
+            lines.append(f"Line (Width 1.7) (Start {bl*SCALE:.2f}, {bl[1]*SCALE:.2f}) (End {tl*SCALE:.2f}, {tl[1]*SCALE:.2f}) (Layer Mechanical13)")
+            lines.append(f"Line (Width 1.7) (Start {tr*SCALE:.2f}, {tr[1]*SCALE:.2f}) (End {br*SCALE:.2f}, {br[1]*SCALE:.2f}) (Layer Mechanical13)")
+            lines.append(f"Line (Width 1.7) (Start {br*SCALE:.2f}, {br[1]*SCALE:.2f}) (End {bl*SCALE:.2f}, {bl[1]*SCALE:.2f}) (Layer Mechanical13)")
+        else:
+            radius = max(half_length, half_width)
+            lines.append(f"Line (Width 1.7) (Center (0, 0)) (Radius {radius*SCALE:.2f}) (Layer Mechanical13)")
+
+        # Generate pads
+        pads = data.get('padstacks', [])
+        resolver = PadPositionResolver(pads)
+
+        for pad in pads:
+            pad_type = pad.get('type', 'square')
+            name = pad.get('pin_number', '1')
+            abs_x, abs_y = resolver.get_absolute_position(pad)
+            rotation = 0
+            
+            try:
+                expand_mask = float(pad.get('mask_expansion', 0))
+                expand_paste = float(pad.get('paste_expansion', 0))
+            except (ValueError, TypeError):
+                expand_mask = expand_paste = 0
+
+            surface = 'True' if pad_type not in ['PTH', 'NPTH', 'PTH_oblong', 'NPTH_oblong', 'PTH_rectangle'] else 'False'
+
+            if pad_type == 'square':
+                try:
+                    size = float(pad.get('size', 1))
+                except (ValueError, TypeError):
+                    size = 1
+                lines.append(f"Pad (Name \"{name}\") (Location {abs_x*SCALE:.2f}, {abs_y*SCALE:.2f}) (Surface {surface}) (Rotation {rotation}) (ExpandMask {expand_mask*SCALE:.2f}) (ExpandPaste {expand_paste*SCALE:.2f})")
+                lines.append(f"PadShape (Size {size*SCALE:.2f}, {size*SCALE:.2f}) (Shape Rectangular) (Layer Top)")
+                lines.append("EndPad")
+
+            elif pad_type in ['rectangle', 'SMD-oblong', 'PTH_rectangle']:
+                try:
+                    length = float(pad.get('length', 1))
+                    width = float(pad.get('width', 1))
+                except (ValueError, TypeError):
+                    length = width = 1
+                lines.append(f"Pad (Name \"{name}\") (Location {abs_x*SCALE:.2f}, {abs_y*SCALE:.2f}) (Surface {surface}) (Rotation {rotation}) (ExpandMask {expand_mask*SCALE:.2f}) (ExpandPaste {expand_paste*SCALE:.2f})")
+                lines.append(f"PadShape (Size {length*SCALE:.2f}, {width*SCALE:.2f}) (Shape Rectangular) (Layer Top)")
+                lines.append("EndPad")
+
+            elif pad_type == 'rounded_rectangle':
+                try:
+                    length = float(pad.get('length', 1))
+                    width = float(pad.get('width', 1))
+                except (ValueError, TypeError):
+                    length = width = 1
+                lines.append(f"Pad (Name \"{name}\") (Location {abs_x*SCALE:.2f}, {abs_y*SCALE:.2f}) (Surface {surface}) (Rotation {rotation}) (ExpandMask {expand_mask*SCALE:.2f}) (ExpandPaste {expand_paste*SCALE:.2f})")
+                lines.append(f"PadShape (Size {length*SCALE:.2f}, {width*SCALE:.2f}) (Shape RoundedRectangular) (Layer Top)")
+                lines.append("EndPad")
+
+            elif pad_type in ['round', 'D-shape']:
+                try:
+                    diameter = float(pad.get('diameter', 1))
+                except (ValueError, TypeError):
+                    diameter = 1
+                lines.append(f"Pad (Name \"{name}\") (Location {abs_x*SCALE:.2f}, {abs_y*SCALE:.2f}) (Surface {surface}) (Rotation {rotation}) (ExpandMask {expand_mask*SCALE:.2f}) (ExpandPaste {expand_paste*SCALE:.2f})")
+                lines.append(f"PadShape (Size {diameter*SCALE:.2f}, {diameter*SCALE:.2f}) (Shape Rounded) (Layer Top)")
+                lines.append("EndPad")
+
+            elif pad_type in ['PTH', 'NPTH']:
+                try:
+                    hole_diameter = float(pad.get('hole_diameter', 0.8))
+                except (ValueError, TypeError):
+                    hole_diameter = 0.8
+                lines.append(f"Pad (Name \"{name}\") (Location {abs_x*SCALE:.2f}, {abs_y*SCALE:.2f}) (Slotted False) (HoleSize {hole_diameter*SCALE:.2f}) (Surface {surface}) (Rotation {rotation}) (ExpandMask {expand_mask*SCALE:.2f}) (ExpandPaste {expand_paste*SCALE:.2f})")
+                
+                if pad_type == 'PTH':
+                    try:
+                        pad_diameter = float(pad.get('pad_diameter', 1.2))
+                    except (ValueError, TypeError):
+                        pad_diameter = 1.2
+                    lines.append(f"PadShape (Size {pad_diameter*SCALE:.2f}, {pad_diameter*SCALE:.2f}) (Shape Rounded) (Layer Top)")
+                    lines.append(f"PadShape (Size {pad_diameter*SCALE:.2f}, {pad_diameter*SCALE:.2f}) (Shape Rounded) (Layer Bottom)")
+                lines.append("EndPad")
+
+            elif pad_type in ['PTH_oblong', 'NPTH_oblong']:
+                try:
+                    hole_length = float(pad.get('hole_length', 1.5))
+                    hole_width = float(pad.get('hole_width', 0.8))
+                except (ValueError, TypeError):
+                    hole_length, hole_width = 1.5, 0.8
+                lines.append(f"Pad (Name \"{name}\") (Location {abs_x*SCALE:.2f}, {abs_y*SCALE:.2f}) (Slotted True) (SlotWidth {hole_width*SCALE:.2f}) (SlotHeight {hole_length*SCALE:.2f}) (Surface {surface}) (Rotation {rotation}) (ExpandMask {expand_mask*SCALE:.2f}) (ExpandPaste {expand_paste*SCALE:.2f})")
+                
+                if pad_type == 'PTH_oblong':
+                    try:
+                        pad_length = float(pad.get('pad_length', 2.0))
+                        pad_width = float(pad.get('pad_width', 1.2))
+                    except (ValueError, TypeError):
+                        pad_length, pad_width = 2.0, 1.2
+                    lines.append(f"PadShape (Size {pad_length*SCALE:.2f}, {pad_width*SCALE:.2f}) (Shape Rounded) (Layer Top)")
+                    lines.append(f"PadShape (Size {pad_length*SCALE:.2f}, {pad_width*SCALE:.2f}) (Shape Rounded) (Layer Bottom)")
+                lines.append("EndPad")
+
+        lines.append("EndFootprint\nEndFootprints")
+
+        # Join lines and save
+        script = '\n'.join(lines)
+        output_path = settings.get('script_output_path', os.path.expanduser("~/Documents"))
+        footprint_name = data.get('footprint_name', 'Unnamed')
+        file_name = os.path.join(output_path, f"{footprint_name}_footprint.txt")
+
+        try:
+            with open(file_name, "w") as f:
+                f.write(script)
+
+            # Show dialog
+            dialog = QMessageBox(self)
+            dialog.setWindowTitle("Generated Footprint Script")
+            dialog.setText(f"Generated script saved to:\n{file_name}")
+            dialog.setDetailedText(script)
+            dialog.setIcon(QMessageBox.Icon.Information)
+            dialog.exec()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save script file:\n{str(e)}")
+
+    def start_update_thread(self):
+        self.update_thread = UpdateThread(self)
+        self.update_thread.update_signal.connect(self.renderer.update_footprint)
+        self.update_thread.start()
+
+    def closeEvent(self, event):
+        if hasattr(self, 'update_thread'):
+            self.update_thread.stop()
+            self.update_thread.wait()
+        event.accept()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+
+    # Set application-wide dark theme
+    app.setStyle('Fusion')
+    palette = QPalette()
+    palette.setColor(QPalette.ColorRole.Window, QColor(43, 43, 43))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Base, QColor(60, 60, 60))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(80, 80, 80))
+    palette.setColor(QPalette.ColorRole.ToolTipBase, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.ToolTipText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Text, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.Button, QColor(74, 74, 74))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(255, 255, 255))
+    palette.setColor(QPalette.ColorRole.BrightText, QColor(255, 0, 0))
+    palette.setColor(QPalette.ColorRole.Link, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(42, 130, 218))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(0, 0, 0))
+    app.setPalette(palette)
+
+    window = FootprintDesigner()
+    window.show()
+
+    sys.exit(app.exec())
