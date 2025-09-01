@@ -1,1 +1,1364 @@
 
+import sys
+import sqlite3
+import requests
+from bs4 import BeautifulSoup
+import pandas as pd
+import re
+import time
+from datetime import datetime
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
+                             QWidget, QToolBar, QPushButton, QTableWidget, QTableWidgetItem,
+                             QComboBox, QLineEdit, QLabel, QTextEdit, QFileDialog,
+                             QMessageBox, QTabWidget, QSpinBox, QDoubleSpinBox,
+                             QProgressBar, QSplitter, QHeaderView)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QAction, QIcon, QColor, QFont
+import json
+import urllib.parse
+
+class FindChipScraper:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+
+    def search_mpn(self, mpn):
+        """Search for MPN on findchips.com and return pricing data"""
+        try:
+            search_url = f"https://www.findchips.com/search/{urllib.parse.quote(mpn)}"
+            response = self.session.get(search_url, timeout=10)
+            
+            if response.status_code != 200:
+                return None
+
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Look for table rows with data attributes
+            distributor_rows = soup.find_all('tr', class_='row')
+            
+            distributors = []
+            
+            for row in distributor_rows:
+                try:
+                    distributor_data = self.parse_distributor_row(row)
+                    if distributor_data:
+                        distributors.append(distributor_data)
+                except Exception as e:
+                    continue
+            
+            return distributors
+            
+        except Exception as e:
+            print(f"Error scraping {mpn}: {str(e)}")
+            return None
+
+    def parse_distributor_row(self, row):
+        """Parse distributor data from a table row with data attributes"""
+        try:
+            # Extract data from attributes
+            distributor_name = row.get('data-distributor_name', 'Unknown')
+            manufacturer = row.get('data-mfr', 'Unknown')
+            mpn = row.get('data-mfrpartnumber', '')
+            stock_raw = row.get('data-instock', '0')
+            price_data_raw = row.get('data-price', '[]')
+            
+            # Parse stock information
+            try:
+                stock = int(stock_raw) if stock_raw.isdigit() else 0
+            except (ValueError, AttributeError):
+                stock = 0
+            
+            # Parse price tiers
+            price_tiers = self.parse_price_data(price_data_raw)
+            
+            if not price_tiers:
+                return None
+                
+            return {
+                'distributor': distributor_name,
+                'manufacturer': manufacturer,
+                'mpn': mpn,
+                'price_tiers': price_tiers,
+                'stock': stock,
+                'currency': 'USD'
+            }
+            
+        except Exception as e:
+            return None
+
+    def parse_price_data(self, price_data_raw):
+        """Parse price data from JSON string in data-price attribute"""
+        import json
+        
+        price_tiers = []
+        try:
+            # The price data is in format: [[qty, "USD", "price"], ...]
+            price_list = json.loads(price_data_raw)
+            
+            for tier in price_list:
+                if len(tier) >= 3:
+                    qty = int(tier[0])
+                    currency = tier[1]
+                    price = float(tier[2])
+                    
+                    price_tiers.append({
+                        'quantity': qty,
+                        'price': price
+                    })
+                    
+        except (json.JSONDecodeError, ValueError, IndexError) as e:
+            return []
+        
+        # Sort by quantity (ascending)
+        return sorted(price_tiers, key=lambda x: x['quantity'])
+
+    def extract_distributor_name(self, element):
+        """Extract distributor name from table element"""
+        # More comprehensive selectors
+        selectors = [
+            '.distributor-name', '.vendor-name', 'td.distributor',
+            '[data-distributor]', '.supplier-name', '.dist-name',
+            'td:first-child', '.company-name'
+        ]
+        
+        for selector in selectors:
+            name_elem = element.select_one(selector)
+            if name_elem:
+                name = name_elem.get_text().strip()
+                if name and len(name) > 2:  # Valid distributor name
+                    return name
+        
+        # Enhanced fallback search
+        text = element.get_text()
+        distributors = ['Digikey', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'RS Components', 
+                      'Future Electronics', 'Element14', 'TME', 'Farnell']
+        for dist in distributors:
+            if dist.lower() in text.lower():
+                return dist
+        
+        return "Unknown"
+
+    def extract_manufacturer(self, element):
+        """Extract manufacturer from table element"""
+        selectors = ['.manufacturer', '.mfg', 'td.manufacturer', '[data-manufacturer]']
+        for selector in selectors:
+            mfg_elem = element.select_one(selector)
+            if mfg_elem:
+                return mfg_elem.get_text().strip()
+        return "Unknown"
+
+    def extract_stock_info(self, element):
+        """Extract stock information from distributor page"""
+        stock_selectors = [
+            '.stock-quantity', '.availability', '.in-stock',
+            '[data-stock]', '.qty-available', '.inventory',
+            '.stock', '.qty-in-stock', '.available-qty'
+        ]
+        
+        for selector in stock_selectors:
+            stock_elem = element.select_one(selector)
+            if stock_elem:
+                stock_text = stock_elem.get_text().strip()
+                # Look for various stock patterns
+                patterns = [
+                    r'(\d+)\s*in\s*stock',
+                    r'(\d+)\s*available',
+                    r'stock:\s*(\d+)',
+                    r'qty:\s*(\d+)',
+                    r'(\d+)\s*pcs?',
+                    r'(\d+)(?:\s*units?)?'
+                ]
+                
+                for pattern in patterns:
+                    stock_match = re.search(pattern, stock_text.lower())
+                    if stock_match:
+                        return int(stock_match.group(1))
+        
+        return 0  # Default to 0 if no stock info found
+
+    def extract_price_tiers(self, element):
+        """Extract price tiers from table element"""
+        price_tiers = []
+        
+        # Look for price rows
+        price_rows = element.find_all('tr') or element.find_all('div', {'class': 'price-row'})
+        
+        for row in price_rows:
+            try:
+                # Extract quantity and price
+                qty_text = ""
+                price_text = ""
+                
+                cells = row.find_all(['td', 'span', 'div'])
+                for cell in cells:
+                    text = cell.get_text().strip()
+                    # Check if it's a quantity (contains numbers and +)
+                    if re.search(r'\d+\+?', text) and not re.search(r'[\$\â‚¬\Â£]', text):
+                        qty_text = text
+                    # Check if it's a price (contains currency symbols)
+                    elif re.search(r'[\$\â‚¬\Â£]\d+\.?\d*', text):
+                        price_text = text
+                
+                if qty_text and price_text:
+                    qty = self.parse_quantity(qty_text)
+                    price = self.parse_price(price_text)
+                    if qty is not None and price is not None:
+                        price_tiers.append({'quantity': qty, 'price': price})
+                        
+            except Exception:
+                continue
+        
+        return sorted(price_tiers, key=lambda x: x['quantity'])
+
+    def parse_quantity(self, qty_text):
+        """Parse quantity from text"""
+        try:
+            # Remove non-numeric characters except for numbers
+            qty_str = re.sub(r'[^\d]', '', qty_text)
+            return int(qty_str) if qty_str else None
+        except:
+            return None
+
+    def parse_price(self, price_text):
+        """Parse price from text"""
+        try:
+            # Extract numeric value from price text
+            price_match = re.search(r'[\d\.]+', price_text.replace(',', ''))
+            return float(price_match.group()) if price_match else None
+        except:
+            return None
+
+class ScrapingWorker(QThread):
+    progress_updated = pyqtSignal(int)
+    log_updated = pyqtSignal(str)
+    data_scraped = pyqtSignal(str, list)  # mpn, distributors
+    finished_scraping = pyqtSignal()
+
+    def __init__(self, mpn_list):
+        super().__init__()
+        self.mpn_list = mpn_list
+        self.scraper = FindChipScraper()
+
+    def run(self):
+        total = len(self.mpn_list)
+        for i, mpn in enumerate(self.mpn_list):
+            try:
+                self.log_updated.emit(f"Scraping MPN: {mpn}")
+                distributors = self.scraper.search_mpn(mpn)
+                if distributors:
+                    self.data_scraped.emit(mpn, distributors)
+                    self.log_updated.emit(f"Found {len(distributors)} distributors for {mpn}")
+                else:
+                    self.log_updated.emit(f"No data found for {mpn}")
+                    
+                self.progress_updated.emit(int((i + 1) / total * 100))
+                time.sleep(1)  # Rate limiting
+                
+            except Exception as e:
+                self.log_updated.emit(f"Error scraping {mpn}: {str(e)}")
+        
+        self.finished_scraping.emit()
+
+class DatabaseManager:
+    def __init__(self, db_path="bom_data.db"):
+        self.db_path = db_path
+        self.init_database()
+        self.migrate_database()
+
+    def init_database(self):
+        """Initialize the database tables"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        CREATE TABLE IF NOT EXISTS component_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mpn TEXT NOT NULL,
+            distributor TEXT,
+            manufacturer TEXT,
+            price_tiers TEXT,  -- Store as JSON string
+            stock INTEGER DEFAULT 0,
+            currency TEXT DEFAULT 'USD',
+            scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(mpn, distributor)
+        )
+        ''')
+        conn.commit()
+        conn.close()
+
+    def migrate_database(self):
+        """Migrate old database format to new format"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Check if we need to migrate
+        cursor.execute("PRAGMA table_info(component_data)")
+        columns = [column[1] for column in cursor.fetchall()]
+        
+        if 'price_tiers' not in columns and 'quantity' in columns:
+            # Old format - need to migrate
+            print("Migrating database to new format...")
+            
+            # Create new table
+            cursor.execute('''
+            CREATE TABLE component_data_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                mpn TEXT NOT NULL,
+                distributor TEXT,
+                manufacturer TEXT,
+                price_tiers TEXT,
+                stock INTEGER DEFAULT 0,
+                currency TEXT DEFAULT 'USD',
+                scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(mpn, distributor)
+            )
+            ''')
+            
+            # Migrate data
+            cursor.execute('''
+            SELECT mpn, distributor, manufacturer, quantity, price, stock, currency
+            FROM component_data
+            ORDER BY mpn, distributor, quantity
+            ''')
+            
+            old_data = cursor.fetchall()
+            
+            # Group by mpn+distributor
+            grouped_data = {}
+            for mpn, dist, mfg, qty, price, stock, currency in old_data:
+                key = (mpn, dist)
+                if key not in grouped_data:
+                    grouped_data[key] = {
+                        'mpn': mpn,
+                        'distributor': dist,
+                        'manufacturer': mfg,
+                        'stock': stock or 0,
+                        'currency': currency,
+                        'price_tiers': []
+                    }
+                grouped_data[key]['price_tiers'].append({'quantity': qty, 'price': price})
+            
+            # Insert merged data
+            for key, data in grouped_data.items():
+                price_tiers_json = json.dumps(data['price_tiers'])
+                cursor.execute('''
+                INSERT INTO component_data_new
+                (mpn, distributor, manufacturer, price_tiers, stock, currency)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ''', (data['mpn'], data['distributor'], data['manufacturer'], 
+                      price_tiers_json, data['stock'], data['currency']))
+            
+            # Replace old table
+            cursor.execute('DROP TABLE component_data')
+            cursor.execute('ALTER TABLE component_data_new RENAME TO component_data')
+            
+            print("Database migration completed")
+        
+        conn.commit()
+        conn.close()
+
+    def save_component_data(self, mpn, distributors):
+        """Save component data to database"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        for dist_data in distributors:
+            distributor = dist_data['distributor']
+            manufacturer = dist_data['manufacturer']
+            currency = dist_data['currency']
+            stock = dist_data.get('stock', 0)
+            price_tiers = dist_data['price_tiers']
+            
+            # Check if this distributor+MPN combination already exists
+            cursor.execute('''
+            SELECT price_tiers FROM component_data 
+            WHERE mpn = ? AND distributor = ?
+            ''', (mpn, distributor))
+            
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Merge with existing price tiers
+                existing_tiers = json.loads(existing[0])
+                
+                # Create a dictionary for easy merging
+                tier_dict = {tier['quantity']: tier for tier in existing_tiers}
+                
+                # Add new tiers or update existing ones
+                for tier in price_tiers:
+                    tier_dict[tier['quantity']] = tier
+                
+                # Convert back to list and sort
+                merged_tiers = sorted(tier_dict.values(), key=lambda x: x['quantity'])
+                price_tiers_json = json.dumps(merged_tiers)
+            else:
+                # No existing data, use new tiers
+                price_tiers_json = json.dumps(price_tiers)
+            
+            cursor.execute('''
+            INSERT OR REPLACE INTO component_data
+            (mpn, distributor, manufacturer, price_tiers, stock, currency)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ''', (mpn, distributor, manufacturer, price_tiers_json, stock, currency))
+        
+        conn.commit()
+        conn.close()
+
+    def get_component_data(self, mpn):
+        """Get component data from database"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT distributor, manufacturer, price_tiers, stock, currency
+        FROM component_data
+        WHERE mpn = ?
+        ORDER BY distributor
+        ''', (mpn,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        # Parse JSON price tiers and flatten the data
+        flattened_results = []
+        for dist, mfg, price_tiers_json, stock, currency in results:
+            try:
+                price_tiers = json.loads(price_tiers_json)
+                for tier in price_tiers:
+                    flattened_results.append((
+                        dist, mfg, tier['quantity'], tier['price'], currency, stock
+                    ))
+            except json.JSONDecodeError:
+                continue
+        
+        return flattened_results
+
+    def get_component_details_by_mpn(self, mpn):
+        """Get detailed component data by MPN for Component Details tab"""
+        import json
+        
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+        SELECT distributor, manufacturer, price_tiers, stock, currency
+        FROM component_data
+        WHERE mpn = ?
+        ORDER BY distributor
+        ''', (mpn,))
+        
+        results = cursor.fetchall()
+        conn.close()
+        
+        # Return structured data with all tiers per distributor
+        component_details = []
+        for dist, mfg, price_tiers_json, stock, currency in results:
+            try:
+                price_tiers = json.loads(price_tiers_json)
+                component_details.append({
+                    'distributor': dist,
+                    'manufacturer': mfg,
+                    'stock': stock,
+                    'currency': currency,
+                    'price_tiers': price_tiers
+                })
+            except json.JSONDecodeError:
+                continue
+        
+        return component_details
+
+class BOMAnalyzer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("BOM Web Scraper & Analyzer")
+        self.setGeometry(100, 100, 1400, 800)
+        
+        # Initialize components
+        self.db_manager = DatabaseManager()
+        self.bom_data = None
+        self.scraped_data = {}
+        
+        # Exchange rates (default values)
+        self.exchange_rates = {"USD": 1.0, "INR": 82.5}
+        
+        self.setup_ui()
+        self.setup_connections()
+
+    def setup_ui(self):
+        """Setup the user interface"""
+        # Create central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        # Create toolbar
+        self.create_toolbar()
+        
+        # Create main layout
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Create top controls
+        controls_layout = self.create_controls()
+        main_layout.addLayout(controls_layout)
+        
+        # Create progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        main_layout.addWidget(self.progress_bar)
+        
+        # Create splitter for main content
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        
+        # Create tab widget for data display
+        self.tab_widget = QTabWidget()
+        
+        # BOM Result View
+        self.result_table = QTableWidget()
+        self.tab_widget.addTab(self.result_table, "BOM Results")
+        
+        # Detail View
+        self.detail_table = QTableWidget()
+        self.tab_widget.addTab(self.detail_table, "Component Details")
+        
+        splitter.addWidget(self.tab_widget)
+        
+        # Create log area
+        self.log_text = QTextEdit()
+        self.log_text.setMaximumHeight(150)
+        self.log_text.setReadOnly(True)
+        splitter.addWidget(self.log_text)
+        
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
+        
+        main_layout.addWidget(splitter)
+
+    def create_toolbar(self):
+        """Create the application toolbar"""
+        toolbar = QToolBar()
+        self.addToolBar(toolbar)
+        
+        # Upload BOM action
+        upload_action = QAction("Upload BOM", self)
+        upload_action.triggered.connect(self.upload_bom)
+        toolbar.addAction(upload_action)
+        
+        toolbar.addSeparator()
+        
+        # Fetch Data action
+        fetch_action = QAction("Fetch Data", self)
+        fetch_action.triggered.connect(self.fetch_data)
+        toolbar.addAction(fetch_action)
+        
+        toolbar.addSeparator()
+        
+        # Export to Excel action
+        export_action = QAction("Export to Excel", self)
+        export_action.triggered.connect(self.export_to_excel)
+        toolbar.addAction(export_action)
+
+    def create_controls(self):
+        """Create control widgets"""
+        layout = QHBoxLayout()
+        
+        # Column selection
+        layout.addWidget(QLabel("MPN Column:"))
+        self.mpn_column_combo = QComboBox()
+        layout.addWidget(self.mpn_column_combo)
+        
+        layout.addWidget(QLabel("QTY Column:"))
+        self.qty_column_combo = QComboBox()
+        layout.addWidget(self.qty_column_combo)
+        
+        # PCB Quantity
+        layout.addWidget(QLabel("PCB Qty:"))
+        self.pcb_qty_input = QSpinBox()
+        self.pcb_qty_input.setMinimum(1)
+        self.pcb_qty_input.setMaximum(1000000)
+        self.pcb_qty_input.setValue(1)
+        layout.addWidget(self.pcb_qty_input)
+        
+        # Currency selection
+        layout.addWidget(QLabel("Currency:"))
+        self.currency_combo = QComboBox()
+        self.currency_combo.addItems(["USD", "INR"])
+        layout.addWidget(self.currency_combo)
+        
+        # Exchange rate
+        layout.addWidget(QLabel("Exchange Rate (USD to INR):"))
+        self.exchange_rate_input = QDoubleSpinBox()
+        self.exchange_rate_input.setMinimum(0.01)
+        self.exchange_rate_input.setMaximum(1000.0)
+        self.exchange_rate_input.setValue(87)
+        self.exchange_rate_input.setDecimals(2)
+        layout.addWidget(self.exchange_rate_input)
+        
+        layout.addStretch()
+        
+        return layout
+
+    def setup_connections(self):
+        """Setup signal connections"""
+        self.currency_combo.currentTextChanged.connect(self.update_exchange_rate)
+        self.currency_combo.currentTextChanged.connect(self.on_currency_changed)
+        self.exchange_rate_input.valueChanged.connect(self.update_exchange_rates)
+        self.exchange_rate_input.valueChanged.connect(self.on_exchange_rate_changed)
+        self.pcb_qty_input.valueChanged.connect(self.recalculate_results)
+
+    def on_currency_changed(self, currency):
+        """Handle currency change"""
+        if self.bom_data is not None and len(self.scraped_data) > 0:
+            self.log_message(f"Currency changed to {currency}, recalculating results...")
+            self.calculate_bom_results()
+
+    def on_exchange_rate_changed(self, rate):
+        """Handle exchange rate change"""
+        if self.bom_data is not None and len(self.scraped_data) > 0:
+            self.log_message(f"Exchange rate updated to {rate}, recalculating results...")
+            self.calculate_bom_results()
+
+    def log_message(self, message):
+        """Add message to log"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_text.append(f"[{timestamp}] {message}")
+
+    def upload_bom(self):
+        """Upload and process BOM file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Open BOM File", "", "Excel files (*.xlsx *.xls)"
+        )
+        
+        if file_path:
+            try:
+                # Read Excel file
+                self.bom_data = pd.read_excel(file_path)
+                self.log_message(f"BOM loaded: {len(self.bom_data)} rows")
+                
+                # Populate column dropdowns
+                columns = list(self.bom_data.columns)
+                self.mpn_column_combo.clear()
+                self.qty_column_combo.clear()
+                self.mpn_column_combo.addItems(columns)
+                self.qty_column_combo.addItems(columns)
+                
+                # Display BOM in result table
+                self.display_bom_data()
+                
+                # Load component details
+                self.load_component_details()
+                
+                self.log_message("BOM uploaded successfully")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load BOM: {str(e)}")
+                self.log_message(f"Error loading BOM: {str(e)}")
+
+    def display_bom_data(self):
+        """Display BOM data in the result table"""
+        if self.bom_data is None:
+            return
+        
+        # Set up table
+        self.result_table.setRowCount(len(self.bom_data))
+        self.result_table.setColumnCount(len(self.bom_data.columns))
+        self.result_table.setHorizontalHeaderLabels(list(self.bom_data.columns))
+        
+        # Set fixed column widths for BOM columns
+        bom_column_widths = {
+            'Designator': 120,
+            'Comment': 150,
+            'Footprint': 140,
+            'LCSC Part #': 120,
+            'MPN': 150,
+            'Quantity': 100,
+            'Qty': 100,
+            'Value': 120,
+            'Package': 100,
+            'Description': 200,
+            'Manufacturer': 140,
+            'Part Number': 150
+        }
+        
+        # Apply fixed widths to BOM columns
+        for i, col_name in enumerate(self.bom_data.columns):
+            if col_name in bom_column_widths:
+                self.result_table.setColumnWidth(i, bom_column_widths[col_name])
+            else:
+                self.result_table.setColumnWidth(i, 120)  # Default width
+        
+        # Disable stretching to preserve fixed widths
+        self.result_table.horizontalHeader().setStretchLastSection(False)
+        
+        # Set green header background color for BOM data
+        for i in range(self.result_table.columnCount()):
+            header_item = self.result_table.horizontalHeaderItem(i)
+            if header_item:
+                header_item.setBackground(QColor(0, 150, 0))  # Dark green
+                header_item.setForeground(QColor(255, 255, 255))  # White text for contrast
+        
+        # Fill table with data
+        for row in range(len(self.bom_data)):
+            for col in range(len(self.bom_data.columns)):
+                item = QTableWidgetItem(str(self.bom_data.iloc[row, col]))
+                self.result_table.setItem(row, col, item)
+
+    def load_component_details(self):
+        """Load component details tab with individual tier columns and stock columns for each distributor"""
+        if self.bom_data is None:
+            return
+        
+        # Find MPN column
+        mpn_column = None
+        for col in self.bom_data.columns:
+            if 'MPN' in col.upper() or 'PART' in col.upper():
+                mpn_column = col
+                break
+        
+        if not mpn_column:
+            mpn_column = self.bom_data.columns[0]  # Fallback to first column
+        
+        # Create detail dataframe starting with BOM data
+        detail_df = self.bom_data.copy()
+        
+        # Fixed list of distributors
+        distributors = ['Digikey', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'RS Components', 
+                    'Future Electronics', 'Element14', 'TME', 'Farnell']
+        
+        # Maximum number of tiers to create columns for
+        max_tiers = 5
+        
+        # Add Manufacturer column first
+        detail_df['Manufacturer'] = ''
+        
+        # Create individual tier columns and stock columns for each distributor
+        tier_columns = []
+        stock_columns = []
+        
+        for distributor in distributors:
+            # Add tier columns for this distributor
+            for tier_num in range(1, max_tiers + 1):
+                qty_col = f'{distributor} T{tier_num} Qty'
+                price_col = f'{distributor} T{tier_num} Price'
+                tier_columns.extend([qty_col, price_col])
+                detail_df[qty_col] = ''
+                detail_df[price_col] = ''
+            
+            # Add stock column for this distributor
+            stock_col = f'{distributor} Stock'
+            stock_columns.append(stock_col)
+            detail_df[stock_col] = ''
+        
+        # Collect component details for each row
+        component_details_map = {}
+        
+        for idx, row in detail_df.iterrows():
+            mpn = str(row[mpn_column]).strip()
+            if mpn and mpn != 'nan':
+                component_details = self.db_manager.get_component_details_by_mpn(mpn)
+                component_details_map[idx] = component_details
+        
+        # Fill data for each row
+        for idx in component_details_map:
+            details = component_details_map[idx]
+            manufacturers = set()
+            
+            # Process each distributor's data
+            for detail in details:
+                manufacturers.add(detail['manufacturer'])
+                dist = detail['distributor']
+                
+                # Check if this distributor matches any of our fixed distributor names
+                matched_dist = None
+                for target_dist in distributors:
+                    if target_dist.lower() in dist.lower():
+                        matched_dist = target_dist
+                        break
+                
+                if matched_dist:
+                    # Sort price tiers by quantity
+                    sorted_tiers = sorted(detail['price_tiers'], key=lambda x: x['quantity'])
+                    
+                    # Fill individual tier columns (up to max_tiers)
+                    for tier_idx, tier in enumerate(sorted_tiers[:max_tiers]):
+                        tier_num = tier_idx + 1  # T1, T2, T3, etc.
+                        qty_col = f'{matched_dist} T{tier_num} Qty'
+                        price_col = f'{matched_dist} T{tier_num} Price'
+                        
+                        detail_df.at[idx, qty_col] = str(tier['quantity'])
+                        detail_df.at[idx, price_col] = f"{tier['price']:.4f}"
+                    
+                    # Fill stock column for this distributor
+                    stock_col = f'{matched_dist} Stock'
+                    detail_df.at[idx, stock_col] = str(detail['stock'])
+            
+            # Set manufacturer (join multiple if different)
+            if manufacturers:
+                detail_df.at[idx, 'Manufacturer'] = ' | '.join(sorted(manufacturers))
+        
+        # Set up detail table
+        self.detail_table.setRowCount(len(detail_df))
+        self.detail_table.setColumnCount(len(detail_df.columns))
+        self.detail_table.setHorizontalHeaderLabels(list(detail_df.columns))
+        
+        # Set column widths for better display
+        column_widths = {
+            # Original BOM columns
+            'Designator': 100,
+            'Comment': 120,
+            'Footprint': 120,
+            'LCSC Part #': 100,
+            'MPN': 130,
+            'Quantity': 80,
+            'Qty': 80,
+            'Value': 100,
+            'Package': 100,
+            'Description': 150,
+            'Manufacturer': 140
+        }
+        
+        # Set widths for tier columns and stock columns
+        for i, col_name in enumerate(detail_df.columns):
+            if col_name in column_widths:
+                self.detail_table.setColumnWidth(i, column_widths[col_name])
+            elif 'Qty' in col_name and 'T' in col_name:
+                self.detail_table.setColumnWidth(i, 60)  # Narrower for quantity
+            elif 'Price' in col_name and 'T' in col_name:
+                self.detail_table.setColumnWidth(i, 80)  # Wider for price
+            elif 'Stock' in col_name:
+                self.detail_table.setColumnWidth(i, 70)  # Medium width for stock
+            else:
+                self.detail_table.setColumnWidth(i, 100)  # Default width
+        
+        # Disable stretching to preserve fixed widths
+        self.detail_table.horizontalHeader().setStretchLastSection(False)
+        
+        # Set colored headers for different distributors
+        for i in range(self.detail_table.columnCount()):
+            header_item = self.detail_table.horizontalHeaderItem(i)
+            if header_item:
+                col_name = detail_df.columns[i]
+                
+                # Color code headers by distributor
+                if any(dist in col_name for dist in distributors):
+                    if 'Digikey' in col_name:
+                        header_item.setBackground(QColor(220, 20, 60))  # Crimson
+                    elif 'Mouser' in col_name:
+                        header_item.setBackground(QColor(0, 100, 200))  # Blue
+                    elif 'Arrow' in col_name:
+                        header_item.setBackground(QColor(255, 140, 0))  # Dark orange
+                    elif 'Avnet' in col_name:
+                        header_item.setBackground(QColor(50, 205, 50))  # Lime green
+                    elif 'Newark' in col_name:
+                        header_item.setBackground(QColor(138, 43, 226))  # Blue violet
+                    elif 'RS Components' in col_name:
+                        header_item.setBackground(QColor(255, 20, 147))  # Deep pink
+                    elif 'Future Electronics' in col_name:
+                        header_item.setBackground(QColor(0, 191, 255))  # Deep sky blue
+                    elif 'Element14' in col_name:
+                        header_item.setBackground(QColor(255, 165, 0))  # Orange
+                    elif 'TME' in col_name:
+                        header_item.setBackground(QColor(34, 139, 34))  # Forest green
+                    elif 'Farnell' in col_name:
+                        header_item.setBackground(QColor(75, 0, 130))  # Indigo
+                    else:
+                        header_item.setBackground(QColor(128, 128, 128))  # Gray
+                    header_item.setForeground(QColor(255, 255, 255))  # White text
+                else:
+                    header_item.setBackground(QColor(0, 100, 200))  # Default blue
+                    header_item.setForeground(QColor(255, 255, 255))  # White text
+        
+        # Fill table with data and apply formatting
+        for row in range(len(detail_df)):
+            for col in range(len(detail_df.columns)):
+                cell_value = str(detail_df.iloc[row, col])
+                item = QTableWidgetItem(cell_value)
+                
+                # Color code and format based on content
+                col_name = detail_df.columns[col]
+                
+                if 'Qty' in col_name and 'T' in col_name and cell_value and cell_value != '':
+                    # Bold font for quantity columns with data
+                    font = QFont()
+                    font.setBold(True)
+                    item.setFont(font)
+                    item.setBackground(QColor(230, 240, 255))  # Light blue background
+                    
+                elif 'Price' in col_name and 'T' in col_name and cell_value and cell_value != '':
+                    # Light green background for price columns with data
+                    item.setBackground(QColor(230, 255, 230))  # Light green
+                    
+                elif 'Stock' in col_name and cell_value and cell_value != '':
+                    # Color code stock levels
+                    try:
+                        stock_val = int(cell_value) if cell_value.isdigit() else 0
+                        if stock_val == 0:
+                            item.setBackground(QColor(255, 200, 200))  # Light red - No stock
+                            item.setText("0")
+                        elif stock_val < 100:
+                            item.setBackground(QColor(255, 255, 200))  # Light yellow - Low stock
+                        elif stock_val < 1000:
+                            item.setBackground(QColor(255, 255, 150))  # Light orange - Medium stock
+                        else:
+                            item.setBackground(QColor(200, 255, 200))  # Light green - Good stock
+                        
+                        # Bold font for stock values
+                        font = QFont()
+                        font.setBold(True)
+                        item.setFont(font)
+                    except (ValueError, TypeError):
+                        item.setBackground(QColor(240, 240, 240))  # Gray for invalid values
+                        
+                elif col_name == 'Manufacturer' and cell_value and cell_value != '':
+                    # Light yellow background for manufacturer
+                    item.setBackground(QColor(255, 255, 230))  # Light yellow
+                    
+                # Make all cells non-editable in Component Details view
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                
+                self.detail_table.setItem(row, col, item)
+        
+        self.log_message(f"Component Details loaded: {len(detail_df)} components with tier and stock columns for {len(distributors)} distributors")
+
+
+    def fetch_data(self):
+        """Start fetching data from findchips.com"""
+        if self.bom_data is None:
+            QMessageBox.warning(self, "Warning", "Please upload BOM first")
+            return
+        
+        mpn_column = self.mpn_column_combo.currentText()
+        if not mpn_column:
+            QMessageBox.warning(self, "Warning", "Please select MPN column")
+            return
+        
+        # Get unique MPNs
+        mpn_list = self.bom_data[mpn_column].dropna().unique().tolist()
+        if not mpn_list:
+            QMessageBox.warning(self, "Warning", "No MPNs found in selected column")
+            return
+        
+        self.log_message(f"Starting to scrape {len(mpn_list)} MPNs")
+        
+        # Show progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        # Start scraping thread
+        self.scraping_worker = ScrapingWorker(mpn_list)
+        self.scraping_worker.progress_updated.connect(self.progress_bar.setValue)
+        self.scraping_worker.log_updated.connect(self.log_message)
+        self.scraping_worker.data_scraped.connect(self.process_scraped_data)
+        self.scraping_worker.finished_scraping.connect(self.scraping_finished)
+        self.scraping_worker.start()
+
+    def process_scraped_data(self, mpn, distributors):
+        """Process scraped data for an MPN"""
+        self.scraped_data[mpn] = distributors
+        self.db_manager.save_component_data(mpn, distributors)
+
+    def scraping_finished(self):
+        """Handle scraping completion"""
+        self.progress_bar.setVisible(False)
+        self.log_message("Scraping completed")
+        self.calculate_bom_results()
+        # Refresh component details with new data
+        self.load_component_details()
+
+    def calculate_bom_results(self):
+        """Calculate BOM results with pricing data"""
+        if self.bom_data is None:
+            return
+        
+        mpn_column = self.mpn_column_combo.currentText()
+        qty_column = self.qty_column_combo.currentText()
+        
+        if not mpn_column or not qty_column:
+            QMessageBox.warning(self, "Warning", "Please select both MPN and QTY columns")
+            return
+        
+        # Create results dataframe
+        results_df = self.bom_data.copy()
+        
+        # Add new columns - include Stock here
+        new_columns = ['Stock','MOQ', 'Total Required Qty', 'Procure Qty', 'Distributor',
+                       'Qty Tier', 'Unit Price', 'PCB Per Unit Price', 'Total Project Price']
+        
+        for col in new_columns:
+            results_df[col] = ""
+        
+        pcb_qty = self.pcb_qty_input.value()
+        currency = self.currency_combo.currentText()
+        usd_to_inr_rate = self.exchange_rate_input.value()
+        
+        # Process each row
+        for idx, row in results_df.iterrows():
+            mpn = str(row[mpn_column])
+            bom_qty = float(row[qty_column]) if pd.notna(row[qty_column]) else 0
+            
+            # Get component data
+            component_data = self.db_manager.get_component_data(mpn)
+            
+            if component_data:
+                # Process pricing data
+                best_option = self.find_best_pricing_option(component_data, bom_qty * pcb_qty, currency, usd_to_inr_rate)
+                
+                if best_option:
+                    results_df.at[idx, 'Stock'] = best_option.get('stock', 'N/A')
+                    results_df.at[idx, 'MOQ'] = best_option['moq']
+                    results_df.at[idx, 'Total Required Qty'] = int(bom_qty * pcb_qty)
+                    results_df.at[idx, 'Procure Qty'] = int(bom_qty * pcb_qty)
+                    results_df.at[idx, 'Distributor'] = best_option['distributor']
+                    results_df.at[idx, 'Qty Tier'] = best_option['qty_tier']
+                    results_df.at[idx, 'Unit Price'] = round(best_option['unit_price'], 4)
+                    results_df.at[idx, 'PCB Per Unit Price'] = round(best_option['unit_price'] * bom_qty, 4)
+                    results_df.at[idx, 'Total Project Price'] = round(best_option['unit_price'] * bom_qty * pcb_qty, 2)
+        
+        # Display results
+        self.display_results(results_df)
+        self.log_message("BOM analysis completed")
+
+    def find_best_pricing_option(self, component_data, required_qty, currency, usd_to_inr_rate):
+        """Find the best pricing option for a component"""
+        distributors = {}
+        
+        # Group by distributor - now includes stock data
+        for dist, mfg, qty, price, curr, stock in component_data:
+            if dist not in distributors:
+                distributors[dist] = {'tiers': [], 'stock': stock}
+            
+            # Convert price to target currency
+            if curr == 'USD' and currency == 'INR':
+                converted_price = price * usd_to_inr_rate
+            elif curr == 'INR' and currency == 'USD':
+                converted_price = price / usd_to_inr_rate
+            else:
+                converted_price = price
+            
+            distributors[dist]['tiers'].append({
+                'quantity': qty,
+                'price': converted_price,
+                'manufacturer': mfg
+            })
+            
+            # Use the highest stock value found for this distributor
+            distributors[dist]['stock'] = max(distributors[dist]['stock'], stock)
+
+        # Priority order for distributors
+        priority_order = ['Digikey', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'RS Components']
+        
+        best_option = None
+        best_distributor = None
+        
+        # Check distributors in priority order
+        for priority_dist in priority_order:
+            for dist_name in distributors.keys():
+                if priority_dist.lower() in dist_name.lower():
+                    option = self.calculate_pricing_for_distributor(distributors[dist_name]['tiers'], required_qty)
+                    if option and (best_option is None or option['unit_price'] < best_option['unit_price']):
+                        best_option = option
+                        best_distributor = dist_name
+                    break
+            if best_option:
+                break
+
+        # If no priority distributor found, check others
+        if not best_option:
+            for dist_name, dist_data in distributors.items():
+                option = self.calculate_pricing_for_distributor(dist_data['tiers'], required_qty)
+                if option and (best_option is None or option['unit_price'] < best_option['unit_price']):
+                    best_option = option
+                    best_distributor = dist_name
+
+        if best_option:
+            best_option['distributor'] = best_distributor
+            best_option['stock'] = distributors[best_distributor]['stock']
+            
+        return best_option
+
+    def calculate_pricing_for_distributor(self, price_tiers, required_qty):
+        """Calculate pricing for a specific distributor"""
+        if not price_tiers:
+            return None
+        
+        # Sort by quantity
+        sorted_tiers = sorted(price_tiers, key=lambda x: x['quantity'])
+        
+        # Find MOQ (lowest quantity tier)
+        moq = sorted_tiers[0]['quantity']
+        
+        # Find appropriate qty tier for required quantity
+        selected_tier = None
+        for tier in sorted_tiers:
+            if required_qty >= tier['quantity']:
+                selected_tier = tier
+            else:
+                break
+        
+        if not selected_tier:
+            selected_tier = sorted_tiers[0]  # Use MOQ tier
+        
+        return {
+            'moq': moq,
+            'qty_tier': selected_tier['quantity'],
+            'unit_price': selected_tier['price']
+        }
+
+    def display_results(self, results_df):
+        """Display calculated results in the table"""
+        # Calculate totals for specific columns
+        sum_columns = ['PCB Per Unit Price', 'Total Project Price']
+        totals = {}
+        
+        for col in sum_columns:
+            if col in results_df.columns:
+                try:
+                    # Convert to numeric, replacing empty strings with 0
+                    numeric_values = pd.to_numeric(results_df[col].replace('', 0), errors='coerce').fillna(0)
+                    totals[col] = numeric_values.sum()
+                except:
+                    totals[col] = 0
+        
+        # Set up table with extra row for totals
+        total_rows = len(results_df) + 1  # +1 for total row
+        self.result_table.setRowCount(total_rows)
+        self.result_table.setColumnCount(len(results_df.columns))
+        self.result_table.setHorizontalHeaderLabels(list(results_df.columns))
+        
+        # Set fixed column widths for better display
+        column_widths = {
+            'Designator': 120,
+            'Comment': 150,
+            'Footprint': 140,
+            'LCSC Part #': 120,
+            'MPN': 150,
+            'Stock': 100,
+            'MOQ': 80,
+            'Total Required Qty': 130,
+            'Procure Qty': 110,
+            'Distributor': 120,
+            'Qty Tier': 80,
+            'Unit Price': 100,
+            'PCB Per Unit Price': 140,
+            'Total Project Price': 140
+        }
+        
+        # Apply fixed widths to columns
+        for i, col_name in enumerate(results_df.columns):
+            if col_name in column_widths:
+                self.result_table.setColumnWidth(i, column_widths[col_name])
+            else:
+                self.result_table.setColumnWidth(i, 100)  # Default width
+        
+        # Disable stretching to preserve fixed widths
+        self.result_table.horizontalHeader().setStretchLastSection(False)
+        
+        # Set green header background color
+        for i in range(self.result_table.columnCount()):
+            header_item = self.result_table.horizontalHeaderItem(i)
+            if header_item:
+                header_item.setBackground(QColor(0, 150, 0))  # Dark green
+                header_item.setForeground(QColor(255, 255, 255))  # White text for contrast
+
+        # Fill table with data (regular rows)
+        for row in range(len(results_df)):
+            for col in range(len(results_df.columns)):
+                item = QTableWidgetItem(str(results_df.iloc[row, col]))
+
+                # Color code stock levels
+                if results_df.columns[col] == 'Stock':
+                    try:
+                        stock_val = int(results_df.iloc[row, col]) if str(results_df.iloc[row, col]).isdigit() else 0
+                        if stock_val == 0:
+                            item.setBackground(QColor(255, 200, 200))  # Light red - No stock
+                        elif stock_val < 100:
+                            item.setBackground(QColor(255, 255, 200))  # Light yellow - Low stock
+                        elif stock_val < 1000:
+                            item.setBackground(QColor(255, 255, 150))  # Light orange - Medium stock
+                        else:
+                            item.setBackground(QColor(200, 255, 200))  # Light green - Good stock
+                    except (ValueError, TypeError):
+                        item.setBackground(QColor(240, 240, 240))  # Gray for N/A
+
+                # Make Procure Qty column editable
+                if results_df.columns[col] == 'Procure Qty':
+                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsEditable)
+                    
+                self.result_table.setItem(row, col, item)
+
+        # Add total row at the bottom
+        total_row_index = len(results_df)
+        
+        for col in range(len(results_df.columns)):
+            col_name = results_df.columns[col]
+            
+            if col == 0:  # First column - add "TOTAL" label
+                total_item = QTableWidgetItem("TOTAL")
+            elif col_name in totals:  # Sum columns
+                total_value = round(totals[col_name], 2)
+                total_item = QTableWidgetItem(str(total_value))
+            else:  # Other columns - leave empty
+                total_item = QTableWidgetItem("")
+            
+            # Style the total row
+            font = QFont()
+            font.setBold(True)
+            total_item.setFont(font)
+            total_item.setBackground(QColor(220, 220, 220))  # Light gray background
+            
+            # Make total row non-editable
+            total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            
+            self.result_table.setItem(total_row_index, col, total_item)
+
+        # Connect cell change signal for recalculation
+        self.result_table.cellChanged.connect(self.on_cell_changed)
+
+    def on_cell_changed(self, row, col):
+        """Handle cell changes for recalculation"""
+        if self.result_table.horizontalHeaderItem(col).text() == 'Procure Qty':
+            self.recalculate_row(row)
+            # Recalculate totals after individual row update
+            self.update_totals()
+
+    def update_totals(self):
+        """Update total row calculations"""
+        sum_columns = ['PCB Per Unit Price', 'Total Project Price']
+        totals = {}
+        
+        # Calculate totals from current table data (excluding last row which is totals)
+        total_row_count = self.result_table.rowCount() - 1  # Exclude total row
+        
+        for col_index in range(self.result_table.columnCount()):
+            col_name = self.result_table.horizontalHeaderItem(col_index).text()
+            
+            if col_name in sum_columns:
+                total = 0.0
+                for row in range(total_row_count):  # Exclude the total row
+                    item = self.result_table.item(row, col_index)
+                    if item:
+                        try:
+                            value = float(item.text()) if item.text() else 0.0
+                            total += value
+                        except ValueError:
+                            pass
+                totals[col_name] = total
+        
+        # Update total row
+        total_row_index = total_row_count
+        
+        for col_index in range(self.result_table.columnCount()):
+            col_name = self.result_table.horizontalHeaderItem(col_index).text()
+            
+            if col_name in totals:
+                total_value = round(totals[col_name], 2)
+                total_item = QTableWidgetItem(str(total_value))
+                
+                # Style the total row
+                font = QFont()
+                font.setBold(True)
+                total_item.setFont(font)
+                total_item.setBackground(QColor(220, 220, 220))
+                total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                
+                self.result_table.setItem(total_row_index, col_index, total_item)
+
+    def recalculate_row(self, row):
+        """Recalculate pricing for a specific row"""
+        try:
+            # Skip if this is the total row
+            if row >= self.result_table.rowCount() - 1:
+                return
+                
+            procure_qty = float(self.result_table.item(row, self.get_column_index('Procure Qty')).text())
+            unit_price = float(self.result_table.item(row, self.get_column_index('Unit Price')).text())
+
+            # Calculate new total project price
+            total_price = procure_qty * unit_price
+            self.result_table.setItem(row, self.get_column_index('Total Project Price'),
+                                    QTableWidgetItem(str(round(total_price, 2))))
+            
+            # Update totals after row calculation
+            self.update_totals()
+            
+        except (ValueError, AttributeError):
+            pass
+
+    def get_column_index(self, column_name):
+        """Get column index by name"""
+        for i in range(self.result_table.columnCount()):
+            if self.result_table.horizontalHeaderItem(i).text() == column_name:
+                return i
+        return -1
+
+    def recalculate_results(self):
+        """Recalculate results when PCB quantity changes"""
+        if self.bom_data is not None and self.scraped_data:
+            self.calculate_bom_results()
+
+    def update_exchange_rate(self, currency):
+        """Update exchange rate based on selected currency"""
+        if currency == "INR":
+            self.exchange_rate_input.setEnabled(True)
+        else:
+            self.exchange_rate_input.setEnabled(False)
+
+    def update_exchange_rates(self, rate):
+        """Update exchange rates dictionary"""
+        self.exchange_rates["INR"] = rate
+
+    def export_to_excel(self):
+        """Export results to Excel file"""
+        if self.result_table.rowCount() == 0:
+            QMessageBox.warning(self, "Warning", "No data to export")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Excel File", "", "Excel files (*.xlsx)"
+        )
+
+        if file_path:
+            try:
+                # Convert table data to DataFrame
+                data = []
+                headers = []
+
+                # Get headers
+                for col in range(self.result_table.columnCount()):
+                    headers.append(self.result_table.horizontalHeaderItem(col).text())
+
+                # Get data
+                for row in range(self.result_table.rowCount()):
+                    row_data = []
+                    for col in range(self.result_table.columnCount()):
+                        item = self.result_table.item(row, col)
+                        row_data.append(item.text() if item else "")
+                    data.append(row_data)
+
+                # Create DataFrame and save
+                df = pd.DataFrame(data, columns=headers)
+                df.to_excel(file_path, index=False)
+
+                self.log_message(f"Data exported to {file_path}")
+                QMessageBox.information(self, "Success", "Data exported successfully!")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to export: {str(e)}")
+                self.log_message(f"Export error: {str(e)}")
+
+
+def main():
+    app = QApplication(sys.argv)
+    window = BOMAnalyzer()
+    window.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
