@@ -92,8 +92,8 @@ class PCBFabCostTool(QWidget):
         nav_layout = QHBoxLayout()
         nav_layout.setSpacing(5)
         
-        self.calc_btn = QPushButton("ðŸ“Š Calculation")
-        self.data_entry_btn = QPushButton("ðŸ“ Data Entry")
+        self.calc_btn = QPushButton("📊 Calculation")
+        self.data_entry_btn = QPushButton("📝 Data Entry")
         
         # Make buttons larger and more attractive
         for btn in [self.calc_btn, self.data_entry_btn]:
@@ -279,17 +279,17 @@ class EditableDataCard(QFrame):
         layout.setSpacing(6)
         
         # Header with fabricator name
-        header = QLabel(f"ðŸ­ {self.data[1]}")
+        header = QLabel(f"🏭 {self.data[1]}")
         header.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         header.setStyleSheet("color: #0078d4; margin-bottom: 5px;")
         layout.addWidget(header)
         
         # Details
         details = [
-            f"ðŸ“‹ Material: {self.data[2]}",
-            f"ðŸ”¢ Layers: {self.data[3]} | Qty: {self.data[4]:,}",
-            f"ðŸ“ Size: {self.data[6]} Ã— {self.data[7]}",
-            f"ðŸ’° Price: ${self.data[5]:,.2f}"
+            f"📋 Material: {self.data[2]}",
+            f"🔢 Layers: {self.data[3]} | Qty: {self.data[4]:,}",
+            f"📏 Size: {self.data[6]} × {self.data[7]}",
+            f"💰 Price: ${self.data[5]:,.2f}"
         ]
         
         for detail in details:
@@ -299,7 +299,7 @@ class EditableDataCard(QFrame):
             layout.addWidget(label)
             
         # Double-click hint
-        hint = QLabel("ðŸ’¡ Double-click to edit")
+        hint = QLabel("💡 Double-click to edit")
         hint.setFont(QFont("Arial", 8))
         hint.setStyleSheet("color: #999999; font-style: italic;")
         hint.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -387,7 +387,7 @@ class DataEntryPage(QWidget):
         form_layout.addWidget(dimensions_label, row, 0, 1, 2)
         row += 1
 
-        form_layout.addWidget(QLabel("PCB Size (L Ã— W):"), row, 0)
+        form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
         size_widget = QWidget()
         size_layout = QHBoxLayout(size_widget)
         size_layout.setContentsMargins(0, 0, 0, 0)
@@ -402,7 +402,7 @@ class DataEntryPage(QWidget):
         
         size_layout.addWidget(QLabel("L:"))
         size_layout.addWidget(self.length_input)
-        size_layout.addWidget(QLabel("Ã—"))
+        size_layout.addWidget(QLabel("×"))
         size_layout.addWidget(QLabel("W:"))
         size_layout.addWidget(self.width_input)
         
@@ -472,10 +472,10 @@ class DataEntryPage(QWidget):
         button_layout = QHBoxLayout()
         button_layout.setSpacing(10)
         
-        self.save_btn = QPushButton("ðŸ’¾ Save Data")
-        self.update_btn = QPushButton("ðŸ“ Update Data")
-        self.clear_btn = QPushButton("ðŸ—‘ï¸ Clear Form")
-        self.delete_btn = QPushButton("âŒ Delete Record")
+        self.save_btn = QPushButton("💾 Save Data")
+        self.update_btn = QPushButton("📝 Update Data")
+        self.clear_btn = QPushButton("🗑️ Clear Form")
+        self.delete_btn = QPushButton("❌ Delete Record")
         
         # Initially hide update and delete buttons
         self.update_btn.hide()
@@ -508,7 +508,7 @@ class DataEntryPage(QWidget):
         
         # Search/Filter section (stays at top, not scrollable)
         search_layout = QHBoxLayout()
-        search_label = QLabel("ðŸ” Search:")
+        search_label = QLabel("🔍 Search:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search by fabricator or material...")
         self.search_input.textChanged.connect(self.filter_cards)
@@ -716,7 +716,7 @@ class DataEntryPage(QWidget):
                 child.setParent(None)
         
         if not data:
-            no_data_label = QLabel("ðŸ“‹ No PCB data records found.")
+            no_data_label = QLabel("📋 No PCB data records found.")
             no_data_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             no_data_label.setStyleSheet("""
                 color: #666666; 
@@ -742,7 +742,7 @@ class DataEntryPage(QWidget):
                 card.double_clicked.connect(self.load_data_in_form)
                 self.cards_layout.addWidget(card)
             
-            self.record_count_label.setText(f"ðŸ“Š {len(data)} record{'s' if len(data) != 1 else ''}")
+            self.record_count_label.setText(f"📊 {len(data)} record{'s' if len(data) != 1 else ''}")
         
         self.cards_layout.addStretch()
 
@@ -906,7 +906,7 @@ class CalculationPage(QWidget):
         row += 1
 
         # PCB Size with improved layout
-        form_layout.addWidget(QLabel("PCB Size (L Ã— W):"), row, 0)
+        form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
         size_widget = QWidget()
         size_layout = QHBoxLayout(size_widget)
         size_layout.setContentsMargins(0, 0, 0, 0)
@@ -921,7 +921,7 @@ class CalculationPage(QWidget):
         
         size_layout.addWidget(QLabel("L:"))
         size_layout.addWidget(self.length_input)
-        size_layout.addWidget(QLabel("Ã—"))
+        size_layout.addWidget(QLabel("×"))
         size_layout.addWidget(QLabel("W:"))
         size_layout.addWidget(self.width_input)
         
@@ -963,7 +963,7 @@ class CalculationPage(QWidget):
         input_layout.addLayout(form_layout)
         
         # Calculate button
-        self.calculate_btn = QPushButton("ðŸ§® Calculate Price")
+        self.calculate_btn = QPushButton("🧮 Calculate Price")
         self.calculate_btn.setMinimumHeight(50)
         self.calculate_btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         self.calculate_btn.clicked.connect(self.calculate_price)
@@ -985,7 +985,7 @@ class CalculationPage(QWidget):
         right_layout.addWidget(self.results_text)
         
         # Export button
-        self.export_btn = QPushButton("ðŸ“Š Export to Excel")
+        self.export_btn = QPushButton("📊 Export to Excel")
         self.export_btn.setMinimumHeight(45)
         self.export_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         self.export_btn.clicked.connect(self.export_to_excel)
@@ -1110,49 +1110,49 @@ class CalculationPage(QWidget):
             
             # Display enhanced results
             results = f"""
-â•”â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•—
-â•‘                    CALCULATION RESULTS                       â•‘
-â•šâ•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+╔══════════════════════════════════════════════════════════════╗
+║                    CALCULATION RESULTS                       ║
+╚══════════════════════════════════════════════════════════════╝
 
-ðŸ“‹ CUSTOMER INFORMATION
-â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
-â€¢ Customer Name: {customer_name}
-â€¢ Job Number: {job_number}
-â€¢ Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+📋 CUSTOMER INFORMATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Customer Name: {customer_name}
+• Job Number: {job_number}
+• Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 
-ðŸ”§ PCB SPECIFICATIONS
-â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
-â€¢ Unit: {unit}
-â€¢ Quantity: {qty:,} pieces
-â€¢ Dimensions: {length} Ã— {width} {unit}
-â€¢ Area per PCB: {input_area:.2f} {unit}Â²
-â€¢ Total Area: {input_area * qty:.2f} {unit}Â²
+🔧 PCB SPECIFICATIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Unit: {unit}
+• Quantity: {qty:,} pieces
+• Dimensions: {length} × {width} {unit}
+• Area per PCB: {input_area:.2f} {unit}²
+• Total Area: {input_area * qty:.2f} {unit}²
 
-âš™ï¸ SELECTED CONFIGURATION
-â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
-â€¢ Fabricator: {self.filter_combos["fabricator"].currentText()}
-â€¢ Layers: {self.filter_combos["pcb_layer"].currentText()}
-â€¢ Material: {self.filter_combos["material"].currentText()}
-â€¢ Mask Color: {self.filter_combos["mask_color"].currentText()}
-â€¢ Silk Color: {self.filter_combos["silk_color"].currentText()}
-â€¢ Copper Inner: {self.filter_combos["copper_inner"].currentText()}
-â€¢ Copper Outer: {self.filter_combos["copper_outer"].currentText()}
-â€¢ Back Drill: {self.filter_combos["back_drill"].currentText()}
-â€¢ Blind Via: {self.filter_combos["blind_via"].currentText()}
-â€¢ Buried Via: {self.filter_combos["berried_via"].currentText()}
+⚙️ SELECTED CONFIGURATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Fabricator: {self.filter_combos["fabricator"].currentText()}
+• Layers: {self.filter_combos["pcb_layer"].currentText()}
+• Material: {self.filter_combos["material"].currentText()}
+• Mask Color: {self.filter_combos["mask_color"].currentText()}
+• Silk Color: {self.filter_combos["silk_color"].currentText()}
+• Copper Inner: {self.filter_combos["copper_inner"].currentText()}
+• Copper Outer: {self.filter_combos["copper_outer"].currentText()}
+• Back Drill: {self.filter_combos["back_drill"].currentText()}
+• Blind Via: {self.filter_combos["blind_via"].currentText()}
+• Buried Via: {self.filter_combos["berried_via"].currentText()}
 
-ðŸ’° PRICE CALCULATION
-â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
-â€¢ Reference PCB: {ref_length} Ã— {ref_width} {unit} @ ${ref_price:.2f} for {ref_qty:,} pcs
-â€¢ Price per {unit}Â²: ${price_per_sq_unit:.4f}
-â€¢ Price per PCB: ${per_unit_price:.2f}
-â€¢ Total Price for {qty:,} pieces: ${total_price:.2f}
+💰 PRICE CALCULATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Reference PCB: {ref_length} × {ref_width} {unit} @ ${ref_price:.2f} for {ref_qty:,} pcs
+• Price per {unit}²: ${price_per_sq_unit:.4f}
+• Price per PCB: ${per_unit_price:.2f}
+• Total Price for {qty:,} pieces: ${total_price:.2f}
 
-ðŸ“Š COST BREAKDOWN
-â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”â”
-â€¢ Unit Cost: ${per_unit_price:.2f} per piece
-â€¢ Total Cost: ${total_price:.2f}
-â€¢ Cost per {unit}Â²: ${price_per_sq_unit:.4f}
+📊 COST BREAKDOWN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+• Unit Cost: ${per_unit_price:.2f} per piece
+• Total Cost: ${total_price:.2f}
+• Cost per {unit}²: ${price_per_sq_unit:.4f}
             """
             
             self.results_text.setPlainText(results.strip())
