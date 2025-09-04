@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QStackedWidget, QPushButton, QLabel, QLineEdit, 
                              QComboBox, QScrollArea, QFrame, QTextEdit, 
                              QMessageBox, QFileDialog, QGridLayout, QSpacerItem, 
-                             QSizePolicy, QGroupBox)
+                             QSizePolicy, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QIntValidator, QDoubleValidator, QFont, QPalette, QColor
 import sqlite3
@@ -16,56 +16,74 @@ class PCBFabCostTool(QWidget):
         self.init_database()
         self.init_ui()
         self.apply_styles()
-        
+            
     def init_database(self):
-        """Initialize SQLite database with required tables"""
+        """Initialize SQLite database with updated tables"""
         self.conn = sqlite3.connect('pcb_fab_cost.db')
         self.cursor = self.conn.cursor()
         
-        # Create PCB data table for data entry
+        # Create updated PCB data table
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS pcb_data (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                fabricator_name TEXT NOT NULL,
-                unit TEXT NOT NULL,
-                pcb_qty INTEGER NOT NULL,
-                pcb_layer INTEGER NOT NULL,
-                pcb_length REAL NOT NULL,
-                pcb_width REAL NOT NULL,
+                fabricator_name TEXT NOT NULL,  -- Add this if missing
+                pcb_part_number TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                layers INTEGER NOT NULL,
+                pcb_spec TEXT,
                 material TEXT,
-                mask_color TEXT,
-                silk_color TEXT,
-                copper_inner TEXT,
-                copper_outer TEXT,
+                length REAL NOT NULL,
+                width REAL NOT NULL,
+                array_size TEXT,
+                board_thickness REAL,
+                cu_inner TEXT,
+                cu_outer TEXT,
+                surface_finish TEXT,
+                selective_plating TEXT,
+                drills TEXT,
+                impedance TEXT,
+                soldermask TEXT,
+                silkscreen TEXT,
                 back_drill TEXT,
                 blind_via TEXT,
                 berried_via TEXT,
-                total_price REAL NOT NULL,
+                via_type TEXT,
+                via_fill TEXT,
+                beveling TEXT,
+                edge_plating TEXT,
+                price_per_unit REAL NOT NULL,
+                engg_cost REAL,
+                total_cost_inr REAL NOT NULL,
+                lead_time TEXT,
                 created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         ''')
         
-        # Create calculation results table
+
+        
+        # Create updated calculation results table
         self.cursor.execute('''
             CREATE TABLE IF NOT EXISTS calculation_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 customer_name TEXT,
                 job_number TEXT,
+                pcb_part_number TEXT,
                 unit TEXT,
-                qty INTEGER,
                 pcb_length REAL,
                 pcb_width REAL,
-                fabricator_name TEXT,
-                pcb_layer INTEGER,
+                layers INTEGER,
                 material TEXT,
-                mask_color TEXT,
-                silk_color TEXT,
-                copper_inner TEXT,
-                copper_outer TEXT,
+                board_thickness REAL,
+                cu_inner TEXT,
+                cu_outer TEXT,
+                surface_finish TEXT,
+                impedance TEXT,
+                soldermask TEXT,
+                silkscreen TEXT,
                 back_drill TEXT,
                 blind_via TEXT,
                 berried_via TEXT,
-                per_sq_mm_price REAL,
+                per_sq_unit_price REAL,
                 per_unit_price REAL,
                 total_price REAL,
                 calculation_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -186,11 +204,13 @@ class PCBFabCostTool(QWidget):
                 border-radius: 6px;
                 padding: 8px 12px;
                 font-size: 13px;
+                color: black;
                 background-color: white;
             }
             
             QComboBox:focus {
                 border-color: #0078d4;
+                color: black;
             }
             
             QTextEdit {
@@ -247,7 +267,7 @@ class PCBFabCostTool(QWidget):
         self.data_entry_page.refresh_saved_data()
 
 class EditableDataCard(QFrame):
-    """Custom data card that emits signal when double-clicked"""
+    """Updated data card for new PCB data structure"""
     double_clicked = pyqtSignal(object)
     
     def __init__(self, data):
@@ -256,47 +276,63 @@ class EditableDataCard(QFrame):
         self.init_ui()
         
     def init_ui(self):
-        """Initialize card UI"""
+        """Initialize card UI with new data structure"""
         self.setFrameStyle(QFrame.Shape.StyledPanel | QFrame.Shadow.Raised)
-        self.setMinimumHeight(140)
+        self.setMaximumHeight(160)
+        self.setMinimumHeight(160)
         
         # Card styling
         self.setStyleSheet("""
-            EditableDataCard {
+            UpdatedEditableDataCard {
                 background-color: white;
                 border: 2px solid #e1e1e1;
                 border-radius: 10px;
                 margin: 5px;
             }
-            EditableDataCard:hover {
+            UpdatedEditableDataCard:hover {
                 border-color: #0078d4;
                 background-color: #f8f9fa;
+            }
+            QLabel {
+                color: #333333;
+                background-color: transparent;
             }
         """)
         
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 0, 0)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(4)
         
-        # Header with fabricator name
-        header = QLabel(f"🏭 {self.data[1]}")
+        if len(self.data) < 6:
+            error_label = QLabel("❌ Invalid data format")
+            layout.addWidget(error_label)
+            return
+        
+        # Header with PCB part number
+        header = QLabel(f"🔧 {self.data[1]}")  # pcb_part_number
         header.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        header.setStyleSheet("color: #0078d4; margin-bottom: 5px;")
+        header.setStyleSheet("color: #0078d4; margin-bottom: 3px;")
         layout.addWidget(header)
         
         # Details
-        details = [
-            f"📋 Material: {self.data[2]}",
-            f"🔢 Layers: {self.data[3]} | Qty: {self.data[4]:,}",
-            f"📏 Size: {self.data[6]} × {self.data[7]}",
-            f"💰 Price: ${self.data[5]:,.2f}"
-        ]
-        
-        for detail in details:
-            label = QLabel(detail)
-            label.setFont(QFont("Arial", 10))
-            label.setStyleSheet("color: #666666; margin: 2px 0;")
-            layout.addWidget(label)
+        try:
+            details = [
+                f"📋 Material: {self.data[2] if self.data[2] else 'N/A'}",  # material
+                f"🔢 Layers: {self.data[3]} | Qty: {self.data[4]:,}",  # layers, quantity
+                f"📏 Size: {self.data[6]} × {self.data[7]}",  # length, width
+                f"💰 Cost: ₹{self.data[5]:,.2f}",  # total_cost_inr
+                f"⏱️ Lead Time: {self.data[8] if self.data[8] else 'N/A'}"  # lead_time
+            ]
+            
+            for detail in details:
+                label = QLabel(detail)
+                label.setFont(QFont("Arial", 9))
+                label.setStyleSheet("color: #666666; margin: 1px 0;")
+                layout.addWidget(label)
+                
+        except Exception as e:
+            error_label = QLabel(f"❌ Error: {str(e)}")
+            layout.addWidget(error_label)
             
         # Double-click hint
         hint = QLabel("💡 Double-click to edit")
@@ -318,11 +354,11 @@ class DataEntryPage(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        """Initialize data entry page UI"""
+        """Initialize data entry page UI with new fields"""
         layout = QHBoxLayout()
         layout.setSpacing(20)
         
-        # Left side - Scrollable Input form (keeping existing code)
+        # Left side - Scrollable Input form
         left_frame = QGroupBox("PCB Specification Entry")
         left_frame_layout = QVBoxLayout(left_frame)
         
@@ -331,7 +367,6 @@ class DataEntryPage(QWidget):
         self.input_scroll_area.setWidgetResizable(True)
         self.input_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.input_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    
         
         # Create container widget for the form
         input_container = QWidget()
@@ -350,34 +385,42 @@ class DataEntryPage(QWidget):
         form_layout.addWidget(basic_label, row, 0, 1, 2)
         row += 1
         
-        # Unit selection
-        form_layout.addWidget(QLabel("Unit:"), row, 0)
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(["mm", "inch"])
-        form_layout.addWidget(self.unit_combo, row, 1)
+        
+        # PCB Part Number
+        form_layout.addWidget(QLabel("PCB Part Number:"), row, 0)
+        self.pcb_part_number_input = QLineEdit()
+        self.pcb_part_number_input.setPlaceholderText("Enter PCB part number...")
+        form_layout.addWidget(self.pcb_part_number_input, row, 1)
         row += 1
         
-        # Fabricator name
-        form_layout.addWidget(QLabel("Fabricator Name:"), row, 0)
-        self.fabricator_input = QLineEdit()
-        self.fabricator_input.setPlaceholderText("Enter fabricator name...")
-        form_layout.addWidget(self.fabricator_input, row, 1)
+        # Quantity
+        form_layout.addWidget(QLabel("Quantity:"), row, 0)
+        self.quantity_input = QLineEdit()
+        self.quantity_input.setValidator(QIntValidator(1, 999999))
+        self.quantity_input.setPlaceholderText("Enter quantity...")
+        form_layout.addWidget(self.quantity_input, row, 1)
         row += 1
         
-        # PCB quantity
-        form_layout.addWidget(QLabel("PCB Quantity:"), row, 0)
-        self.qty_input = QLineEdit()
-        self.qty_input.setValidator(QIntValidator(1, 999999))
-        self.qty_input.setPlaceholderText("Enter quantity...")
-        form_layout.addWidget(self.qty_input, row, 1)
-        row += 1
-        
-        # PCB layer
-        form_layout.addWidget(QLabel("PCB Layers:"), row, 0)
-        self.layer_combo = QComboBox()
+        # Layers
+        form_layout.addWidget(QLabel("Layers:"), row, 0)
+        self.layers_combo = QComboBox()
         layers = [str(i) for i in range(1, 41)]
-        self.layer_combo.addItems(layers)
-        form_layout.addWidget(self.layer_combo, row, 1)
+        self.layers_combo.addItems(layers)
+        form_layout.addWidget(self.layers_combo, row, 1)
+        row += 1
+        
+        # PCB Spec
+        form_layout.addWidget(QLabel("PCB Spec:"), row, 0)
+        self.pcb_spec_combo = QComboBox()
+        self.pcb_spec_combo.addItems(["Class 2", "Class 3", "Mil Grade"])
+        form_layout.addWidget(self.pcb_spec_combo, row, 1)
+        row += 1
+        
+        # Materialupdate_data
+        form_layout.addWidget(QLabel("Material:"), row, 0)
+        self.material_input = QLineEdit()
+        self.material_input.setPlaceholderText("Enter material...")
+        form_layout.addWidget(self.material_input, row, 1)
         row += 1
 
         # PCB Dimensions section
@@ -387,26 +430,35 @@ class DataEntryPage(QWidget):
         form_layout.addWidget(dimensions_label, row, 0, 1, 2)
         row += 1
 
-        form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
-        size_widget = QWidget()
-        size_layout = QHBoxLayout(size_widget)
-        size_layout.setContentsMargins(0, 0, 0, 0)
-        
+        # Length
+        form_layout.addWidget(QLabel("Length:"), row, 0)
         self.length_input = QLineEdit()
         self.length_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-        self.length_input.setPlaceholderText("Length")
+        self.length_input.setPlaceholderText("Enter length...")
+        form_layout.addWidget(self.length_input, row, 1)
+        row += 1
         
+        # Width
+        form_layout.addWidget(QLabel("Width:"), row, 0)
         self.width_input = QLineEdit()
         self.width_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-        self.width_input.setPlaceholderText("Width")
+        self.width_input.setPlaceholderText("Enter width...")
+        form_layout.addWidget(self.width_input, row, 1)
+        row += 1
         
-        size_layout.addWidget(QLabel("L:"))
-        size_layout.addWidget(self.length_input)
-        size_layout.addWidget(QLabel("×"))
-        size_layout.addWidget(QLabel("W:"))
-        size_layout.addWidget(self.width_input)
+        # Array Size
+        form_layout.addWidget(QLabel("Array Size:"), row, 0)
+        self.array_size_input = QLineEdit()
+        self.array_size_input.setPlaceholderText("Enter array size...")
+        form_layout.addWidget(self.array_size_input, row, 1)
+        row += 1
         
-        form_layout.addWidget(size_widget, row, 1)
+        # Board Thickness
+        form_layout.addWidget(QLabel("Board Thickness:"), row, 0)
+        self.board_thickness_input = QLineEdit()
+        self.board_thickness_input.setValidator(QDoubleValidator(0.1, 10.0, 2))
+        self.board_thickness_input.setPlaceholderText("Enter board thickness...")
+        form_layout.addWidget(self.board_thickness_input, row, 1)
         row += 1
 
         # Material Specifications
@@ -416,21 +468,61 @@ class DataEntryPage(QWidget):
         form_layout.addWidget(material_label, row, 0, 1, 2)
         row += 1
         
-        materials = [
-            ("Material:", "material_input"),
-            ("Mask Color:", "mask_color_input"),
-            ("Silk Color:", "silk_color_input"),
-            ("Copper Inner:", "copper_inner_input"),
-            ("Copper Outer:", "copper_outer_input")
-        ]
+        # Cu Inner
+        form_layout.addWidget(QLabel("Cu Inner:"), row, 0)
+        self.cu_inner_input = QLineEdit()
+        self.cu_inner_input.setPlaceholderText("Enter Cu inner...")
+        form_layout.addWidget(self.cu_inner_input, row, 1)
+        row += 1
         
-        for label_text, attr_name in materials:
-            form_layout.addWidget(QLabel(label_text), row, 0)
-            line_edit = QLineEdit()
-            line_edit.setPlaceholderText(f"Enter {label_text.lower().rstrip(':')}...")
-            setattr(self, attr_name, line_edit)
-            form_layout.addWidget(line_edit, row, 1)
-            row += 1
+        # Cu Outer
+        form_layout.addWidget(QLabel("Cu Outer:"), row, 0)
+        self.cu_outer_input = QLineEdit()
+        self.cu_outer_input.setPlaceholderText("Enter Cu outer...")
+        form_layout.addWidget(self.cu_outer_input, row, 1)
+        row += 1
+        
+        # Surface Finish
+        form_layout.addWidget(QLabel("Surface Finish:"), row, 0)
+        self.surface_finish_input = QLineEdit()
+        self.surface_finish_input.setPlaceholderText("Enter surface finish...")
+        form_layout.addWidget(self.surface_finish_input, row, 1)
+        row += 1
+        
+        # Selective Plating
+        form_layout.addWidget(QLabel("Selective Plating:"), row, 0)
+        self.selective_plating_combo = QComboBox()
+        self.selective_plating_combo.addItems(["No", "Yes"])
+        form_layout.addWidget(self.selective_plating_combo, row, 1)
+        row += 1
+        
+        # Drills
+        form_layout.addWidget(QLabel("Drills:"), row, 0)
+        self.drills_input = QLineEdit()
+        self.drills_input.setPlaceholderText("Enter drill specifications...")
+        form_layout.addWidget(self.drills_input, row, 1)
+        row += 1
+        
+        # Impedance
+        form_layout.addWidget(QLabel("Impedance:"), row, 0)
+        self.impedance_combo = QComboBox()
+        self.impedance_combo.addItems(["No", "Yes"])
+        form_layout.addWidget(self.impedance_combo, row, 1)
+        row += 1
+        
+        # Soldermask
+        form_layout.addWidget(QLabel("Soldermask:"), row, 0)
+        self.soldermask_input = QLineEdit()
+        self.soldermask_input.setPlaceholderText("Enter soldermask color...")
+        form_layout.addWidget(self.soldermask_input, row, 1)
+        row += 1
+        
+        # Silkscreen
+        form_layout.addWidget(QLabel("Silkscreen:"), row, 0)
+        self.silkscreen_input = QLineEdit()
+        self.silkscreen_input.setPlaceholderText("Enter silkscreen color...")
+        form_layout.addWidget(self.silkscreen_input, row, 1)
+        row += 1
 
         # Special Features
         features_label = QLabel("Special Features")
@@ -439,32 +531,92 @@ class DataEntryPage(QWidget):
         form_layout.addWidget(features_label, row, 0, 1, 2)
         row += 1
         
-        features = [
-            ("Back Drill:", "back_drill_combo"),
-            ("Blind Via:", "blind_via_combo"),
-            ("Buried Via:", "berried_via_combo")
-        ]
+        # Back Drill
+        form_layout.addWidget(QLabel("Back Drill:"), row, 0)
+        self.back_drill_combo = QComboBox()
+        self.back_drill_combo.addItems(["No", "Yes"])
+        form_layout.addWidget(self.back_drill_combo, row, 1)
+        row += 1
         
-        for label_text, attr_name in features:
-            form_layout.addWidget(QLabel(label_text), row, 0)
-            combo = QComboBox()
-            combo.addItems(["No", "Yes"])
-            setattr(self, attr_name, combo)
-            form_layout.addWidget(combo, row, 1)
-            row += 1
+        # Blind Via
+        form_layout.addWidget(QLabel("Blind Via:"), row, 0)
+        self.blind_via_combo = QComboBox()
+        self.blind_via_combo.addItems(["No", "Yes"])
+        form_layout.addWidget(self.blind_via_combo, row, 1)
+        row += 1
+        
+        # Berried Via
+        form_layout.addWidget(QLabel("Buried Via:"), row, 0)
+        self.berried_via_combo = QComboBox()
+        self.berried_via_combo.addItems(["No", "Yes"])
+        form_layout.addWidget(self.berried_via_combo, row, 1)
+        row += 1
+        
+        # Via Type
+        form_layout.addWidget(QLabel("Via Type:"), row, 0)
+        self.via_type_input = QLineEdit()
+        self.via_type_input.setPlaceholderText("Enter via type...")
+        form_layout.addWidget(self.via_type_input, row, 1)
+        row += 1
+        
+        # Via Fill
+        form_layout.addWidget(QLabel("Via Fill:"), row, 0)
+        self.via_fill_input = QLineEdit()
+        self.via_fill_input.setPlaceholderText("Enter via fill...")
+        form_layout.addWidget(self.via_fill_input, row, 1)
+        row += 1
+        
+        # Beveling
+        form_layout.addWidget(QLabel("Beveling:"), row, 0)
+        self.beveling_input = QLineEdit()
+        self.beveling_input.setPlaceholderText("Enter beveling...")
+        form_layout.addWidget(self.beveling_input, row, 1)
+        row += 1
+        
+        # Edge Plating
+        form_layout.addWidget(QLabel("Edge Plating:"), row, 0)
+        self.edge_plating_combo = QComboBox()
+        self.edge_plating_combo.addItems(["No", "Yes"])
+        form_layout.addWidget(self.edge_plating_combo, row, 1)
+        row += 1
         
         # Pricing
-        pricing_label = QLabel("Pricing")
+        pricing_label = QLabel("Pricing & Timeline")
         pricing_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         pricing_label.setStyleSheet("color: #0078d4; margin: 15px 0 5px 0;")
         form_layout.addWidget(pricing_label, row, 0, 1, 2)
         row += 1
         
-        form_layout.addWidget(QLabel("Total Price ($):"), row, 0)
-        self.price_input = QLineEdit()
-        self.price_input.setValidator(QDoubleValidator(0.01, 999999.99, 2))
-        self.price_input.setPlaceholderText("Enter total price...")
-        form_layout.addWidget(self.price_input, row, 1)
+        # Price Per Unit
+        form_layout.addWidget(QLabel("Price Per Unit (₹):"), row, 0)
+        self.price_per_unit_input = QLineEdit()
+        self.price_per_unit_input.setValidator(QDoubleValidator(0.01, 999999.99, 2))
+        self.price_per_unit_input.setPlaceholderText("Enter price per unit...")
+        form_layout.addWidget(self.price_per_unit_input, row, 1)
+        row += 1
+        
+        # Engineering Cost
+        form_layout.addWidget(QLabel("Engineering Cost (₹):"), row, 0)
+        self.engg_cost_input = QLineEdit()
+        self.engg_cost_input.setValidator(QDoubleValidator(0.0, 999999.99, 2))
+        self.engg_cost_input.setPlaceholderText("Enter engineering cost...")
+        form_layout.addWidget(self.engg_cost_input, row, 1)
+        row += 1
+        
+        # Total Cost INR
+        form_layout.addWidget(QLabel("Total Cost INR (₹):"), row, 0)
+        self.total_cost_inr_input = QLineEdit()
+        self.total_cost_inr_input.setValidator(QDoubleValidator(0.01, 999999.99, 2))
+        self.total_cost_inr_input.setPlaceholderText("Enter total cost...")
+        form_layout.addWidget(self.total_cost_inr_input, row, 1)
+        row += 1
+        
+        # Lead Time
+        form_layout.addWidget(QLabel("Lead Time:"), row, 0)
+        self.lead_time_input = QLineEdit()
+        self.lead_time_input.setPlaceholderText("Enter lead time...")
+        form_layout.addWidget(self.lead_time_input, row, 1)
+        row += 1
         
         input_layout.addLayout(form_layout)
         
@@ -502,81 +654,32 @@ class DataEntryPage(QWidget):
         # Add scroll area to the frame layout
         left_frame_layout.addWidget(self.input_scroll_area)
         
-            # Right side - Saved data cards
+        # Right side - Saved data cards (keeping existing structure)
         right_frame = QGroupBox("Saved PCB Data Records")
         right_layout = QVBoxLayout(right_frame)
         
-        # Search/Filter section (stays at top, not scrollable)
+        # Search/Filter section
         search_layout = QHBoxLayout()
         search_label = QLabel("🔍 Search:")
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Search by fabricator or material...")
+        self.search_input.setPlaceholderText("Search by part number or material...")
         self.search_input.textChanged.connect(self.filter_cards)
         
         search_layout.addWidget(search_label)
         search_layout.addWidget(self.search_input)
         right_layout.addLayout(search_layout)
         
-        # ENHANCED Scroll area for cards
-        self.cards_scroll_area = QScrollArea()
-        self.cards_scroll_area.setWidgetResizable(True)
-        self.cards_scroll_area.setMinimumWidth(400)
-        self.cards_scroll_area.setMinimumHeight(300)  # Ensure minimum height
+        # Scroll area for cards
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setMinimumWidth(400)
         
-        # Enhanced scroll bar policies
-        self.cards_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.cards_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        
-        # Enhanced scroll area styling
-        self.cards_scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 2px solid #e1e1e1;
-                border-radius: 8px;
-                background-color: #f8f9fa;
-            }
-            QScrollArea > QWidget > QWidget {
-                background-color: #f8f9fa;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background-color: #f0f0f0;
-                width: 12px;
-                border-radius: 6px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #c0c0c0;
-                min-height: 20px;
-                border-radius: 6px;
-                margin: 2px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #0078d4;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-        """)
-        
-        # Cards container widget
         self.cards_widget = QWidget()
-        self.cards_widget.setStyleSheet("background-color: transparent;")
-        
-        # Cards layout with improved spacing
         self.cards_layout = QVBoxLayout(self.cards_widget)
-        self.cards_layout.setSpacing(10)
-        self.cards_layout.setContentsMargins(10, 10, 10, 10)
+        self.cards_layout.setSpacing(8)
         
-        # Set the cards widget to the scroll area
-        self.cards_scroll_area.setWidget(self.cards_widget)
-        
-        # Add scroll area to right layout
-        right_layout.addWidget(self.cards_scroll_area)
-        
-        # Add record count label at bottom
-        self.record_count_label = QLabel("No records")
-        self.record_count_label.setStyleSheet("color: #666666; font-size: 11px; padding: 5px;")
-        self.record_count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_layout.addWidget(self.record_count_label)
+        self.scroll_area.setWidget(self.cards_widget)
+        right_layout.addWidget(self.scroll_area)
         
         # Add frames to main layout
         layout.addWidget(left_frame, 1)
@@ -584,17 +687,51 @@ class DataEntryPage(QWidget):
         self.setLayout(layout)
         
         self.refresh_saved_data()
-
+        
+    def get_form_data(self):
+        """Get data from form inputs"""
+        return {
+            'pcb_part_number': self.pcb_part_number_input.text().strip(),
+            'quantity': int(self.quantity_input.text()) if self.quantity_input.text() else 0,
+            'layers': int(self.layers_combo.currentText()),
+            'pcb_spec': self.pcb_spec_combo.currentText(),
+            'material': self.material_input.text().strip(),
+            'length': float(self.length_input.text()) if self.length_input.text() else 0.0,
+            'width': float(self.width_input.text()) if self.width_input.text() else 0.0,
+            'array_size': self.array_size_input.text().strip(),
+            'board_thickness': float(self.board_thickness_input.text()) if self.board_thickness_input.text() else 0.0,
+            'cu_inner': self.cu_inner_input.text().strip(),
+            'cu_outer': self.cu_outer_input.text().strip(),
+            'surface_finish': self.surface_finish_input.text().strip(),
+            'selective_plating': self.selective_plating_combo.currentText(),
+            'drills': self.drills_input.text().strip(),
+            'impedance': self.impedance_combo.currentText(),
+            'soldermask': self.soldermask_input.text().strip(),
+            'silkscreen': self.silkscreen_input.text().strip(),
+            'back_drill': self.back_drill_combo.currentText(),
+            'blind_via': self.blind_via_combo.currentText(),
+            'berried_via': self.berried_via_combo.currentText(),
+            'via_type': self.via_type_input.text().strip(),
+            'via_fill': self.via_fill_input.text().strip(),
+            'beveling': self.beveling_input.text().strip(),
+            'edge_plating': self.edge_plating_combo.currentText(),
+            'price_per_unit': float(self.price_per_unit_input.text()) if self.price_per_unit_input.text() else 0.0,
+            'engg_cost': float(self.engg_cost_input.text()) if self.engg_cost_input.text() else 0.0,
+            'total_cost_inr': float(self.total_cost_inr_input.text()) if self.total_cost_inr_input.text() else 0.0,
+            'lead_time': self.lead_time_input.text().strip()
+        }
+        
     def save_data(self):
         """Save PCB data to database"""
         try:
             # Validate required fields
             if not all([
-                self.fabricator_input.text().strip(),
-                self.qty_input.text(),
+                self.pcb_part_number_input.text().strip(),
+                self.quantity_input.text(),
                 self.length_input.text(),
                 self.width_input.text(),
-                self.price_input.text()
+                self.price_per_unit_input.text(),
+                self.total_cost_inr_input.text()
             ]):
                 QMessageBox.warning(self, "Validation Error", 
                                   "Please fill all required fields!")
@@ -605,10 +742,12 @@ class DataEntryPage(QWidget):
             # Insert into database
             self.parent.cursor.execute('''
                 INSERT INTO pcb_data (
-                    fabricator_name, unit, pcb_qty, pcb_layer, pcb_length, pcb_width,
-                    material, mask_color, silk_color, copper_inner, copper_outer,
-                    back_drill, blind_via, berried_via, total_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    pcb_part_number, quantity, layers, pcb_spec, material, length, width,
+                    array_size, board_thickness, cu_inner, cu_outer, surface_finish,
+                    selective_plating, drills, impedance, soldermask, silkscreen,
+                    back_drill, blind_via, berried_via, via_type, via_fill, beveling,
+                    edge_plating, price_per_unit, engg_cost, total_cost_inr, lead_time
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', tuple(data.values()))
             
             self.parent.conn.commit()
@@ -621,66 +760,22 @@ class DataEntryPage(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to save data: {str(e)}")
     
-    def update_data(self):
-        """Update existing PCB data"""
-        try:
-            if self.current_edit_id is None:
-                return
-                
-            data = self.get_form_data()
-            
-            # Update existing record
-            self.parent.cursor.execute('''
-                UPDATE pcb_data SET
-                    fabricator_name = ?, unit = ?, pcb_qty = ?, pcb_layer = ?, 
-                    pcb_length = ?, pcb_width = ?, material = ?, mask_color = ?, 
-                    silk_color = ?, copper_inner = ?, copper_outer = ?,
-                    back_drill = ?, blind_via = ?, berried_via = ?, total_price = ?
-                WHERE id = ?
-            ''', tuple(data.values()) + (self.current_edit_id,))
-
-            self.parent.conn.commit()
-            QMessageBox.information(self, "Success", "Data updated successfully!")
-            self.clear_form()
-            self.refresh_saved_data()
-            
-        except ValueError:
-            QMessageBox.warning(self, "Input Error", "Please enter valid numeric values!")
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to update data: {str(e)}")
-    
-    def get_form_data(self):
-        """Get data from form inputs"""
-        return {
-            'fabricator_name': self.fabricator_input.text().strip(),
-            'unit': self.unit_combo.currentText(),
-            'pcb_qty': int(self.qty_input.text()),
-            'pcb_layer': int(self.layer_combo.currentText()),
-            'pcb_length': float(self.length_input.text()),
-            'pcb_width': float(self.width_input.text()),
-            'material': self.material_input.text().strip(),
-            'mask_color': self.mask_color_input.text().strip(),
-            'silk_color': self.silk_color_input.text().strip(),
-            'copper_inner': self.copper_inner_input.text().strip(),
-            'copper_outer': self.copper_outer_input.text().strip(),
-            'back_drill': self.back_drill_combo.currentText(),
-            'blind_via': self.blind_via_combo.currentText(),
-            'berried_via': self.berried_via_combo.currentText(),
-            'total_price': float(self.price_input.text())
-        }
-        
     def clear_form(self):
-        """Clear all form inputs and reset editing state"""
-        # Clear all inputs
-        for widget in [self.fabricator_input, self.qty_input, self.length_input, 
-                      self.width_input, self.material_input, self.mask_color_input,
-                      self.silk_color_input, self.copper_inner_input, 
-                      self.copper_outer_input, self.price_input]:
+        """Clear all form inputs"""
+        # Clear text inputs
+        for widget in [self.pcb_part_number_input, self.quantity_input, self.material_input, 
+                      self.length_input, self.width_input, self.array_size_input,
+                      self.board_thickness_input, self.cu_inner_input, self.cu_outer_input,
+                      self.surface_finish_input, self.drills_input, self.soldermask_input,
+                      self.silkscreen_input, self.via_type_input, self.via_fill_input,
+                      self.beveling_input, self.price_per_unit_input, self.engg_cost_input,
+                      self.total_cost_inr_input, self.lead_time_input]:
             widget.clear()
         
         # Reset combos to default
-        for combo in [self.unit_combo, self.layer_combo, self.back_drill_combo,
-                     self.blind_via_combo, self.berried_via_combo]:
+        for combo in [self.layers_combo, self.pcb_spec_combo, self.selective_plating_combo,
+                     self.impedance_combo, self.back_drill_combo, self.blind_via_combo,
+                     self.berried_via_combo, self.edge_plating_combo]:
             combo.setCurrentIndex(0)
         
         # Reset editing state
@@ -691,16 +786,14 @@ class DataEntryPage(QWidget):
 
     def refresh_saved_data(self):
         """Refresh the saved data cards"""
-        # Clear existing cards
         for i in reversed(range(self.cards_layout.count())):
             child = self.cards_layout.itemAt(i).widget()
             if child:
                 child.setParent(None)
                 
-        # Fetch data from database
         self.parent.cursor.execute('''
-            SELECT id, fabricator_name, material, pcb_layer, pcb_qty, total_price, 
-                   pcb_length, pcb_width, unit
+            SELECT id, pcb_part_number, material, layers, quantity, total_cost_inr, 
+                   length, width, lead_time
             FROM pcb_data ORDER BY created_date DESC
         ''')
         
@@ -709,7 +802,6 @@ class DataEntryPage(QWidget):
         
     def display_cards(self, data):
         """Display data cards"""
-        # Clear existing cards
         for i in reversed(range(self.cards_layout.count())):
             child = self.cards_layout.itemAt(i).widget()
             if child:
@@ -718,33 +810,16 @@ class DataEntryPage(QWidget):
         if not data:
             no_data_label = QLabel("📋 No PCB data records found.")
             no_data_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            no_data_label.setStyleSheet("""
-                color: #666666; 
-                font-style: italic; 
-                font-size: 14px;
-                padding: 40px;
-                background-color: white;
-                border: 2px dashed #e1e1e1;
-                border-radius: 10px;
-                margin: 20px;
-            """)
+            no_data_label.setStyleSheet("color: #666666; font-style: italic; padding: 20px;")
             self.cards_layout.addWidget(no_data_label)
-            self.record_count_label.setText("No records")
         else:
-            # Debug: Print the data structure
-            print(f"Data count: {len(data)}")
-            if data:
-                print(f"First record structure: {data[0]}")
-                print(f"Record length: {len(data[0])}")
-            
             for row in data:
                 card = EditableDataCard(row)
                 card.double_clicked.connect(self.load_data_in_form)
                 self.cards_layout.addWidget(card)
-            
-            self.record_count_label.setText(f"📊 {len(data)} record{'s' if len(data) != 1 else ''}")
         
         self.cards_layout.addStretch()
+
 
 
     def scroll_to_top(self):
@@ -761,20 +836,6 @@ class DataEntryPage(QWidget):
                 self.cards_scroll_area.verticalScrollBar().setValue(card_pos)
                 break
 
-
-    def filter_cards(self):
-        """Filter cards based on search input"""
-        search_text = self.search_input.text().lower()
-        
-        if not search_text:
-            filtered_data = self.all_data
-        else:
-            filtered_data = [
-                row for row in self.all_data
-                if search_text in row[1].lower() or search_text in row[2].lower()
-            ]
-        
-        self.display_cards(filtered_data)
 
     def load_data_in_form(self, data):
         """Load card data into input fields for editing"""
@@ -837,6 +898,119 @@ class DataEntryPage(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Failed to delete record: {str(e)}")
 
+    def filter_cards(self):
+        """Filter cards based on search input"""
+        search_text = self.search_input.text().lower()
+        
+        if not search_text:
+            filtered_data = self.all_data
+        else:
+            filtered_data = [
+                row for row in self.all_data
+                if search_text in str(row[1]).lower() or search_text in str(row[2]).lower()
+            ]
+        
+        self.display_cards(filtered_data)
+
+    def update_data(self):
+        """Update existing PCB data"""
+        try:
+            if self.current_edit_id is None:
+                return
+                
+            # Validate required fields
+            if not all([
+                self.pcb_part_number_input.text().strip(),
+                self.quantity_input.text(),
+                self.length_input.text(),
+                self.width_input.text(),
+                self.price_per_unit_input.text(),
+                self.total_cost_inr_input.text()
+            ]):
+                QMessageBox.warning(self, "Validation Error", 
+                                "Please fill all required fields!")
+                return
+                
+            data = self.get_form_data()
+            
+            # Update existing record
+            self.parent.cursor.execute('''
+                UPDATE pcb_data SET
+                    pcb_part_number = ?, quantity = ?, layers = ?, pcb_spec = ?, material = ?, 
+                    length = ?, width = ?, array_size = ?, board_thickness = ?, cu_inner = ?, 
+                    cu_outer = ?, surface_finish = ?, selective_plating = ?, drills = ?, 
+                    impedance = ?, soldermask = ?, silkscreen = ?, back_drill = ?, blind_via = ?, 
+                    berried_via = ?, via_type = ?, via_fill = ?, beveling = ?, edge_plating = ?, 
+                    price_per_unit = ?, engg_cost = ?, total_cost_inr = ?, lead_time = ?
+                WHERE id = ?
+            ''', tuple(data.values()) + (self.current_edit_id,))
+
+            self.parent.conn.commit()
+            QMessageBox.information(self, "Success", "Data updated successfully!")
+            self.clear_form()
+            self.refresh_saved_data()
+            
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Please enter valid numeric values!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to update data: {str(e)}")
+
+    def load_data_in_form(self, data):
+        """Load card data into input fields for editing"""
+        self.current_edit_id = data[0]
+        
+        # Query full record from database with correct field names
+        self.parent.cursor.execute("SELECT * FROM pcb_data WHERE id=?", (self.current_edit_id,))
+        record = self.parent.cursor.fetchone()
+        
+        if not record:
+            QMessageBox.warning(self, "Load Error", "Failed to load the selected record.")
+            return
+
+        # Unpack record data according to new database schema
+        (_, pcb_part_number, quantity, layers, pcb_spec, material, length, width,
+        array_size, board_thickness, cu_inner, cu_outer, surface_finish,
+        selective_plating, drills, impedance, soldermask, silkscreen,
+        back_drill, blind_via, berried_via, via_type, via_fill, beveling,
+        edge_plating, price_per_unit, engg_cost, total_cost_inr, lead_time, _) = record
+
+        # Populate form fields with correct field names
+        self.pcb_part_number_input.setText(pcb_part_number or "")
+        self.quantity_input.setText(str(quantity))
+        self.layers_combo.setCurrentText(str(layers))
+        self.pcb_spec_combo.setCurrentText(pcb_spec or "Class 2")
+        self.material_input.setText(material or "")
+        self.length_input.setText(str(length))
+        self.width_input.setText(str(width))
+        self.array_size_input.setText(array_size or "")
+        self.board_thickness_input.setText(str(board_thickness) if board_thickness else "")
+        self.cu_inner_input.setText(cu_inner or "")
+        self.cu_outer_input.setText(cu_outer or "")
+        self.surface_finish_input.setText(surface_finish or "")
+        self.selective_plating_combo.setCurrentText(selective_plating or "No")
+        self.drills_input.setText(drills or "")
+        self.impedance_combo.setCurrentText(impedance or "No")
+        self.soldermask_input.setText(soldermask or "")
+        self.silkscreen_input.setText(silkscreen or "")
+        self.back_drill_combo.setCurrentText(back_drill or "No")
+        self.blind_via_combo.setCurrentText(blind_via or "No")
+        self.berried_via_combo.setCurrentText(berried_via or "No")
+        self.via_type_input.setText(via_type or "")
+        self.via_fill_input.setText(via_fill or "")
+        self.beveling_input.setText(beveling or "")
+        self.edge_plating_combo.setCurrentText(edge_plating or "No")
+        self.price_per_unit_input.setText(str(price_per_unit))
+        self.engg_cost_input.setText(str(engg_cost) if engg_cost else "")
+        self.total_cost_inr_input.setText(str(total_cost_inr))
+        self.lead_time_input.setText(lead_time or "")
+
+        # Switch to edit mode
+        self.save_btn.hide()
+        self.update_btn.show()
+        self.delete_btn.show()
+
+
+
 class CalculationPage(QWidget):
     def __init__(self, parent):
         super().__init__()
@@ -844,7 +1018,7 @@ class CalculationPage(QWidget):
         self.init_ui()
         
     def init_ui(self):
-        """Initialize calculation page UI"""
+        """Initialize calculation page UI with updated fields"""
         layout = QHBoxLayout()
         layout.setSpacing(20)
         
@@ -884,6 +1058,12 @@ class CalculationPage(QWidget):
         self.job_input.setPlaceholderText("Enter job number...")
         form_layout.addWidget(self.job_input, row, 1)
         row += 1
+        
+        form_layout.addWidget(QLabel("PCB Part Number:"), row, 0)
+        self.pcb_part_input = QLineEdit()
+        self.pcb_part_input.setPlaceholderText("Enter PCB part number...")
+        form_layout.addWidget(self.pcb_part_input, row, 1)
+        row += 1
 
         # PCB Specifications
         pcb_label = QLabel("PCB Specifications")
@@ -898,14 +1078,7 @@ class CalculationPage(QWidget):
         form_layout.addWidget(self.unit_combo, row, 1)
         row += 1
 
-        form_layout.addWidget(QLabel("Quantity:"), row, 0)
-        self.qty_input = QLineEdit()
-        self.qty_input.setValidator(QIntValidator(1, 999999))
-        self.qty_input.setPlaceholderText("Enter quantity...")
-        form_layout.addWidget(self.qty_input, row, 1)
-        row += 1
-
-        # PCB Size with improved layout
+        # PCB Size
         form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
         size_widget = QWidget()
         size_layout = QHBoxLayout(size_widget)
@@ -917,7 +1090,7 @@ class CalculationPage(QWidget):
         
         self.width_input = QLineEdit()
         self.width_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-        self.width_input.setPlaceholderText("Width")
+        self.width_input.setPlaceholderText("Width")  # Fixed typo here
         
         size_layout.addWidget(QLabel("L:"))
         size_layout.addWidget(self.length_input)
@@ -928,38 +1101,32 @@ class CalculationPage(QWidget):
         form_layout.addWidget(size_widget, row, 1)
         row += 1
 
-        # Database Filters
+        # Database Filters section
         filter_label = QLabel("Database Filters")
         filter_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         filter_label.setStyleSheet("color: #0078d4; margin: 15px 0 5px 0;")
         form_layout.addWidget(filter_label, row, 0, 1, 2)
         row += 1
 
-        # Create filter combos
-        filters = [
-            ("Fabricator:", "fabricator"),
-            ("PCB Layer:", "pcb_layer"), 
-            ("Material:", "material"),
-            ("Mask Color:", "mask_color"),
-            ("Silk Color:", "silk_color"),
-            ("Copper Inner:", "copper_inner"),
-            ("Copper Outer:", "copper_outer"),
-            ("Back Drill:", "back_drill"),
-            ("Blind Via:", "blind_via"),
-            ("Buried Via:", "berried_via")
+        # Initialize filter_combos dictionary BEFORE using it
+        self.filter_combos = {}
+        
+        # Create all filter fields
+        filter_fields = [
+            "layers", "material", "board_thickness", "cu_inner", "cu_outer",
+            "surface_finish", "impedance", "soldermask", "silkscreen", 
+            "back_drill", "blind_via", "berried_via"
         ]
         
-        self.filter_combos = {}
-        for label_text, key in filters:
+        for field in filter_fields:
+            label_text = field.replace('_', ' ').title() + ":"
             form_layout.addWidget(QLabel(label_text), row, 0)
             combo = QComboBox()
             combo.setMinimumWidth(200)
-            self.filter_combos[key] = combo
+            self.filter_combos[field] = combo
             form_layout.addWidget(combo, row, 1)
             row += 1
 
-        self.filter_combos["fabricator"].currentTextChanged.connect(self.update_filters)
-        
         input_layout.addLayout(form_layout)
         
         # Calculate button
@@ -971,18 +1138,24 @@ class CalculationPage(QWidget):
         
         # Set the container widget to the scroll area
         self.input_scroll_area.setWidget(input_container)
-        
-        # Add scroll area to the frame layout
         left_frame_layout.addWidget(self.input_scroll_area)
         
         # Right side - Results
         right_frame = QGroupBox("Calculation Results")
         right_layout = QVBoxLayout(right_frame)
-        
-        self.results_text = QTextEdit()
-        self.results_text.setReadOnly(True)
-        self.results_text.setFont(QFont("Consolas", 11))
-        right_layout.addWidget(self.results_text)
+
+        # Create table widget for results
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(2)
+        self.results_table.setHorizontalHeaderLabels(['Parameter', 'Value'])
+        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.results_table.verticalHeader().setVisible(False)
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        right_layout.addWidget(self.results_table)
+
         
         # Export button
         self.export_btn = QPushButton("📊 Export to Excel")
@@ -995,204 +1168,237 @@ class CalculationPage(QWidget):
         layout.addWidget(left_frame, 1)
         layout.addWidget(right_frame, 1)
         self.setLayout(layout)
-        
+            
     def refresh_data(self):
         """Refresh dropdown data from database"""
-        # Get unique fabricators
-        self.parent.cursor.execute("SELECT DISTINCT fabricator_name FROM pcb_data ORDER BY fabricator_name")
-        fabricators = [row[0] for row in self.parent.cursor.fetchall()]
-        
-        self.filter_combos["fabricator"].clear()
-        if fabricators:
-            self.filter_combos["fabricator"].addItems(fabricators)
-            self.update_filters()
+        try:
+            # Get unique values for each filter
+            filter_fields = ["layers", "material", "board_thickness", "cu_inner", "cu_outer",
+                            "surface_finish", "impedance", "soldermask", "silkscreen",
+                            "back_drill", "blind_via", "berried_via"]
+            
+            for field in filter_fields:
+                self.parent.cursor.execute(f"SELECT DISTINCT {field} FROM pcb_data WHERE {field} IS NOT NULL AND {field} != '' ORDER BY {field}")
+                values = [str(row[0]) for row in self.parent.cursor.fetchall()]
+                if field in self.filter_combos:
+                    self.filter_combos[field].clear()
+                    if values:
+                        self.filter_combos[field].addItems(values)
+        except Exception as e:
+            print(f"Error refreshing data: {e}")
 
-    def update_filters(self):
-        """Update filter dropdowns based on selected fabricator"""
-        fabricator = self.filter_combos["fabricator"].currentText()
-        if not fabricator:
-            return
-            
-        # Get data for selected fabricator
-        self.parent.cursor.execute('''
-            SELECT DISTINCT pcb_layer, material, mask_color, silk_color, 
-                   copper_inner, copper_outer, back_drill, blind_via, berried_via
-            FROM pcb_data WHERE fabricator_name = ?
-            ORDER BY pcb_layer
-        ''', (fabricator,))
-        
-        data = self.parent.cursor.fetchall()
-        
-        if not data:
-            return
-            
-        # Update each dropdown
-        fields = ["pcb_layer", "material", "mask_color", "silk_color", 
-                 "copper_inner", "copper_outer", "back_drill", "blind_via", "berried_via"]
-        
-        for i, field in enumerate(fields):
-            combo = self.filter_combos[field]
-            combo.blockSignals(True)
-            combo.clear()
-            unique_values = sorted(set(str(row[i]) for row in data if row[i]))
-            combo.addItems(unique_values)
-            combo.blockSignals(False)
 
     def calculate_price(self):
-        """Calculate PCB price based on database data"""
+        """Calculate PCB price based on updated database data"""
         try:
             # Validate inputs
             if not all([
                 self.customer_input.text().strip(),
                 self.job_input.text().strip(),
-                self.qty_input.text(),
+                self.pcb_part_input.text().strip(),
                 self.length_input.text(),
-                self.width_input.text(),
-                self.filter_combos["fabricator"].currentText()
+                self.width_input.text()
             ]):
-                QMessageBox.warning(self, "Input Error", 
-                                  "Please fill all required fields!")
+                QMessageBox.warning(self, "Input Error", "Please fill all required fields!")
                 return
-                
+
             # Get input values
             customer_name = self.customer_input.text().strip()
             job_number = self.job_input.text().strip()
+            pcb_part_number = self.pcb_part_input.text().strip()
             unit = self.unit_combo.currentText()
-            qty = int(self.qty_input.text())
             length = float(self.length_input.text())
             width = float(self.width_input.text())
-            
-            # Search for matching records
-            query = '''
-                SELECT pcb_qty, pcb_length, pcb_width, total_price
-                FROM pcb_data 
-                WHERE fabricator_name = ? AND pcb_layer = ? AND material = ? 
-                  AND mask_color = ? AND silk_color = ? AND copper_inner = ? 
-                  AND copper_outer = ? AND back_drill = ? AND blind_via = ? 
-                  AND berried_via = ? AND pcb_qty >= ?
-                ORDER BY total_price DESC
+
+            # Build dynamic query based on selected filters
+            query_conditions = []
+            params = []
+            for field, combo in self.filter_combos.items():
+                if combo.currentText():
+                    query_conditions.append(f"{field} = ?")
+                    params.append(combo.currentText())
+
+            base_query = '''
+            SELECT quantity, length, width, price_per_unit, total_cost_inr
+            FROM pcb_data
             '''
             
-            params = (
-                self.filter_combos["fabricator"].currentText(),
-                int(self.filter_combos["pcb_layer"].currentText()) if self.filter_combos["pcb_layer"].currentText() else 0,
-                self.filter_combos["material"].currentText(),
-                self.filter_combos["mask_color"].currentText(),
-                self.filter_combos["silk_color"].currentText(),
-                self.filter_combos["copper_inner"].currentText(),
-                self.filter_combos["copper_outer"].currentText(),
-                self.filter_combos["back_drill"].currentText(),
-                self.filter_combos["blind_via"].currentText(),
-                self.filter_combos["berried_via"].currentText(),
-                qty
-            )
-            
+            if query_conditions:
+                query = base_query + "WHERE " + " AND ".join(query_conditions) + " ORDER BY price_per_unit DESC"
+            else:
+                query = base_query + "ORDER BY price_per_unit DESC"
+
             self.parent.cursor.execute(query, params)
             matches = self.parent.cursor.fetchall()
-            
+
             if not matches:
-                QMessageBox.information(self, "No Match", 
-                                      "No matching records found for the specified criteria and quantity.")
+                QMessageBox.information(self, "No Match", "No matching records found for the specified criteria.")
                 return
-                
-            # Use the record with maximum price
+
+            # Use the record with maximum price per unit
             best_match = matches[0]
-            ref_qty, ref_length, ref_width, ref_price = best_match
-            
+            ref_qty, ref_length, ref_width, ref_price_per_unit, ref_total_cost = best_match
+
             # Calculate price per square unit
             ref_area = ref_length * ref_width
-            price_per_sq_unit = ref_price / ref_area if ref_area > 0 else 0
-            
+            price_per_sq_unit = ref_price_per_unit / ref_area if ref_area > 0 else 0
+
             # Calculate prices for input PCB
             input_area = length * width
             per_unit_price = price_per_sq_unit * input_area
-            total_price = per_unit_price * qty
-            
-            # Display enhanced results
-            results = f"""
-╔══════════════════════════════════════════════════════════════╗
-║                    CALCULATION RESULTS                       ║
-╚══════════════════════════════════════════════════════════════╝
 
-📋 CUSTOMER INFORMATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Customer Name: {customer_name}
-• Job Number: {job_number}
-• Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+            # Populate results table
+            self.populate_results_table(customer_name, job_number, pcb_part_number, unit, 
+                                    length, width, input_area, ref_length, ref_width, 
+                                    ref_price_per_unit, price_per_sq_unit, per_unit_price)
 
-🔧 PCB SPECIFICATIONS
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Unit: {unit}
-• Quantity: {qty:,} pieces
-• Dimensions: {length} × {width} {unit}
-• Area per PCB: {input_area:.2f} {unit}²
-• Total Area: {input_area * qty:.2f} {unit}²
-
-⚙️ SELECTED CONFIGURATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Fabricator: {self.filter_combos["fabricator"].currentText()}
-• Layers: {self.filter_combos["pcb_layer"].currentText()}
-• Material: {self.filter_combos["material"].currentText()}
-• Mask Color: {self.filter_combos["mask_color"].currentText()}
-• Silk Color: {self.filter_combos["silk_color"].currentText()}
-• Copper Inner: {self.filter_combos["copper_inner"].currentText()}
-• Copper Outer: {self.filter_combos["copper_outer"].currentText()}
-• Back Drill: {self.filter_combos["back_drill"].currentText()}
-• Blind Via: {self.filter_combos["blind_via"].currentText()}
-• Buried Via: {self.filter_combos["berried_via"].currentText()}
-
-💰 PRICE CALCULATION
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Reference PCB: {ref_length} × {ref_width} {unit} @ ${ref_price:.2f} for {ref_qty:,} pcs
-• Price per {unit}²: ${price_per_sq_unit:.4f}
-• Price per PCB: ${per_unit_price:.2f}
-• Total Price for {qty:,} pieces: ${total_price:.2f}
-
-📊 COST BREAKDOWN
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-• Unit Cost: ${per_unit_price:.2f} per piece
-• Total Cost: ${total_price:.2f}
-• Cost per {unit}²: ${price_per_sq_unit:.4f}
-            """
-            
-            self.results_text.setPlainText(results.strip())
-            
-            # Save calculation to database
+            # Save calculation to database (existing logic)
             self.parent.cursor.execute('''
-                INSERT INTO calculation_results (
-                    customer_name, job_number, unit, qty, pcb_length, pcb_width,
-                    fabricator_name, pcb_layer, material, mask_color, silk_color,
-                    copper_inner, copper_outer, back_drill, blind_via, berried_via,
-                    per_sq_mm_price, per_unit_price, total_price
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO calculation_results (
+                customer_name, job_number, pcb_part_number, unit, pcb_length, pcb_width,
+                layers, material, board_thickness, cu_inner, cu_outer, surface_finish,
+                impedance, soldermask, silkscreen, back_drill, blind_via, berried_via,
+                per_sq_unit_price, per_unit_price, total_price
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                customer_name, job_number, unit, qty, length, width,
-                self.filter_combos["fabricator"].currentText(),
-                int(self.filter_combos["pcb_layer"].currentText()) if self.filter_combos["pcb_layer"].currentText() else 0,
-                self.filter_combos["material"].currentText(), self.filter_combos["mask_color"].currentText(),
-                self.filter_combos["silk_color"].currentText(), self.filter_combos["copper_inner"].currentText(),
-                self.filter_combos["copper_outer"].currentText(), self.filter_combos["back_drill"].currentText(),
-                self.filter_combos["blind_via"].currentText(), self.filter_combos["berried_via"].currentText(),
-                price_per_sq_unit, per_unit_price, total_price
+                customer_name, job_number, pcb_part_number, unit, length, width,
+                self.filter_combos.get("layers", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("material", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("board_thickness", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("cu_inner", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("cu_outer", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("surface_finish", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("impedance", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                "",  # soldermask - not in filter
+                "",  # silkscreen - not in filter
+                self.filter_combos.get("back_drill", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("blind_via", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                self.filter_combos.get("berried_via", type('obj', (object,), {'currentText': lambda: ''})).currentText(),
+                price_per_sq_unit, per_unit_price, per_unit_price
             ))
-            
+
             self.parent.conn.commit()
-            
+
         except ValueError:
             QMessageBox.warning(self, "Input Error", "Please enter valid numeric values!")
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Calculation failed: {str(e)}")
 
+    def populate_results_table(self, customer_name, job_number, pcb_part_number, unit,
+                            length, width, input_area, ref_length, ref_width,
+                            ref_price_per_unit, price_per_sq_unit, per_unit_price):
+        """Populate the results table with calculation data in Excel-like format"""
+        
+        # Define all rows with their data
+        rows = [
+            ("PCB Fabrication Cost Tool", "", "header"),
+            ("", "", "spacer"),
+            ("Customer Information", "", "section"),
+            ("Customer Name", customer_name, "data"),
+            ("Job Number", job_number, "data"),
+            ("PCB Part Number", pcb_part_number, "data"),
+            ("Calculation Date", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "data"),
+            ("", "", "spacer"),
+            ("PCB Specifications", "", "section"),
+            ("Unit", unit, "data"),
+            ("PCB Length", f"{length} {unit}", "data"),
+            ("PCB Width", f"{width} {unit}", "data"),
+            ("PCB Area", f"{input_area:.2f} {unit}²", "data"),
+        ]
+        
+        # Add selected configuration if filters are applied - FIXED LINE
+        if any(combo.currentText() for combo in self.filter_combos.values()):
+            rows.extend([
+                ("", "", "spacer"),
+                ("Selected Configuration", "", "section")
+            ])
+            
+            for field, combo in self.filter_combos.items():
+                if combo.currentText():
+                    field_display = field.replace('_', ' ').title()
+                    rows.append((field_display, combo.currentText(), "data"))
+        
+        # Add reference data and calculations
+        rows.extend([
+            ("", "", "spacer"),
+            ("Reference Data", "", "section"),
+            ("Reference PCB Size", f"{ref_length} × {ref_width} {unit}", "data"),
+            ("Reference Price/Unit", f"₹{ref_price_per_unit:.2f}", "data"),
+            ("", "", "spacer"),
+            ("Price Calculation", "", "section"),
+            ("Price per Square Unit", f"₹{price_per_sq_unit:.4f}", "calculation"),
+            ("Estimated Price per PCB", f"₹{per_unit_price:.2f}", "calculation"),
+            ("Unit Cost", f"₹{per_unit_price:.2f} per piece", "calculation")
+        ])
+
+        # Set up the table
+        self.results_table.setRowCount(len(rows))
+        
+        # Populate table items
+        for row_idx, (param, value, row_type) in enumerate(rows):
+            param_item = QTableWidgetItem(param)
+            value_item = QTableWidgetItem(value)
+            
+            # Apply formatting based on row type
+            if row_type == "header":
+                # Blue header like Excel
+                param_item.setBackground(QColor(68, 114, 196))  # Excel blue
+                param_item.setForeground(QColor(255, 255, 255))  # White text
+                value_item.setBackground(QColor(68, 114, 196))
+                value_item.setForeground(QColor(255, 255, 255))
+                font = QFont()
+                font.setBold(True)
+                font.setPointSize(14)
+                param_item.setFont(font)
+                param_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                
+            elif row_type == "section":
+                # Light blue section headers
+                param_item.setBackground(QColor(213, 228, 247))  # Light blue
+                value_item.setBackground(QColor(213, 228, 247))
+                font = QFont()
+                font.setBold(True)
+                param_item.setFont(font)
+                value_item.setFont(font)
+                
+            elif row_type == "calculation":
+                # Light green for calculations
+                param_item.setBackground(QColor(226, 239, 218))  # Light green
+                value_item.setBackground(QColor(226, 239, 218))
+                font = QFont()
+                font.setBold(True)
+                param_item.setFont(font)
+                value_item.setFont(font)
+                value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+                
+            elif row_type == "data":
+                # Regular data rows
+                param_item.setBackground(QColor(242, 242, 242))  # Light gray
+                value_item.setBackground(QColor(255, 255, 255))  # White
+                value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+                
+            elif row_type == "spacer":
+                # Empty spacer rows
+                param_item.setBackground(QColor(255, 255, 255))
+                value_item.setBackground(QColor(255, 255, 255))
+
+            self.results_table.setItem(row_idx, 0, param_item)
+            self.results_table.setItem(row_idx, 1, value_item)
+
+        # Resize columns and rows
+        self.results_table.resizeColumnsToContents()
+        self.results_table.resizeRowsToContents()
+
+                
     def export_to_excel(self):
-        """Export calculation results to Excel"""
+        """Export calculation results to Excel with two-column format"""
         try:
-            # Get all calculation results
             self.parent.cursor.execute('''
-                SELECT customer_name, job_number, unit, qty, pcb_length, pcb_width,
-                       fabricator_name, pcb_layer, material, mask_color, silk_color,
-                       copper_inner, copper_outer, back_drill, blind_via, berried_via,
-                       per_sq_mm_price, per_unit_price, total_price, calculation_date
-                FROM calculation_results ORDER BY calculation_date DESC
+            SELECT customer_name, job_number, pcb_part_number, unit, pcb_length, pcb_width,
+            layers, material, board_thickness, cu_inner, cu_outer, surface_finish,
+            impedance, soldermask, silkscreen, back_drill, blind_via, berried_via,
+            per_sq_unit_price, per_unit_price, total_price, calculation_date
+            FROM calculation_results ORDER BY calculation_date DESC
             ''')
             
             data = self.parent.cursor.fetchall()
@@ -1200,18 +1406,7 @@ class CalculationPage(QWidget):
             if not data:
                 QMessageBox.information(self, "Export", "No calculation data to export.")
                 return
-                
-            # Create DataFrame
-            columns = [
-                'Customer Name', 'Job Number', 'Unit', 'Qty', 'PCB Length', 'PCB Width',
-                'Fabricator', 'PCB Layer', 'Material', 'Mask Color', 'Silk Color',
-                'Copper Inner', 'Copper Outer', 'Back Drill', 'Blind Via', 'Buried Via',
-                'Price per Sq Unit', 'Per Unit Price', 'Total Price', 'Calculation Date'
-            ]
-            
-            df = pd.DataFrame(data, columns=columns)
-            
-            # Get save location
+
             file_path, _ = QFileDialog.getSaveFileName(
                 self, "Export to Excel", 
                 f"PCB_Calculations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
@@ -1219,13 +1414,62 @@ class CalculationPage(QWidget):
             )
             
             if file_path:
-                df.to_excel(file_path, index=False, engine='openpyxl')
-                QMessageBox.information(self, "Export Success", 
-                                      f"Data exported successfully!\n\nFile saved as:\n{file_path}")
+                # Import openpyxl for advanced Excel formatting
+                try:
+                    import openpyxl
+                    from openpyxl.styles import Alignment, Font
+                except ImportError:
+                    QMessageBox.critical(self, "Export Error", 
+                                    "openpyxl library not found. Please install it using: pip install openpyxl")
+                    return
+
+                # Create workbook and worksheet
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "PCB Calculations"
                 
+                # Tool name merged across two columns in first row
+                tool_name = "PCB Fabrication Cost Tool"
+                ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=2)
+                ws.cell(row=1, column=1).value = tool_name
+                ws.cell(row=1, column=1).alignment = Alignment(horizontal='center', vertical='center')
+                ws.cell(row=1, column=1).font = Font(size=16, bold=True)
+                
+                # Column headers in row 2
+                ws.cell(row=2, column=1).value = "Parameter"
+                ws.cell(row=2, column=2).value = "Value"
+                ws.cell(row=2, column=1).font = Font(bold=True)
+                ws.cell(row=2, column=2).font = Font(bold=True)
+                
+                # Parameter names corresponding to the data columns
+                parameter_names = [
+                    'Customer Name', 'Job Number', 'PCB Part Number', 'Unit', 
+                    'PCB Length', 'PCB Width', 'Layers', 'Material', 'Board Thickness', 
+                    'Cu Inner', 'Cu Outer', 'Surface Finish', 'Impedance', 
+                    'Soldermask', 'Silkscreen', 'Back Drill', 'Blind Via', 'Buried Via',
+                    'Price per Sq Unit', 'Per Unit Price', 'Total Price', 'Calculation Date'
+                ]
+                
+                # Use the most recent calculation (first record)
+                latest_record = data[0]
+                
+                # Write parameter-value pairs starting from row 3
+                for i, (param_name, value) in enumerate(zip(parameter_names, latest_record), 3):
+                    ws.cell(row=i, column=1).value = param_name
+                    ws.cell(row=i, column=2).value = value
+                
+                # Adjust column widths
+                ws.column_dimensions['A'].width = 25
+                ws.column_dimensions['B'].width = 30
+                
+                # Save the workbook
+                wb.save(file_path)
+                
+                QMessageBox.information(self, "Export Success", 
+                                    f"Data exported successfully!\n\nFile saved as:\n{file_path}")
+                                    
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
-
 
 def main():
     app = QApplication(sys.argv)
