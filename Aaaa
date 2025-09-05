@@ -1,5 +1,5 @@
 def calculate_price(self):
-    """Calculate PCB price based on database data with proper filtering"""
+    """Calculate PCB price based on database data with exact filtering"""
     try:
         # Validate inputs
         if not all([
@@ -25,106 +25,102 @@ def calculate_price(self):
             QMessageBox.warning(self, "Input Error", "Length and Width must be numeric.")
             return
 
-        # Build dynamic query with proper filtering
-        query_conditions = []
+        # Build EXACT filter conditions
+        filter_conditions = []
         params = []
-        
-        # Base conditions to ensure valid data
-        base_conditions = [
-            "PricePerUnit IS NOT NULL",
-            "PricePerUnit != ''", 
-            "Length > 0", 
-            "Width > 0",
-            "TotalCostINR IS NOT NULL",
-            "TotalCostINR > 0"
-        ]
-        
-        # Add filter conditions based on user selections
         active_filters = []
+        
+        # Apply exact filters for each selected option
         for field, combo in self.filter_combos.items():
-            current_value = combo.currentText().strip()
-            if current_value and current_value != "Any" and current_value != "":
-                # Handle different data types properly
-                if field in ["Layers", "BoardThickness"]:
-                    # Integer fields - exact match
-                    query_conditions.append(f"CAST({field} AS TEXT) = ?")
-                    params.append(str(current_value))
-                elif field in ["back_drill", "blind_via", "berried_via", "Impedance"]:
-                    # Boolean-like fields - case insensitive
-                    query_conditions.append(f"UPPER({field}) = UPPER(?)")
-                    params.append(current_value)
-                else:
-                    # Text fields - case insensitive partial match
-                    query_conditions.append(f"UPPER({field}) LIKE UPPER(?)")
-                    params.append(f"%{current_value}%")
-                
-                active_filters.append(f"{field}: {current_value}")
+            selected_value = combo.currentText().strip()
+            if selected_value and selected_value != "Any":
+                # EXACT MATCH only
+                filter_conditions.append(f"{field} = ?")
+                params.append(selected_value)
+                active_filters.append(f"{field}: {selected_value}")
 
-        # Construct the complete query
+        # Base query - get all valid records
         base_query = '''
             SELECT Quantity, Length, Width, PricePerUnit, TotalCostINR, FabricatorName, 
                    Layers, material, BoardThickness, CuInner, CuOuter, SurfaceFinish,
                    Impedance, Soldermask, Silkscreen, back_drill, blind_via, berried_via
             FROM pcb_data
-            WHERE ''' + " AND ".join(base_conditions)
+            WHERE PricePerUnit IS NOT NULL 
+            AND PricePerUnit != '' 
+            AND Length > 0 
+            AND Width > 0
+        '''
         
-        if query_conditions:
-            complete_query = base_query + " AND " + " AND ".join(query_conditions)
+        # Add exact filter conditions
+        if filter_conditions:
+            complete_query = base_query + " AND " + " AND ".join(filter_conditions)
         else:
             complete_query = base_query
             
-        # Add ordering - prioritize by price per unit (highest first)
-        complete_query += " ORDER BY CAST(REPLACE(PricePerUnit, ',', '') AS REAL) DESC"
+        # Order by highest price per unit
+        complete_query += " ORDER BY CAST(REPLACE(REPLACE(PricePerUnit, ',', ''), '$', '') AS REAL) DESC"
 
-        print(f"Executing query: {complete_query}")
-        print(f"With parameters: {params}")
-        print(f"Active filters: {active_filters}")
+        print(f"FILTER DEBUG:")
+        print(f"Query: {complete_query}")
+        print(f"Parameters: {params}")
+        print(f"Active Filters: {active_filters}")
         
         self.parent.cursor.execute(complete_query, params)
         matches = self.parent.cursor.fetchall()
 
         if not matches:
-            filter_info = "\n".join(active_filters) if active_filters else "No filters applied"
-            QMessageBox.information(self, "No Match", 
-                                  f"No matching records found for the specified criteria:\n\n{filter_info}\n\nTry adjusting your filter selections.")
+            if active_filters:
+                filter_msg = "Applied Filters:\n" + "\n".join(f"• {f}" for f in active_filters)
+                QMessageBox.information(self, "No Match Found", 
+                                      f"No records found matching your exact criteria:\n\n{filter_msg}\n\nTry different filter values or select 'Any' for some filters.")
+            else:
+                QMessageBox.information(self, "No Data", "No valid PCB data found in database.")
             return
 
-        print(f"Found {len(matches)} matching records")
+        print(f"Found {len(matches)} exact matches")
+        
+        # Show all matching records info
+        print("MATCHING RECORDS:")
+        for i, match in enumerate(matches[:5]):  # Show first 5 matches
+            fabricator = match[5]
+            layers = match[6]
+            material = match[7] 
+            price = match[3]
+            print(f"{i+1}. {fabricator} - {layers} layers, {material}, Price: {price}")
 
-        # Use the record with highest price per unit (first result due to ordering)
+        # Use the best match (highest price per unit)
         best_match = matches[0]
         (ref_qty, ref_length, ref_width, ref_price_per_unit_str, ref_total_cost, ref_fabricator,
          ref_layers, ref_material, ref_thickness, ref_cu_inner, ref_cu_outer, ref_surface_finish,
          ref_impedance, ref_soldermask, ref_silkscreen, ref_back_drill, ref_blind_via, ref_buried_via) = best_match
         
-        # Convert price per unit to float with proper error handling
+        # Convert price to number
         try:
-            ref_price_per_unit = float(str(ref_price_per_unit_str).replace(',', '').strip())
+            # Remove currency symbols and commas
+            clean_price = str(ref_price_per_unit_str).replace('$', '').replace('₹', '').replace(',', '').strip()
+            ref_price_per_unit = float(clean_price)
         except (ValueError, TypeError):
-            ref_price_per_unit = 0.0
-
-        if ref_price_per_unit <= 0:
-            QMessageBox.warning(self, "Data Error", "Invalid reference price data found. Please check your database records.")
+            QMessageBox.warning(self, "Data Error", f"Invalid price format in database: {ref_price_per_unit_str}")
             return
 
-        # Calculate price per square unit
+        # Calculate area and price per square unit
         ref_area = float(ref_length) * float(ref_width)
         if ref_area <= 0:
-            QMessageBox.warning(self, "Data Error", "Invalid reference PCB dimensions found.")
+            QMessageBox.warning(self, "Data Error", "Invalid PCB dimensions in reference data.")
             return
             
         price_per_sq_unit = ref_price_per_unit / ref_area
 
-        # Calculate prices for input PCB
+        # Calculate price for user's PCB
         input_area = length * width
         per_unit_price = price_per_sq_unit * input_area
 
-        # Create reference specs dictionary for display
+        # Create reference specs for display
         reference_specs = {
             'Fabricator': ref_fabricator,
             'Layers': ref_layers,
             'Material': ref_material,
-            'Thickness': f"{ref_thickness} mil" if ref_thickness else "N/A",
+            'Board Thickness': f"{ref_thickness} mil" if ref_thickness else "N/A",
             'Cu Inner': ref_cu_inner or "N/A",
             'Cu Outer': ref_cu_outer or "N/A",
             'Surface Finish': ref_surface_finish or "N/A",
@@ -136,24 +132,16 @@ def calculate_price(self):
             'Buried Via': ref_buried_via or "N/A"
         }
 
-        # Populate results table with reference specs
-        self.populate_results_table_with_specs(
-            customer_name, job_number, pcb_part_number, unit, 
-            length, width, input_area, ref_length, ref_width, 
-            ref_price_per_unit, price_per_sq_unit, per_unit_price, 
+        # Update results table
+        self.populate_filtered_results(
+            customer_name, job_number, pcb_part_number, unit,
+            length, width, input_area, ref_length, ref_width,
+            ref_price_per_unit, price_per_sq_unit, per_unit_price,
             reference_specs, active_filters, len(matches)
         )
 
-        print(f"Calculation completed successfully. Price per unit: ₹{per_unit_price:.2f}")
-        
-        # Show summary of applied filters
-        if active_filters:
-            filter_summary = "Applied Filters:\n" + "\n".join(f"• {f}" for f in active_filters)
-            filter_summary += f"\n\nFound {len(matches)} matching records."
-            print(filter_summary)
+        print(f"SUCCESS: Final calculated price per unit: ₹{per_unit_price:.2f}")
 
-    except ValueError as ve:
-        QMessageBox.warning(self, "Input Error", f"Please enter valid numeric values: {str(ve)}")
     except Exception as e:
-        print(f"Calculation error: {e}")
+        print(f"CALCULATION ERROR: {e}")
         QMessageBox.critical(self, "Error", f"Calculation failed: {str(e)}")
