@@ -1,439 +1,159 @@
+def calculate_price(self):
+    """Calculate PCB price based on database data with proper filtering"""
+    try:
+        # Validate inputs
+        if not all([
+            self.customer_input.text().strip(),
+            self.job_input.text().strip(),
+            self.pcb_part_input.text().strip(),
+            self.length_input.text(),
+            self.width_input.text()
+        ]):
+            QMessageBox.warning(self, "Input Error", "Please fill all required fields!")
+            return
 
-class CalculationPage(QWidget):
-    def __init__(self, parent):
-        super().__init__()
-        self.parent = parent
-        self.filter_combos = {}  # Initialize this early
-        self.init_ui()
-        self.refresh_data()  # Load data after UI is created
+        # Get input values
+        customer_name = self.customer_input.text().strip()
+        job_number = self.job_input.text().strip()
+        pcb_part_number = self.pcb_part_input.text().strip()
+        unit = self.unit_combo.currentText()
         
-    def init_ui(self):
-        """Initialize calculation page UI with updated fields"""
-        layout = QHBoxLayout()
-        layout.setSpacing(20)
-        
-        # Left side - Scrollable Input form
-        left_frame = QGroupBox("Price Calculation Input")
-        left_frame_layout = QVBoxLayout(left_frame)
-        
-        # Create scroll area for the input form
-        self.input_scroll_area = QScrollArea()
-        self.input_scroll_area.setWidgetResizable(True)
-        self.input_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.input_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        
-        # Create container widget for the form
-        input_container = QWidget()
-        input_layout = QVBoxLayout(input_container)
-        
-        form_layout = QGridLayout()
-        form_layout.setSpacing(12)
-        row = 0
+        try:
+            length = float(self.length_input.text())
+            width = float(self.width_input.text())
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Length and Width must be numeric.")
+            return
 
-        # Customer Information
-        customer_label = QLabel("Customer Information")
-        customer_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        customer_label.setStyleSheet("color: #0078d4; margin: 10px 0 5px 0;")
-        form_layout.addWidget(customer_label, row, 0, 1, 2)
-        row += 1
-
-        form_layout.addWidget(QLabel("Customer Name:"), row, 0)
-        self.customer_input = QLineEdit()
-        self.customer_input.setPlaceholderText("Enter customer name...")
-        form_layout.addWidget(self.customer_input, row, 1)
-        row += 1
-
-        form_layout.addWidget(QLabel("Job Number:"), row, 0)
-        self.job_input = QLineEdit()
-        self.job_input.setPlaceholderText("Enter job number...")
-        form_layout.addWidget(self.job_input, row, 1)
-        row += 1
+        # Build dynamic query with proper filtering
+        query_conditions = []
+        params = []
         
-        form_layout.addWidget(QLabel("PCB Part Number:"), row, 0)
-        self.pcb_part_input = QLineEdit()
-        self.pcb_part_input.setPlaceholderText("Enter PCB part number...")
-        form_layout.addWidget(self.pcb_part_input, row, 1)
-        row += 1
-
-        # PCB Specifications
-        pcb_label = QLabel("PCB Specifications")
-        pcb_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        pcb_label.setStyleSheet("color: #0078d4; margin: 15px 0 5px 0;")
-        form_layout.addWidget(pcb_label, row, 0, 1, 2)
-        row += 1
-
-        form_layout.addWidget(QLabel("Unit:"), row, 0)
-        self.unit_combo = QComboBox()
-        self.unit_combo.addItems(["mm", "inch"])
-        form_layout.addWidget(self.unit_combo, row, 1)
-        row += 1
-
-        # PCB Size
-        form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
-        size_widget = QWidget()
-        size_layout = QHBoxLayout(size_widget)
-        size_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.length_input = QLineEdit()
-        self.length_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-        self.length_input.setPlaceholderText("Length")
-        
-        self.width_input = QLineEdit()
-        self.width_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-        self.width_input.setPlaceholderText("Width")
-        
-        size_layout.addWidget(QLabel("L:"))
-        size_layout.addWidget(self.length_input)
-        size_layout.addWidget(QLabel("×"))
-        size_layout.addWidget(QLabel("W:"))
-        size_layout.addWidget(self.width_input)
-        
-        form_layout.addWidget(size_widget, row, 1)
-        row += 1
-
-        # Create filter fields matching the database schema
-        filter_fields = [
-            ("Layers", "Layers"),
-            ("Material", "material"),
-            ("Board Thickness", "BoardThickness"),
-            ("Cu Inner", "CuInner"),
-            ("Cu Outer", "CuOuter"),
-            ("Surface Finish", "SurfaceFinish"),
-            ("Impedance", "Impedance"),
-            ("Soldermask", "Soldermask"),
-            ("Silkscreen", "Silkscreen"),
-            ("Back Drill", "back_drill"),
-            ("Blind Via", "blind_via"),
-            ("Buried Via", "berried_via")
+        # Base conditions to ensure valid data
+        base_conditions = [
+            "PricePerUnit IS NOT NULL",
+            "PricePerUnit != ''", 
+            "Length > 0", 
+            "Width > 0",
+            "TotalCostINR IS NOT NULL",
+            "TotalCostINR > 0"
         ]
         
-        for display_name, field_name in filter_fields:
-            form_layout.addWidget(QLabel(f"{display_name}:"), row, 0)
-            combo = QComboBox()
-            combo.setMinimumWidth(200)
-            combo.addItem("Any")  # Add default "Any" option
-            self.filter_combos[field_name] = combo
-            form_layout.addWidget(combo, row, 1)
-            row += 1
+        # Add filter conditions based on user selections
+        active_filters = []
+        for field, combo in self.filter_combos.items():
+            current_value = combo.currentText().strip()
+            if current_value and current_value != "Any" and current_value != "":
+                # Handle different data types properly
+                if field in ["Layers", "BoardThickness"]:
+                    # Integer fields - exact match
+                    query_conditions.append(f"CAST({field} AS TEXT) = ?")
+                    params.append(str(current_value))
+                elif field in ["back_drill", "blind_via", "berried_via", "Impedance"]:
+                    # Boolean-like fields - case insensitive
+                    query_conditions.append(f"UPPER({field}) = UPPER(?)")
+                    params.append(current_value)
+                else:
+                    # Text fields - case insensitive partial match
+                    query_conditions.append(f"UPPER({field}) LIKE UPPER(?)")
+                    params.append(f"%{current_value}%")
+                
+                active_filters.append(f"{field}: {current_value}")
 
-        input_layout.addLayout(form_layout)
+        # Construct the complete query
+        base_query = '''
+            SELECT Quantity, Length, Width, PricePerUnit, TotalCostINR, FabricatorName, 
+                   Layers, material, BoardThickness, CuInner, CuOuter, SurfaceFinish,
+                   Impedance, Soldermask, Silkscreen, back_drill, blind_via, berried_via
+            FROM pcb_data
+            WHERE ''' + " AND ".join(base_conditions)
         
-        # Calculate button
-        self.calculate_btn = QPushButton("🧮 Calculate Price")
-        self.calculate_btn.setMinimumHeight(50)
-        self.calculate_btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.calculate_btn.clicked.connect(self.calculate_price)
-        input_layout.addWidget(self.calculate_btn)
-        
-        # Set the container widget to the scroll area
-        self.input_scroll_area.setWidget(input_container)
-        left_frame_layout.addWidget(self.input_scroll_area)
-        
-        # Right side - Results
-        right_frame = QGroupBox("Calculation Results")
-        right_layout = QVBoxLayout(right_frame)
-
-        # Create table widget for results
-        self.results_table = QTableWidget()
-        self.results_table.setColumnCount(2)
-        self.results_table.setHorizontalHeaderLabels(['Parameter', 'Value'])
-        self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.results_table.verticalHeader().setVisible(False)
-        self.results_table.setAlternatingRowColors(True)
-        self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        right_layout.addWidget(self.results_table)
-
-        # Export button
-        self.export_btn = QPushButton("📊 Export to Excel")
-        self.export_btn.setMinimumHeight(45)
-        self.export_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.export_btn.clicked.connect(self.export_to_excel)
-        right_layout.addWidget(self.export_btn)
-        
-        # Add frames to main layout
-        layout.addWidget(left_frame, 1)
-        layout.addWidget(right_frame, 1)
-        self.setLayout(layout)
+        if query_conditions:
+            complete_query = base_query + " AND " + " AND ".join(query_conditions)
+        else:
+            complete_query = base_query
             
-    def refresh_data(self):
-        """Refresh filter combo boxes with data from database"""
+        # Add ordering - prioritize by price per unit (highest first)
+        complete_query += " ORDER BY CAST(REPLACE(PricePerUnit, ',', '') AS REAL) DESC"
+
+        print(f"Executing query: {complete_query}")
+        print(f"With parameters: {params}")
+        print(f"Active filters: {active_filters}")
+        
+        self.parent.cursor.execute(complete_query, params)
+        matches = self.parent.cursor.fetchall()
+
+        if not matches:
+            filter_info = "\n".join(active_filters) if active_filters else "No filters applied"
+            QMessageBox.information(self, "No Match", 
+                                  f"No matching records found for the specified criteria:\n\n{filter_info}\n\nTry adjusting your filter selections.")
+            return
+
+        print(f"Found {len(matches)} matching records")
+
+        # Use the record with highest price per unit (first result due to ordering)
+        best_match = matches[0]
+        (ref_qty, ref_length, ref_width, ref_price_per_unit_str, ref_total_cost, ref_fabricator,
+         ref_layers, ref_material, ref_thickness, ref_cu_inner, ref_cu_outer, ref_surface_finish,
+         ref_impedance, ref_soldermask, ref_silkscreen, ref_back_drill, ref_blind_via, ref_buried_via) = best_match
+        
+        # Convert price per unit to float with proper error handling
         try:
-            # Define filter fields that match database schema
-            filter_fields = ["Layers", "material", "BoardThickness", "CuInner", "CuOuter",
-                            "SurfaceFinish", "Impedance", "Soldermask", "Silkscreen", 
-                            "back_drill", "blind_via", "berried_via"]
+            ref_price_per_unit = float(str(ref_price_per_unit_str).replace(',', '').strip())
+        except (ValueError, TypeError):
+            ref_price_per_unit = 0.0
+
+        if ref_price_per_unit <= 0:
+            QMessageBox.warning(self, "Data Error", "Invalid reference price data found. Please check your database records.")
+            return
+
+        # Calculate price per square unit
+        ref_area = float(ref_length) * float(ref_width)
+        if ref_area <= 0:
+            QMessageBox.warning(self, "Data Error", "Invalid reference PCB dimensions found.")
+            return
             
-            for field in filter_fields:
-                if field in self.filter_combos:
-                    print(f"Fetching values for: {field}")
-                    try:
-                        self.parent.cursor.execute(f"""
-                            SELECT DISTINCT {field}
-                            FROM pcb_data
-                            WHERE {field} IS NOT NULL AND {field} != ''
-                            ORDER BY {field}
-                        """)
-                        values = [str(row[0]) for row in self.parent.cursor.fetchall()]
-                        print(f"Found {len(values)} values for {field}: {values}")
+        price_per_sq_unit = ref_price_per_unit / ref_area
 
-                        # Clear and repopulate combo
-                        self.filter_combos[field].clear()
-                        self.filter_combos[field].addItem("Any")  # Default option
-                        if values:
-                            self.filter_combos[field].addItems(values)
-                    except Exception as field_error:
-                        print(f"Error fetching data for {field}: {field_error}")
-                        
-        except Exception as e:
-            print(f"Error during refresh_data: {e}")
-            QMessageBox.warning(self, "Data Load Error", f"Could not load filter data: {str(e)}")
+        # Calculate prices for input PCB
+        input_area = length * width
+        per_unit_price = price_per_sq_unit * input_area
 
-    def calculate_price(self):
-        """Calculate PCB price based on database data"""
-        try:
-            # Validate inputs
-            if not all([
-                self.customer_input.text().strip(),
-                self.job_input.text().strip(),
-                self.pcb_part_input.text().strip(),
-                self.length_input.text(),
-                self.width_input.text()
-            ]):
-                QMessageBox.warning(self, "Input Error", "Please fill all required fields!")
-                return
+        # Create reference specs dictionary for display
+        reference_specs = {
+            'Fabricator': ref_fabricator,
+            'Layers': ref_layers,
+            'Material': ref_material,
+            'Thickness': f"{ref_thickness} mil" if ref_thickness else "N/A",
+            'Cu Inner': ref_cu_inner or "N/A",
+            'Cu Outer': ref_cu_outer or "N/A",
+            'Surface Finish': ref_surface_finish or "N/A",
+            'Impedance': ref_impedance or "N/A",
+            'Soldermask': ref_soldermask or "N/A",
+            'Silkscreen': ref_silkscreen or "N/A",
+            'Back Drill': ref_back_drill or "N/A",
+            'Blind Via': ref_blind_via or "N/A",
+            'Buried Via': ref_buried_via or "N/A"
+        }
 
-            # Get input values
-            customer_name = self.customer_input.text().strip()
-            job_number = self.job_input.text().strip()
-            pcb_part_number = self.pcb_part_input.text().strip()
-            unit = self.unit_combo.currentText()
-            
-            try:
-                length = float(self.length_input.text())
-                width = float(self.width_input.text())
-            except ValueError:
-                QMessageBox.warning(self, "Input Error", "Length and Width must be numeric.")
-                return
+        # Populate results table with reference specs
+        self.populate_results_table_with_specs(
+            customer_name, job_number, pcb_part_number, unit, 
+            length, width, input_area, ref_length, ref_width, 
+            ref_price_per_unit, price_per_sq_unit, per_unit_price, 
+            reference_specs, active_filters, len(matches)
+        )
 
-            # Build dynamic query based on selected filters
-            query_conditions = []
-            params = []
-            for field, combo in self.filter_combos.items():
-                if combo.currentText() and combo.currentText() != "Any":
-                    query_conditions.append(f"{field} = ?")
-                    params.append(combo.currentText())
-
-            base_query = '''
-                SELECT Quantity, Length, Width, PricePerUnit, TotalCostINR, FabricatorName
-                FROM pcb_data
-                WHERE PricePerUnit IS NOT NULL AND PricePerUnit != '' 
-                AND Length > 0 AND Width > 0
-            '''
-            
-            if query_conditions:
-                query = base_query + " AND " + " AND ".join(query_conditions) + " ORDER BY CAST(PricePerUnit AS REAL) DESC"
-            else:
-                query = base_query + " ORDER BY CAST(PricePerUnit AS REAL) DESC"
-
-            print(f"Executing query: {query}")
-            print(f"With parameters: {params}")
-            
-            self.parent.cursor.execute(query, params)
-            matches = self.parent.cursor.fetchall()
-
-            if not matches:
-                QMessageBox.information(self, "No Match", "No matching records found for the specified criteria.")
-                return
-
-            # Use the record with highest price per unit
-            best_match = matches[0]
-            ref_qty, ref_length, ref_width, ref_price_per_unit_str, ref_total_cost, ref_fabricator = best_match
-            
-            # Convert price per unit to float
-            try:
-                ref_price_per_unit = float(str(ref_price_per_unit_str).replace(',', '').strip())
-            except (ValueError, TypeError):
-                ref_price_per_unit = 0.0
-
-            # Calculate price per square unit
-            ref_area = float(ref_length) * float(ref_width)
-            price_per_sq_unit = ref_price_per_unit / ref_area if ref_area > 0 else 0
-
-            # Calculate prices for input PCB
-            input_area = length * width
-            per_unit_price = price_per_sq_unit * input_area
-
-            # Populate results table
-            self.populate_results_table(customer_name, job_number, pcb_part_number, unit, 
-                                       length, width, input_area, ref_length, ref_width, 
-                                       ref_price_per_unit, price_per_sq_unit, per_unit_price, ref_fabricator)
-
-            print(f"Calculation completed successfully. Price per unit: ₹{per_unit_price:.2f}")
-
-        except ValueError as ve:
-            QMessageBox.warning(self, "Input Error", f"Please enter valid numeric values: {str(ve)}")
-        except Exception as e:
-            print(f"Calculation error: {e}")
-            QMessageBox.critical(self, "Error", f"Calculation failed: {str(e)}")
-
-    def populate_results_table(self, customer_name, job_number, pcb_part_number, unit,
-                              length, width, input_area, ref_length, ref_width,
-                              ref_price_per_unit, price_per_sq_unit, per_unit_price, ref_fabricator):
-        """Populate the results table with calculation data"""
+        print(f"Calculation completed successfully. Price per unit: ₹{per_unit_price:.2f}")
         
-        # Define all rows with their data
-        rows = [
-            ("PCB Fabrication Cost Tool", "", "header"),
-            ("", "", "spacer"),
-            ("Customer Information", "", "section"),
-            ("Customer Name", customer_name, "data"),
-            ("Job Number", job_number, "data"),
-            ("PCB Part Number", pcb_part_number, "data"),
-            ("Calculation Date", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "data"),
-            ("", "", "spacer"),
-            ("PCB Specifications", "", "section"),
-            ("Unit", unit, "data"),
-            ("PCB Length", f"{length} {unit}", "data"),
-            ("PCB Width", f"{width} {unit}", "data"),
-            ("PCB Area", f"{input_area:.2f} {unit}²", "data"),
-        ]
-        
-        # Add selected configuration if filters are applied
-        selected_filters = [(field, combo.currentText()) for field, combo in self.filter_combos.items() 
-                           if combo.currentText() and combo.currentText() != "Any"]
-        
-        if selected_filters:
-            rows.extend([
-                ("", "", "spacer"),
-                ("Selected Configuration", "", "section")
-            ])
-            
-            for field, value in selected_filters:
-                field_display = field.replace('_', ' ').title()
-                rows.append((field_display, value, "data"))
-        
-        # Add reference data and calculations
-        rows.extend([
-            ("", "", "spacer"),
-            ("Reference Data", "", "section"),
-            ("Reference Fabricator", ref_fabricator, "data"),
-            ("Reference PCB Size", f"{ref_length} × {ref_width} {unit}", "data"),
-            ("Reference Price/Unit", f"₹{ref_price_per_unit:.2f}", "data"),
-            ("", "", "spacer"),
-            ("Price Calculation", "", "section"),
-            ("Price per Square Unit", f"₹{price_per_sq_unit:.4f}", "calculation"),
-            ("Estimated Price per PCB", f"₹{per_unit_price:.2f}", "calculation"),
-            ("Unit Cost", f"₹{per_unit_price:.2f} per piece", "calculation")
-        ])
+        # Show summary of applied filters
+        if active_filters:
+            filter_summary = "Applied Filters:\n" + "\n".join(f"• {f}" for f in active_filters)
+            filter_summary += f"\n\nFound {len(matches)} matching records."
+            print(filter_summary)
 
-        # Set up the table
-        self.results_table.setRowCount(len(rows))
-        
-        # Populate table items
-        for row_idx, (param, value, row_type) in enumerate(rows):
-            param_item = QTableWidgetItem(param)
-            value_item = QTableWidgetItem(value)
-            
-            # Apply formatting based on row type
-            if row_type == "header":
-                # Blue header like Excel
-                param_item.setBackground(QColor(68, 114, 196))  # Excel blue
-                param_item.setForeground(QColor(255, 255, 255))  # White text
-                value_item.setBackground(QColor(68, 114, 196))
-                value_item.setForeground(QColor(255, 255, 255))
-                font = QFont()
-                font.setBold(True)
-                font.setPointSize(14)
-                param_item.setFont(font)
-                param_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                
-            elif row_type == "section":
-                # Light blue section headers
-                param_item.setBackground(QColor(213, 228, 247))  # Light blue
-                value_item.setBackground(QColor(213, 228, 247))
-                font = QFont()
-                font.setBold(True)
-                param_item.setFont(font)
-                value_item.setFont(font)
-                
-            elif row_type == "calculation":
-                # Light green for calculations
-                param_item.setBackground(QColor(226, 239, 218))  # Light green
-                value_item.setBackground(QColor(226, 239, 218))
-                font = QFont()
-                font.setBold(True)
-                param_item.setFont(font)
-                value_item.setFont(font)
-                value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
-                
-            elif row_type == "data":
-                # Regular data rows
-                param_item.setBackground(QColor(242, 242, 242))  # Light gray
-                value_item.setBackground(QColor(255, 255, 255))  # White
-                value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
-                
-            elif row_type == "spacer":
-                # Empty spacer rows
-                param_item.setBackground(QColor(255, 255, 255))
-                value_item.setBackground(QColor(255, 255, 255))
-
-            self.results_table.setItem(row_idx, 0, param_item)
-            self.results_table.setItem(row_idx, 1, value_item)
-
-        # Resize columns and rows
-        self.results_table.resizeColumnsToContents()
-        self.results_table.resizeRowsToContents()
-
-    def export_to_excel(self):
-        """Export calculation results to Excel"""
-        try:
-            # Get the current results from the table
-            if self.results_table.rowCount() == 0:
-                QMessageBox.information(self, "Export", "No calculation results to export. Please calculate first.")
-                return
-
-            file_path, _ = QFileDialog.getSaveFileName(
-                self, "Export to Excel", 
-                f"PCB_Calculations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                "Excel Files (*.xlsx)"
-            )
-            
-            if file_path:
-                # Try using pandas first (simpler approach)
-                try:
-                    # Extract data from the table
-                    data_rows = []
-                    for row in range(self.results_table.rowCount()):
-                        param_item = self.results_table.item(row, 0)
-                        value_item = self.results_table.item(row, 1)
-                        param = param_item.text() if param_item else ""
-                        value = value_item.text() if value_item else ""
-                        data_rows.append([param, value])
-                    
-                    # Create DataFrame and export
-                    df = pd.DataFrame(data_rows, columns=['Parameter', 'Value'])
-                    df.to_excel(file_path, index=False, sheet_name='PCB Calculations')
-                    
-                    QMessageBox.information(self, "Export Success", 
-                                          f"Data exported successfully!\n\nFile saved as:\n{file_path}")
-                    
-                except ImportError:
-                    # Fallback: create simple text file
-                    with open(file_path.replace('.xlsx', '.txt'), 'w') as f:
-                        f.write("PCB Fabrication Cost Tool - Calculation Results\n")
-                        f.write("=" * 50 + "\n\n")
-                        for row in range(self.results_table.rowCount()):
-                            param_item = self.results_table.item(row, 0)
-                            value_item = self.results_table.item(row, 1)
-                            param = param_item.text() if param_item else ""
-                            value = value_item.text() if value_item else ""
-                            if param or value:
-                                f.write(f"{param:<30}: {value}\n")
-                    
-                    QMessageBox.information(self, "Export Success", 
-                                          f"Data exported as text file (Excel not available):\n{file_path.replace('.xlsx', '.txt')}")
-                                    
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
+    except ValueError as ve:
+        QMessageBox.warning(self, "Input Error", f"Please enter valid numeric values: {str(ve)}")
+    except Exception as e:
+        print(f"Calculation error: {e}")
+        QMessageBox.critical(self, "Error", f"Calculation failed: {str(e)}")
