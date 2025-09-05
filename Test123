@@ -1,104 +1,159 @@
-def populate_results_table_with_specs(self, customer_name, job_number, pcb_part_number, unit,
-                                    length, width, input_area, ref_length, ref_width,
-                                    ref_price_per_unit, price_per_sq_unit, per_unit_price, 
-                                    reference_specs, active_filters, total_matches):
-    """Populate the results table with calculation data and reference specifications"""
+def init_ui(self):
+    """Initialize calculation page UI with quantity field"""
+    layout = QHBoxLayout()
+    layout.setSpacing(20)
     
-    # Define all rows with their data
-    rows = [
-        ("PCB Fabrication Cost Tool", "", "header"),
-        ("", "", "spacer"),
-        ("Customer Information", "", "section"),
-        ("Customer Name", customer_name, "data"),
-        ("Job Number", job_number, "data"),
-        ("PCB Part Number", pcb_part_number, "data"),
-        ("Calculation Date", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "data"),
-        ("", "", "spacer"),
-        ("Input PCB Specifications", "", "section"),
-        ("Unit", unit, "data"),
-        ("PCB Length", f"{length} {unit}", "data"),
-        ("PCB Width", f"{width} {unit}", "data"),
-        ("PCB Area", f"{input_area:.2f} {unit}²", "data"),
+    # Left side - Scrollable Input form
+    left_frame = QGroupBox("Price Calculation Input")
+    left_frame_layout = QVBoxLayout(left_frame)
+    
+    # Create scroll area for the input form
+    self.input_scroll_area = QScrollArea()
+    self.input_scroll_area.setWidgetResizable(True)
+    self.input_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    self.input_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+    
+    # Create container widget for the form
+    input_container = QWidget()
+    input_layout = QVBoxLayout(input_container)
+    
+    form_layout = QGridLayout()
+    form_layout.setSpacing(12)
+    row = 0
+
+    # Customer Information
+    customer_label = QLabel("Customer Information")
+    customer_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+    customer_label.setStyleSheet("color: #0078d4; margin: 10px 0 5px 0;")
+    form_layout.addWidget(customer_label, row, 0, 1, 2)
+    row += 1
+
+    form_layout.addWidget(QLabel("Customer Name:"), row, 0)
+    self.customer_input = QLineEdit()
+    self.customer_input.setPlaceholderText("Enter customer name...")
+    form_layout.addWidget(self.customer_input, row, 1)
+    row += 1
+
+    form_layout.addWidget(QLabel("Job Number:"), row, 0)
+    self.job_input = QLineEdit()
+    self.job_input.setPlaceholderText("Enter job number...")
+    form_layout.addWidget(self.job_input, row, 1)
+    row += 1
+    
+    form_layout.addWidget(QLabel("PCB Part Number:"), row, 0)
+    self.pcb_part_input = QLineEdit()
+    self.pcb_part_input.setPlaceholderText("Enter PCB part number...")
+    form_layout.addWidget(self.pcb_part_input, row, 1)
+    row += 1
+
+    # PCB Specifications
+    pcb_label = QLabel("PCB Specifications")
+    pcb_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+    pcb_label.setStyleSheet("color: #0078d4; margin: 15px 0 5px 0;")
+    form_layout.addWidget(pcb_label, row, 0, 1, 2)
+    row += 1
+
+    # ADD QUANTITY FIELD
+    form_layout.addWidget(QLabel("Quantity:"), row, 0)
+    self.quantity_input = QLineEdit()
+    self.quantity_input.setValidator(QIntValidator(1, 999999))
+    self.quantity_input.setPlaceholderText("Enter quantity (e.g. 100)")
+    self.quantity_input.setText("1")  # Default value
+    form_layout.addWidget(self.quantity_input, row, 1)
+    row += 1
+
+    form_layout.addWidget(QLabel("Unit:"), row, 0)
+    self.unit_combo = QComboBox()
+    self.unit_combo.addItems(["mm", "inch"])
+    form_layout.addWidget(self.unit_combo, row, 1)
+    row += 1
+
+    # PCB Size
+    form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
+    size_widget = QWidget()
+    size_layout = QHBoxLayout(size_widget)
+    size_layout.setContentsMargins(0, 0, 0, 0)
+    
+    self.length_input = QLineEdit()
+    self.length_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
+    self.length_input.setPlaceholderText("Length")
+    
+    self.width_input = QLineEdit()
+    self.width_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
+    self.width_input.setPlaceholderText("Width")
+    
+    size_layout.addWidget(QLabel("L:"))
+    size_layout.addWidget(self.length_input)
+    size_layout.addWidget(QLabel("×"))
+    size_layout.addWidget(QLabel("W:"))
+    size_layout.addWidget(self.width_input)
+    
+    form_layout.addWidget(size_widget, row, 1)
+    row += 1
+
+    # Create cascading filter fields (same as before)
+    self.filter_combos = {}
+    self.filter_sequence = [
+        ("Layers", "Layers"),
+        ("Material", "material"),
+        ("Board Thickness", "BoardThickness"),
+        ("Cu Inner", "CuInner"),
+        ("Cu Outer", "CuOuter"),
+        ("Surface Finish", "SurfaceFinish"),
+        ("Impedance", "Impedance"),
+        ("Soldermask", "Soldermask"),
+        ("Silkscreen", "Silkscreen"),
+        ("Back Drill", "back_drill"),
+        ("Blind Via", "blind_via"),
+        ("Buried Via", "berried_via")
     ]
     
-    # Add applied filters section
-    if active_filters:
-        rows.extend([
-            ("", "", "spacer"),
-            ("Applied Filters", "", "section"),
-            ("Total Matches Found", str(total_matches), "data")
-        ])
+    for display_name, field_name in self.filter_sequence:
+        form_layout.addWidget(QLabel(f"{display_name}:"), row, 0)
+        combo = QComboBox()
+        combo.setMinimumWidth(200)
+        combo.addItem("Any")
         
-        for filter_text in active_filters:
-            rows.append((filter_text, "✓ Applied", "data"))
-    
-    # Add reference PCB specifications
-    rows.extend([
-        ("", "", "spacer"),
-        ("Reference PCB (Best Match)", "", "section"),
-        ("Reference Size", f"{ref_length} × {ref_width} {unit}", "data"),
-        ("Reference Price/Unit", f"₹{ref_price_per_unit:.2f}", "data")
-    ])
-    
-    # Add detailed reference specifications
-    for spec_name, spec_value in reference_specs.items():
-        if spec_value and spec_value != "N/A":
-            rows.append((f"Ref {spec_name}", str(spec_value), "data"))
-    
-    # Add price calculations
-    rows.extend([
-        ("", "", "spacer"),
-        ("Price Calculation", "", "section"),
-        ("Price per Square Unit", f"₹{price_per_sq_unit:.4f}", "calculation"),
-        ("Estimated Price per PCB", f"₹{per_unit_price:.2f}", "calculation"),
-        ("Unit Cost", f"₹{per_unit_price:.2f} per piece", "calculation")
-    ])
-
-    # Set up the table
-    self.results_table.setRowCount(len(rows))
-    
-    # Populate table items with the same formatting as before
-    for row_idx, (param, value, row_type) in enumerate(rows):
-        param_item = QTableWidgetItem(param)
-        value_item = QTableWidgetItem(value)
+        combo.currentTextChanged.connect(lambda text, field=field_name: self.on_filter_changed(field))
         
-        # Apply formatting based on row type (same as before)
-        if row_type == "header":
-            param_item.setBackground(QColor(68, 114, 196))
-            param_item.setForeground(QColor(255, 255, 255))
-            value_item.setBackground(QColor(68, 114, 196))
-            value_item.setForeground(QColor(255, 255, 255))
-            font = QFont()
-            font.setBold(True)
-            font.setPointSize(14)
-            param_item.setFont(font)
-            param_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            
-        elif row_type == "section":
-            param_item.setBackground(QColor(213, 228, 247))
-            value_item.setBackground(QColor(213, 228, 247))
-            font = QFont()
-            font.setBold(True)
-            param_item.setFont(font)
-            value_item.setFont(font)
-            
-        elif row_type == "calculation":
-            param_item.setBackground(QColor(226, 239, 218))
-            value_item.setBackground(QColor(226, 239, 218))
-            font = QFont()
-            font.setBold(True)
-            param_item.setFont(font)
-            value_item.setFont(font)
-            value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
-            
-        elif row_type == "data":
-            param_item.setBackground(QColor(242, 242, 242))
-            value_item.setBackground(QColor(255, 255, 255))
-            value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+        self.filter_combos[field_name] = combo
+        form_layout.addWidget(combo, row, 1)
+        row += 1
 
-        self.results_table.setItem(row_idx, 0, param_item)
-        self.results_table.setItem(row_idx, 1, value_item)
+    input_layout.addLayout(form_layout)
+    
+    # Calculate button
+    self.calculate_btn = QPushButton("🧮 Calculate Total Project Price")
+    self.calculate_btn.setMinimumHeight(50)
+    self.calculate_btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+    self.calculate_btn.clicked.connect(self.calculate_price)
+    input_layout.addWidget(self.calculate_btn)
+    
+    # Set the container widget to the scroll area
+    self.input_scroll_area.setWidget(input_container)
+    left_frame_layout.addWidget(self.input_scroll_area)
+    
+    # Right side - Results (same as before)
+    right_frame = QGroupBox("Calculation Results")
+    right_layout = QVBoxLayout(right_frame)
 
-    # Resize columns and rows
-    self.results_table.resizeColumnsToContents()
-    self.results_table.resizeRowsToContents()
+    self.results_table = QTableWidget()
+    self.results_table.setColumnCount(2)
+    self.results_table.setHorizontalHeaderLabels(['Parameter', 'Value'])
+    self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+    self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+    self.results_table.verticalHeader().setVisible(False)
+    self.results_table.setAlternatingRowColors(True)
+    self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+    self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    right_layout.addWidget(self.results_table)
+
+    self.export_btn = QPushButton("📊 Export to Excel")
+    self.export_btn.setMinimumHeight(45)
+    self.export_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+    self.export_btn.clicked.connect(self.export_to_excel)
+    right_layout.addWidget(self.export_btn)
+    
+    layout.addWidget(left_frame, 1)
+    layout.addWidget(right_frame, 1)
+    self.setLayout(layout)
