@@ -1,264 +1,158 @@
-def init_ui(self):
-    """Initialize calculation page UI with cascading dropdowns"""
-    layout = QHBoxLayout()
-    layout.setSpacing(20)
-    
-    # Left side - Scrollable Input form
-    left_frame = QGroupBox("Price Calculation Input")
-    left_frame_layout = QVBoxLayout(left_frame)
-    
-    # Create scroll area for the input form
-    self.input_scroll_area = QScrollArea()
-    self.input_scroll_area.setWidgetResizable(True)
-    self.input_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    self.input_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-    
-    # Create container widget for the form
-    input_container = QWidget()
-    input_layout = QVBoxLayout(input_container)
-    
-    form_layout = QGridLayout()
-    form_layout.setSpacing(12)
-    row = 0
-
-    # Customer Information (same as before)
-    customer_label = QLabel("Customer Information")
-    customer_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-    customer_label.setStyleSheet("color: #0078d4; margin: 10px 0 5px 0;")
-    form_layout.addWidget(customer_label, row, 0, 1, 2)
-    row += 1
-
-    form_layout.addWidget(QLabel("Customer Name:"), row, 0)
-    self.customer_input = QLineEdit()
-    self.customer_input.setPlaceholderText("Enter customer name...")
-    form_layout.addWidget(self.customer_input, row, 1)
-    row += 1
-
-    form_layout.addWidget(QLabel("Job Number:"), row, 0)
-    self.job_input = QLineEdit()
-    self.job_input.setPlaceholderText("Enter job number...")
-    form_layout.addWidget(self.job_input, row, 1)
-    row += 1
-    
-    form_layout.addWidget(QLabel("PCB Part Number:"), row, 0)
-    self.pcb_part_input = QLineEdit()
-    self.pcb_part_input.setPlaceholderText("Enter PCB part number...")
-    form_layout.addWidget(self.pcb_part_input, row, 1)
-    row += 1
-
-    # PCB Specifications
-    pcb_label = QLabel("PCB Specifications")
-    pcb_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-    pcb_label.setStyleSheet("color: #0078d4; margin: 15px 0 5px 0;")
-    form_layout.addWidget(pcb_label, row, 0, 1, 2)
-    row += 1
-
-    form_layout.addWidget(QLabel("Unit:"), row, 0)
-    self.unit_combo = QComboBox()
-    self.unit_combo.addItems(["mm", "inch"])
-    form_layout.addWidget(self.unit_combo, row, 1)
-    row += 1
-
-    # PCB Size
-    form_layout.addWidget(QLabel("PCB Size (L × W):"), row, 0)
-    size_widget = QWidget()
-    size_layout = QHBoxLayout(size_widget)
-    size_layout.setContentsMargins(0, 0, 0, 0)
-    
-    self.length_input = QLineEdit()
-    self.length_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-    self.length_input.setPlaceholderText("Length")
-    
-    self.width_input = QLineEdit()
-    self.width_input.setValidator(QDoubleValidator(0.1, 9999.0, 2))
-    self.width_input.setPlaceholderText("Width")
-    
-    size_layout.addWidget(QLabel("L:"))
-    size_layout.addWidget(self.length_input)
-    size_layout.addWidget(QLabel("×"))
-    size_layout.addWidget(QLabel("W:"))
-    size_layout.addWidget(self.width_input)
-    
-    form_layout.addWidget(size_widget, row, 1)
-    row += 1
-
-    # Create cascading filter fields in sequence
-    self.filter_combos = {}
-    self.filter_sequence = [
-        ("Layers", "Layers"),
-        ("Material", "material"),
-        ("Board Thickness", "BoardThickness"),
-        ("Cu Inner", "CuInner"),
-        ("Cu Outer", "CuOuter"),
-        ("Surface Finish", "SurfaceFinish"),
-        ("Impedance", "Impedance"),
-        ("Soldermask", "Soldermask"),
-        ("Silkscreen", "Silkscreen"),
-        ("Back Drill", "back_drill"),
-        ("Blind Via", "blind_via"),
-        ("Buried Via", "berried_via")
-    ]
-    
-    for display_name, field_name in self.filter_sequence:
-        form_layout.addWidget(QLabel(f"{display_name}:"), row, 0)
-        combo = QComboBox()
-        combo.setMinimumWidth(200)
-        combo.addItem("Any")
-        
-        # Connect each combo to update subsequent combos
-        combo.currentTextChanged.connect(lambda text, field=field_name: self.on_filter_changed(field))
-        
-        self.filter_combos[field_name] = combo
-        form_layout.addWidget(combo, row, 1)
-        row += 1
-
-    input_layout.addLayout(form_layout)
-    
-    # Calculate button
-    self.calculate_btn = QPushButton("🧮 Calculate Price")
-    self.calculate_btn.setMinimumHeight(50)
-    self.calculate_btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-    self.calculate_btn.clicked.connect(self.calculate_price)
-    input_layout.addWidget(self.calculate_btn)
-    
-    # Set the container widget to the scroll area
-    self.input_scroll_area.setWidget(input_container)
-    left_frame_layout.addWidget(self.input_scroll_area)
-    
-    # Right side - Results (same as before)
-    right_frame = QGroupBox("Calculation Results")
-    right_layout = QVBoxLayout(right_frame)
-
-    self.results_table = QTableWidget()
-    self.results_table.setColumnCount(2)
-    self.results_table.setHorizontalHeaderLabels(['Parameter', 'Value'])
-    self.results_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-    self.results_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-    self.results_table.verticalHeader().setVisible(False)
-    self.results_table.setAlternatingRowColors(True)
-    self.results_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-    self.results_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-    right_layout.addWidget(self.results_table)
-
-    self.export_btn = QPushButton("📊 Export to Excel")
-    self.export_btn.setMinimumHeight(45)
-    self.export_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-    self.export_btn.clicked.connect(self.export_to_excel)
-    right_layout.addWidget(self.export_btn)
-    
-    layout.addWidget(left_frame, 1)
-    layout.addWidget(right_frame, 1)
-    self.setLayout(layout)
-
-def refresh_data(self):
-    """Initial load of all filter options"""
-    print("Loading initial filter data...")
-    self.load_filter_options()
-
-def on_filter_changed(self, changed_field):
-    """Handle when a filter dropdown changes - update subsequent dropdowns"""
-    print(f"Filter changed: {changed_field}")
-    
-    # Find the position of the changed field
-    field_names = [field[1] for field in self.filter_sequence]
+def calculate_price(self):
+    """Calculate total project price with quantity"""
     try:
-        changed_index = field_names.index(changed_field)
-    except ValueError:
-        return
-    
-    # Clear and reset all subsequent filters
-    for i in range(changed_index + 1, len(field_names)):
-        subsequent_field = field_names[i]
-        if subsequent_field in self.filter_combos:
-            combo = self.filter_combos[subsequent_field]
-            combo.blockSignals(True)  # Prevent recursive calls
-            combo.clear()
-            combo.addItem("Any")
-            combo.blockSignals(False)
-    
-    # Update options for subsequent filters based on current selections
-    self.update_subsequent_filters(changed_index)
+        # Validate inputs including quantity
+        if not all([
+            self.customer_input.text().strip(),
+            self.job_input.text().strip(),
+            self.pcb_part_input.text().strip(),
+            self.quantity_input.text().strip(),
+            self.length_input.text(),
+            self.width_input.text()
+        ]):
+            QMessageBox.warning(self, "Input Error", "Please fill all required fields including quantity!")
+            return
 
-def update_subsequent_filters(self, from_index):
-    """Update dropdown options for filters after the changed one"""
-    field_names = [field[1] for field in self.filter_sequence]
-    
-    # Get currently applied filters up to the changed point
-    current_filters = {}
-    for i in range(from_index + 1):
-        field = field_names[i]
-        if field in self.filter_combos:
-            value = self.filter_combos[field].currentText()
-            if value and value != "Any":
-                current_filters[field] = value
-    
-    print(f"Current filters for cascading: {current_filters}")
-    
-    # Update each subsequent filter with available options
-    for i in range(from_index + 1, len(field_names)):
-        field = field_names[i]
-        if field in self.filter_combos:
-            available_values = self.get_available_values(field, current_filters)
+        # Get input values
+        customer_name = self.customer_input.text().strip()
+        job_number = self.job_input.text().strip()
+        pcb_part_number = self.pcb_part_input.text().strip()
+        unit = self.unit_combo.currentText()
+        
+        try:
+            quantity = int(self.quantity_input.text())
+            length = float(self.length_input.text())
+            width = float(self.width_input.text())
             
-            combo = self.filter_combos[field]
-            combo.blockSignals(True)
-            combo.clear()
-            combo.addItem("Any")
-            if available_values:
-                combo.addItems(sorted(set(available_values)))
-            combo.blockSignals(False)
-            
-            print(f"Updated {field} with {len(available_values)} options")
+            if quantity <= 0:
+                QMessageBox.warning(self, "Input Error", "Quantity must be greater than 0!")
+                return
+                
+        except ValueError:
+            QMessageBox.warning(self, "Input Error", "Please enter valid numbers for quantity, length, and width.")
+            return
 
-def get_available_values(self, field, current_filters):
-    """Get available values for a field based on current filter selections"""
-    try:
-        # Build query with current filters
-        conditions = ["PricePerUnit IS NOT NULL", "PricePerUnit != ''", "Length > 0", "Width > 0"]
-        params = []
+        # Sequential filtering logic (same as before)
+        print("=== SEQUENTIAL FILTERING WITH QUANTITY ===")
         
-        for filter_field, filter_value in current_filters.items():
-            conditions.append(f"{filter_field} = ?")
-            params.append(filter_value)
-        
-        query = f"""
-            SELECT DISTINCT {field}
+        base_query = '''
+            SELECT Quantity, Length, Width, PricePerUnit, TotalCostINR, FabricatorName, 
+                   Layers, material, BoardThickness, CuInner, CuOuter, SurfaceFinish,
+                   Impedance, Soldermask, Silkscreen, back_drill, blind_via, berried_via
             FROM pcb_data
-            WHERE {' AND '.join(conditions)}
-            AND {field} IS NOT NULL 
-            AND {field} != ''
-            ORDER BY {field}
-        """
+            WHERE PricePerUnit IS NOT NULL 
+            AND PricePerUnit != '' 
+            AND Length > 0 
+            AND Width > 0
+        '''
         
-        print(f"Query for {field}: {query}")
-        print(f"Params: {params}")
+        self.parent.cursor.execute(base_query)
+        current_records = self.parent.cursor.fetchall()
+        print(f"Step 0 - Initial records: {len(current_records)}")
         
-        self.parent.cursor.execute(query, params)
-        results = self.parent.cursor.fetchall()
-        values = [str(row[0]) for row in results if row[0]]
+        # Apply sequential filters (same logic as before)
+        filter_sequence = [
+            "Layers", "material", "BoardThickness", "CuInner", "CuOuter",
+            "SurfaceFinish", "Impedance", "Soldermask", "Silkscreen", 
+            "back_drill", "blind_via", "berried_via"
+        ]
         
-        print(f"Found {len(values)} values for {field}: {values[:5]}...")  # Show first 5
-        return values
+        applied_filters = []
+        step = 1
         
-    except Exception as e:
-        print(f"Error getting values for {field}: {e}")
-        return []
+        for field in filter_sequence:
+            if field in self.filter_combos:
+                selected_value = self.filter_combos[field].currentText().strip()
+                
+                if selected_value and selected_value != "Any":
+                    print(f"Step {step} - Applying {field} = '{selected_value}'")
+                    
+                    filtered_records = []
+                    field_index = self.get_field_index(field)
+                    
+                    for record in current_records:
+                        if str(record[field_index]).strip() == selected_value:
+                            filtered_records.append(record)
+                    
+                    current_records = filtered_records
+                    applied_filters.append(f"{field}: {selected_value}")
+                    
+                    print(f"   After {field} filter: {len(current_records)} records remaining")
+                    
+                    if not current_records:
+                        print(f"   No records match {field} = '{selected_value}'. Stopping filter sequence.")
+                        break
+                    
+                    step += 1
+        
+        print(f"=== FINAL RESULTS: {len(current_records)} records ===")
+        
+        if not current_records:
+            filter_msg = "Sequential Filters Applied:\n" + "\n".join(f"{i+1}. {f}" for i, f in enumerate(applied_filters))
+            QMessageBox.information(self, "No Records Found", 
+                                  f"No records found after sequential filtering:\n\n{filter_msg}\n\nTry relaxing some filter criteria.")
+            return
 
-def load_filter_options(self):
-    """Load initial options for the first filter (Layers)"""
-    try:
-        # Load only the first filter initially
-        first_field = self.filter_sequence[0][1]  # "Layers"
-        values = self.get_available_values(first_field, {})
+        # Sort by price (highest first)
+        try:
+            current_records.sort(key=lambda x: float(str(x[3]).replace('$', '').replace('₹', '').replace(',', '').strip()), reverse=True)
+        except:
+            pass
         
-        if first_field in self.filter_combos and values:
-            combo = self.filter_combos[first_field]
-            combo.blockSignals(True)
-            combo.clear()
-            combo.addItem("Any")
-            combo.addItems(sorted(set(values)))
-            combo.blockSignals(False)
-            print(f"Loaded {len(values)} options for {first_field}")
+        # Use the best record
+        best_match = current_records[0]
+        (ref_qty, ref_length, ref_width, ref_price_per_unit_str, ref_total_cost, ref_fabricator,
+         ref_layers, ref_material, ref_thickness, ref_cu_inner, ref_cu_outer, ref_surface_finish,
+         ref_impedance, ref_soldermask, ref_silkscreen, ref_back_drill, ref_blind_via, ref_buried_via) = best_match
+        
+        # Convert price to number
+        try:
+            clean_price = str(ref_price_per_unit_str).replace('$', '').replace('₹', '').replace(',', '').strip()
+            ref_price_per_unit = float(clean_price)
+        except (ValueError, TypeError):
+            QMessageBox.warning(self, "Data Error", f"Invalid price format: {ref_price_per_unit_str}")
+            return
+
+        # Calculate pricing WITH QUANTITY
+        ref_area = float(ref_length) * float(ref_width)
+        if ref_area <= 0:
+            QMessageBox.warning(self, "Data Error", "Invalid PCB dimensions in reference data.")
+            return
             
+        price_per_sq_unit = ref_price_per_unit / ref_area
+        input_area = length * width
+        per_unit_price = price_per_sq_unit * input_area
+        
+        # CALCULATE TOTAL PROJECT PRICE
+        total_project_price = per_unit_price * quantity
+
+        # Create reference specs
+        reference_specs = {
+            'Fabricator': ref_fabricator,
+            'Layers': ref_layers,
+            'Material': ref_material,
+            'Board Thickness': f"{ref_thickness} mil" if ref_thickness else "N/A",
+            'Cu Inner': ref_cu_inner or "N/A",
+            'Cu Outer': ref_cu_outer or "N/A",
+            'Surface Finish': ref_surface_finish or "N/A",
+            'Impedance': ref_impedance or "N/A",
+            'Soldermask': ref_soldermask or "N/A",
+            'Silkscreen': ref_silkscreen or "N/A",
+            'Back Drill': ref_back_drill or "N/A",
+            'Blind Via': ref_blind_via or "N/A",
+            'Buried Via': ref_buried_via or "N/A"
+        }
+
+        # Display results with quantity
+        self.populate_project_results(
+            customer_name, job_number, pcb_part_number, unit, quantity,
+            length, width, input_area, ref_length, ref_width,
+            ref_price_per_unit, price_per_sq_unit, per_unit_price, total_project_price,
+            reference_specs, applied_filters, len(current_records)
+        )
+
+        print(f"SUCCESS: Per unit price: ₹{per_unit_price:.2f}, Total project price: ₹{total_project_price:.2f}")
+
     except Exception as e:
-        print(f"Error loading initial filter options: {e}")
+        print(f"ERROR: {e}")
+        QMessageBox.critical(self, "Error", f"Calculation failed: {str(e)}")
