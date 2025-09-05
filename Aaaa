@@ -1,5 +1,5 @@
 def calculate_price(self):
-    """Calculate PCB price based on database data with exact filtering"""
+    """Calculate PCB price with sequential cascading filters"""
     try:
         # Validate inputs
         if not all([
@@ -25,21 +25,11 @@ def calculate_price(self):
             QMessageBox.warning(self, "Input Error", "Length and Width must be numeric.")
             return
 
-        # Build EXACT filter conditions
-        filter_conditions = []
-        params = []
-        active_filters = []
+        # SEQUENTIAL FILTERING - Apply filters in order, each one shortlisting from previous results
         
-        # Apply exact filters for each selected option
-        for field, combo in self.filter_combos.items():
-            selected_value = combo.currentText().strip()
-            if selected_value and selected_value != "Any":
-                # EXACT MATCH only
-                filter_conditions.append(f"{field} = ?")
-                params.append(selected_value)
-                active_filters.append(f"{field}: {selected_value}")
-
-        # Base query - get all valid records
+        # Start with all valid records
+        print("=== SEQUENTIAL FILTERING START ===")
+        
         base_query = '''
             SELECT Quantity, Length, Width, PricePerUnit, TotalCostINR, FabricatorName, 
                    Layers, material, BoardThickness, CuInner, CuOuter, SurfaceFinish,
@@ -51,71 +41,87 @@ def calculate_price(self):
             AND Width > 0
         '''
         
-        # Add exact filter conditions
-        if filter_conditions:
-            complete_query = base_query + " AND " + " AND ".join(filter_conditions)
-        else:
-            complete_query = base_query
-            
-        # Order by highest price per unit
-        complete_query += " ORDER BY CAST(REPLACE(REPLACE(PricePerUnit, ',', ''), '$', '') AS REAL) DESC"
-
-        print(f"FILTER DEBUG:")
-        print(f"Query: {complete_query}")
-        print(f"Parameters: {params}")
-        print(f"Active Filters: {active_filters}")
+        self.parent.cursor.execute(base_query)
+        current_records = self.parent.cursor.fetchall()
+        print(f"Step 0 - Initial records: {len(current_records)}")
         
-        self.parent.cursor.execute(complete_query, params)
-        matches = self.parent.cursor.fetchall()
-
-        if not matches:
-            if active_filters:
-                filter_msg = "Applied Filters:\n" + "\n".join(f"• {f}" for f in active_filters)
-                QMessageBox.information(self, "No Match Found", 
-                                      f"No records found matching your exact criteria:\n\n{filter_msg}\n\nTry different filter values or select 'Any' for some filters.")
-            else:
-                QMessageBox.information(self, "No Data", "No valid PCB data found in database.")
+        # Define filter sequence - EXACT ORDER as you specified
+        filter_sequence = [
+            "Layers", "material", "BoardThickness", "CuInner", "CuOuter",
+            "SurfaceFinish", "Impedance", "Soldermask", "Silkscreen", 
+            "back_drill", "blind_via", "berried_via"
+        ]
+        
+        applied_filters = []
+        step = 1
+        
+        # Apply each filter sequentially
+        for field in filter_sequence:
+            if field in self.filter_combos:
+                selected_value = self.filter_combos[field].currentText().strip()
+                
+                if selected_value and selected_value != "Any":
+                    print(f"Step {step} - Applying {field} = '{selected_value}'")
+                    
+                    # Filter current records by this field
+                    filtered_records = []
+                    field_index = self.get_field_index(field)
+                    
+                    for record in current_records:
+                        if str(record[field_index]).strip() == selected_value:
+                            filtered_records.append(record)
+                    
+                    current_records = filtered_records
+                    applied_filters.append(f"{field}: {selected_value}")
+                    
+                    print(f"   After {field} filter: {len(current_records)} records remaining")
+                    
+                    # If no records left, stop filtering
+                    if not current_records:
+                        print(f"   No records match {field} = '{selected_value}'. Stopping filter sequence.")
+                        break
+                    
+                    step += 1
+        
+        print(f"=== FINAL RESULTS: {len(current_records)} records ===")
+        
+        if not current_records:
+            filter_msg = "Sequential Filters Applied:\n" + "\n".join(f"{i+1}. {f}" for i, f in enumerate(applied_filters))
+            QMessageBox.information(self, "No Records Found", 
+                                  f"No records found after sequential filtering:\n\n{filter_msg}\n\nTry relaxing some filter criteria.")
             return
 
-        print(f"Found {len(matches)} exact matches")
+        # Sort remaining records by price (highest first)
+        try:
+            current_records.sort(key=lambda x: float(str(x[3]).replace('$', '').replace('₹', '').replace(',', '').strip()), reverse=True)
+        except:
+            pass  # Keep original order if sorting fails
         
-        # Show all matching records info
-        print("MATCHING RECORDS:")
-        for i, match in enumerate(matches[:5]):  # Show first 5 matches
-            fabricator = match[5]
-            layers = match[6]
-            material = match[7] 
-            price = match[3]
-            print(f"{i+1}. {fabricator} - {layers} layers, {material}, Price: {price}")
-
-        # Use the best match (highest price per unit)
-        best_match = matches[0]
+        # Use the best record
+        best_match = current_records[0]
         (ref_qty, ref_length, ref_width, ref_price_per_unit_str, ref_total_cost, ref_fabricator,
          ref_layers, ref_material, ref_thickness, ref_cu_inner, ref_cu_outer, ref_surface_finish,
          ref_impedance, ref_soldermask, ref_silkscreen, ref_back_drill, ref_blind_via, ref_buried_via) = best_match
         
         # Convert price to number
         try:
-            # Remove currency symbols and commas
             clean_price = str(ref_price_per_unit_str).replace('$', '').replace('₹', '').replace(',', '').strip()
             ref_price_per_unit = float(clean_price)
         except (ValueError, TypeError):
-            QMessageBox.warning(self, "Data Error", f"Invalid price format in database: {ref_price_per_unit_str}")
+            QMessageBox.warning(self, "Data Error", f"Invalid price format: {ref_price_per_unit_str}")
             return
 
-        # Calculate area and price per square unit
+        # Calculate pricing
         ref_area = float(ref_length) * float(ref_width)
         if ref_area <= 0:
             QMessageBox.warning(self, "Data Error", "Invalid PCB dimensions in reference data.")
             return
             
         price_per_sq_unit = ref_price_per_unit / ref_area
-
-        # Calculate price for user's PCB
         input_area = length * width
         per_unit_price = price_per_sq_unit * input_area
 
-        # Create reference specs for display
+        # Create reference specs
         reference_specs = {
             'Fabricator': ref_fabricator,
             'Layers': ref_layers,
@@ -132,16 +138,141 @@ def calculate_price(self):
             'Buried Via': ref_buried_via or "N/A"
         }
 
-        # Update results table
-        self.populate_filtered_results(
+        # Display results
+        self.populate_sequential_results(
             customer_name, job_number, pcb_part_number, unit,
             length, width, input_area, ref_length, ref_width,
             ref_price_per_unit, price_per_sq_unit, per_unit_price,
-            reference_specs, active_filters, len(matches)
+            reference_specs, applied_filters, len(current_records)
         )
 
-        print(f"SUCCESS: Final calculated price per unit: ₹{per_unit_price:.2f}")
+        print(f"SUCCESS: Sequential filtering complete. Final price: ₹{per_unit_price:.2f}")
 
     except Exception as e:
-        print(f"CALCULATION ERROR: {e}")
-        QMessageBox.critical(self, "Error", f"Calculation failed: {str(e)}")
+        print(f"ERROR: {e}")
+        QMessageBox.critical(self, "Error", f"Sequential filtering failed: {str(e)}")
+
+def get_field_index(self, field_name):
+    """Get the index position of field in the query results"""
+    # Based on the SELECT query order:
+    # 0=Quantity, 1=Length, 2=Width, 3=PricePerUnit, 4=TotalCostINR, 5=FabricatorName, 
+    # 6=Layers, 7=material, 8=BoardThickness, 9=CuInner, 10=CuOuter, 11=SurfaceFinish,
+    # 12=Impedance, 13=Soldermask, 14=Silkscreen, 15=back_drill, 16=blind_via, 17=berried_via
+    
+    field_indices = {
+        "Layers": 6,
+        "material": 7,
+        "BoardThickness": 8,
+        "CuInner": 9,
+        "CuOuter": 10,
+        "SurfaceFinish": 11,
+        "Impedance": 12,
+        "Soldermask": 13,
+        "Silkscreen": 14,
+        "back_drill": 15,
+        "blind_via": 16,
+        "berried_via": 17
+    }
+    
+    return field_indices.get(field_name, 0)
+
+def populate_sequential_results(self, customer_name, job_number, pcb_part_number, unit,
+                               length, width, input_area, ref_length, ref_width,
+                               ref_price_per_unit, price_per_sq_unit, per_unit_price,
+                               reference_specs, applied_filters, final_count):
+    """Display results from sequential filtering"""
+    
+    rows = [
+        ("PCB Fabrication Cost Tool", "", "header"),
+        ("", "", "spacer"),
+        ("Customer Information", "", "section"),
+        ("Customer Name", customer_name, "data"),
+        ("Job Number", job_number, "data"),
+        ("PCB Part Number", pcb_part_number, "data"),
+        ("", "", "spacer"),
+        ("Your PCB Specifications", "", "section"),
+        ("Unit", unit, "data"),
+        ("Length", f"{length} {unit}", "data"),
+        ("Width", f"{width} {unit}", "data"),
+        ("Area", f"{input_area:.2f} {unit}²", "data"),
+    ]
+    
+    # Show sequential filter steps
+    if applied_filters:
+        rows.extend([
+            ("", "", "spacer"),
+            ("SEQUENTIAL FILTERS APPLIED", "", "section"),
+            ("Final Records Found", f"{final_count} matches", "data"),
+            ("", "", "spacer"),
+            ("Filter Sequence Applied:", "", "section")
+        ])
+        
+        for i, filter_info in enumerate(applied_filters, 1):
+            rows.append((f"Step {i}", filter_info, "data"))
+    else:
+        rows.extend([
+            ("", "", "spacer"),
+            ("No Filters Applied", "All records considered", "section")
+        ])
+    
+    # Show best match details
+    rows.extend([
+        ("", "", "spacer"),
+        ("BEST MATCH FROM SHORTLIST", "", "section")
+    ])
+    
+    for spec_name, spec_value in reference_specs.items():
+        rows.append((spec_name, str(spec_value), "data"))
+        
+    rows.extend([
+        ("Reference Size", f"{ref_length} × {ref_width} {unit}", "data"),
+        ("Reference Price/Unit", f"₹{ref_price_per_unit:.2f}", "data"),
+        ("", "", "spacer"),
+        ("CALCULATED PRICING", "", "section"),
+        ("Price per Sq Unit", f"₹{price_per_sq_unit:.4f}", "calculation"),
+        ("Your PCB Price", f"₹{per_unit_price:.2f}", "calculation"),
+        ("Final Cost per Piece", f"₹{per_unit_price:.2f}", "calculation")
+    ])
+
+    # Populate table
+    self.results_table.setRowCount(len(rows))
+    
+    for row_idx, (param, value, row_type) in enumerate(rows):
+        param_item = QTableWidgetItem(param)
+        value_item = QTableWidgetItem(value)
+        
+        if row_type == "header":
+            param_item.setBackground(QColor(68, 114, 196))
+            param_item.setForeground(QColor(255, 255, 255))
+            value_item.setBackground(QColor(68, 114, 196))
+            value_item.setForeground(QColor(255, 255, 255))
+            font = QFont()
+            font.setBold(True)
+            font.setPointSize(14)
+            param_item.setFont(font)
+            
+        elif row_type == "section":
+            param_item.setBackground(QColor(213, 228, 247))
+            value_item.setBackground(QColor(213, 228, 247))
+            font = QFont()
+            font.setBold(True)
+            param_item.setFont(font)
+            value_item.setFont(font)
+            
+        elif row_type == "calculation":
+            param_item.setBackground(QColor(226, 239, 218))
+            value_item.setBackground(QColor(226, 239, 218))
+            font = QFont()
+            font.setBold(True)
+            param_item.setFont(font)
+            value_item.setFont(font)
+            
+        elif row_type == "data":
+            param_item.setBackground(QColor(242, 242, 242))
+            value_item.setBackground(QColor(255, 255, 255))
+
+        self.results_table.setItem(row_idx, 0, param_item)
+        self.results_table.setItem(row_idx, 1, value_item)
+
+    self.results_table.resizeColumnsToContents()
+    self.results_table.resizeRowsToContents()
