@@ -1,114 +1,113 @@
-def populate_project_results(self, customer_name, job_number, pcb_part_number, unit, quantity,
-                           length, width, input_area, ref_length, ref_width,
-                           ref_price_per_unit, price_per_sq_unit, per_unit_price, total_project_price,
-                           reference_specs, applied_filters, final_count):
-    """Display results with reference inputs included"""
-    
-    # Get reference inputs
-    soldermask_ref = self.soldermask_input.text().strip() or "Not specified"
-    silkscreen_ref = self.silkscreen_input.text().strip() or "Not specified"
-    
-    rows = [
-        ("PCB Fabrication Cost Tool", "", "header"),
-        ("", "", "spacer"),
-        ("Project Information", "", "section"),
-        ("Customer Name", customer_name, "data"),
-        ("Job Number", job_number, "data"),
-        ("PCB Part Number", pcb_part_number, "data"),
-        ("Project Quantity", f"{quantity:,} pieces", "data"),
-        ("Calculation Date", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "data"),
-        ("", "", "spacer"),
-        ("PCB Specifications", "", "section"),
-        ("Unit", unit, "data"),
-        ("Length", f"{length} {unit}", "data"),
-        ("Width", f"{width} {unit}", "data"),
-        ("PCB Area", f"{input_area:.2f} {unit}²", "data"),
-        ("Total PCB Area", f"{input_area * quantity:.2f} {unit}² ({quantity:,} × {input_area:.2f})", "data"),
-        ("", "", "spacer"),
-        ("Reference Specifications", "", "section"),
-        ("Soldermask", soldermask_ref, "data"),
-        ("Silkscreen", silkscreen_ref, "data"),
-    ]
-    
-    # Show sequential filters applied
-    if applied_filters:
-        rows.extend([
-            ("", "", "spacer"),
-            ("Price Calculation Filters", "", "section"),
-            ("Records Found", f"{final_count} matches", "data"),
-            ("", "", "spacer"),
-            ("Filter Sequence:", "", "section")
-        ])
+def export_to_excel(self):
+    """Export calculation results to Excel WITHOUT best match reference details"""
+    try:
+        # Check if we have results to export
+        if self.results_table.rowCount() == 0:
+            QMessageBox.information(self, "Export", "No calculation results to export. Please calculate first.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Export to Excel", 
+            f"PCB_Project_Cost_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+            "Excel Files (*.xlsx)"
+        )
         
-        for i, filter_info in enumerate(applied_filters, 1):
-            rows.append((f"Step {i}", filter_info, "data"))
-    
-    # Show ONLY key reference data (not full best match)
-    rows.extend([
-        ("", "", "spacer"),
-        ("Price Reference", "", "section"),
-        ("Reference Fabricator", reference_specs.get('Fabricator', 'N/A'), "data"),
-        ("Reference Size", f"{ref_length} × {ref_width} {unit}", "data"),
-        ("Reference Price/Unit", f"₹{ref_price_per_unit:.2f}", "data"),
-        ("", "", "spacer"),
-        ("PRICING BREAKDOWN", "", "section"),
-        ("Price per Square Unit", f"₹{price_per_sq_unit:.4f}", "calculation"),
-        ("Price per PCB", f"₹{per_unit_price:.2f}", "calculation"),
-        ("Project Quantity", f"{quantity:,} pieces", "calculation"),
-        ("", "", "spacer"),
-        ("TOTAL PROJECT COST", "", "section"),
-        ("Total Project Price", f"₹{total_project_price:,.2f}", "total"),
-        ("Cost Breakdown", f"₹{per_unit_price:.2f} × {quantity:,} = ₹{total_project_price:,.2f}", "total")
-    ])
-
-    # Populate table (same formatting as before)
-    self.results_table.setRowCount(len(rows))
-    
-    for row_idx, (param, value, row_type) in enumerate(rows):
-        param_item = QTableWidgetItem(param)
-        value_item = QTableWidgetItem(value)
-        
-        if row_type == "header":
-            param_item.setBackground(QColor(68, 114, 196))
-            param_item.setForeground(QColor(255, 255, 255))
-            value_item.setBackground(QColor(68, 114, 196))
-            value_item.setForeground(QColor(255, 255, 255))
-            font = QFont()
-            font.setBold(True)
-            font.setPointSize(14)
-            param_item.setFont(font)
+        if file_path:
+            # Extract only essential data (excluding best match reference)
+            export_data = []
             
-        elif row_type == "section":
-            param_item.setBackground(QColor(213, 228, 247))
-            value_item.setBackground(QColor(213, 228, 247))
-            font = QFont()
-            font.setBold(True)
-            param_item.setFont(font)
-            value_item.setFont(font)
+            # Get current values from form
+            customer_name = self.customer_input.text().strip()
+            job_number = self.job_input.text().strip()
+            pcb_part_number = self.pcb_part_input.text().strip()
+            quantity = self.quantity_input.text().strip()
+            unit = self.unit_combo.currentText()
+            length = self.length_input.text().strip()
+            width = self.width_input.text().strip()
+            soldermask = self.soldermask_input.text().strip() or "Not specified"
+            silkscreen = self.silkscreen_input.text().strip() or "Not specified"
             
-        elif row_type == "calculation":
-            param_item.setBackground(QColor(226, 239, 218))
-            value_item.setBackground(QColor(226, 239, 218))
-            font = QFont()
-            font.setBold(True)
-            param_item.setFont(font)
-            value_item.setFont(font)
+            # Calculate basic values
+            try:
+                qty = int(quantity)
+                l = float(length)
+                w = float(width)
+                area = l * w
+                total_area = area * qty
+            except:
+                area = "Invalid"
+                total_area = "Invalid"
             
-        elif row_type == "total":
-            param_item.setBackground(QColor(255, 235, 156))
-            value_item.setBackground(QColor(255, 235, 156))
-            font = QFont()
-            font.setBold(True)
-            font.setPointSize(12)
-            param_item.setFont(font)
-            value_item.setFont(font)
+            # Get applied filters
+            applied_filters = []
+            for field, combo in self.filter_combos.items():
+                value = combo.currentText().strip()
+                if value and value != "Any":
+                    applied_filters.append(f"{field}: {value}")
             
-        elif row_type == "data":
-            param_item.setBackground(QColor(242, 242, 242))
-            value_item.setBackground(QColor(255, 255, 255))
-
-        self.results_table.setItem(row_idx, 0, param_item)
-        self.results_table.setItem(row_idx, 1, value_item)
-
-    self.results_table.resizeColumnsToContents()
-    self.results_table.resizeRowsToContents()
+            # Get pricing from results table if available
+            per_unit_price = "Not calculated"
+            total_project_price = "Not calculated"
+            
+            for row in range(self.results_table.rowCount()):
+                param_item = self.results_table.item(row, 0)
+                value_item = self.results_table.item(row, 1)
+                if param_item and value_item:
+                    param = param_item.text()
+                    value = value_item.text()
+                    if "Price per PCB" in param:
+                        per_unit_price = value
+                    elif "Total Project Price" in param:
+                        total_project_price = value
+            
+            # Create export data structure - NO BEST MATCH REFERENCE
+            export_data = [
+                ["PCB Project Cost Calculation", ""],
+                ["", ""],
+                ["Project Information", ""],
+                ["Customer Name", customer_name],
+                ["Job Number", job_number],
+                ["PCB Part Number", pcb_part_number],
+                ["Project Quantity", f"{quantity} pieces"],
+                ["Calculation Date", datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
+                ["", ""],
+                ["PCB Specifications", ""],
+                ["Unit", unit],
+                ["Length", f"{length} {unit}"],
+                ["Width", f"{width} {unit}"],
+                ["PCB Area", f"{area} {unit}²" if area != "Invalid" else "Invalid"],
+                ["Total Project Area", f"{total_area} {unit}²" if total_area != "Invalid" else "Invalid"],
+                ["", ""],
+                ["Reference Specifications", ""],
+                ["Soldermask", soldermask],
+                ["Silkscreen", silkscreen],
+                ["", ""]
+            ]
+            
+            # Add applied filters if any
+            if applied_filters:
+                export_data.extend([
+                    ["Applied Filters", ""],
+                    ["Filter Count", f"{len(applied_filters)} filters"]
+                ])
+                for i, filter_info in enumerate(applied_filters, 1):
+                    export_data.append([f"Filter {i}", filter_info])
+                export_data.append(["", ""])
+            
+            # Add final pricing
+            export_data.extend([
+                ["FINAL PRICING", ""],
+                ["Price per PCB", per_unit_price],
+                ["Project Quantity", f"{quantity} pieces"],
+                ["Total Project Cost", total_project_price]
+            ])
+            
+            # Create DataFrame and export
+            df = pd.DataFrame(export_data, columns=['Parameter', 'Value'])
+            df.to_excel(file_path, index=False, sheet_name='PCB Project Cost')
+            
+            QMessageBox.information(self, "Export Success", 
+                                  f"Project cost data exported successfully!\n\nFile saved as:\n{file_path}")
+                                    
+    except Exception as e:
+        QMessageBox.critical(self, "Export Error", f"Failed to export data: {str(e)}")
