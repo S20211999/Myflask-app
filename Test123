@@ -1,1 +1,104 @@
+def populate_results_table_with_specs(self, customer_name, job_number, pcb_part_number, unit,
+                                    length, width, input_area, ref_length, ref_width,
+                                    ref_price_per_unit, price_per_sq_unit, per_unit_price, 
+                                    reference_specs, active_filters, total_matches):
+    """Populate the results table with calculation data and reference specifications"""
+    
+    # Define all rows with their data
+    rows = [
+        ("PCB Fabrication Cost Tool", "", "header"),
+        ("", "", "spacer"),
+        ("Customer Information", "", "section"),
+        ("Customer Name", customer_name, "data"),
+        ("Job Number", job_number, "data"),
+        ("PCB Part Number", pcb_part_number, "data"),
+        ("Calculation Date", datetime.now().strftime('%Y-%m-%d %H:%M:%S'), "data"),
+        ("", "", "spacer"),
+        ("Input PCB Specifications", "", "section"),
+        ("Unit", unit, "data"),
+        ("PCB Length", f"{length} {unit}", "data"),
+        ("PCB Width", f"{width} {unit}", "data"),
+        ("PCB Area", f"{input_area:.2f} {unit}²", "data"),
+    ]
+    
+    # Add applied filters section
+    if active_filters:
+        rows.extend([
+            ("", "", "spacer"),
+            ("Applied Filters", "", "section"),
+            ("Total Matches Found", str(total_matches), "data")
+        ])
+        
+        for filter_text in active_filters:
+            rows.append((filter_text, "✓ Applied", "data"))
+    
+    # Add reference PCB specifications
+    rows.extend([
+        ("", "", "spacer"),
+        ("Reference PCB (Best Match)", "", "section"),
+        ("Reference Size", f"{ref_length} × {ref_width} {unit}", "data"),
+        ("Reference Price/Unit", f"₹{ref_price_per_unit:.2f}", "data")
+    ])
+    
+    # Add detailed reference specifications
+    for spec_name, spec_value in reference_specs.items():
+        if spec_value and spec_value != "N/A":
+            rows.append((f"Ref {spec_name}", str(spec_value), "data"))
+    
+    # Add price calculations
+    rows.extend([
+        ("", "", "spacer"),
+        ("Price Calculation", "", "section"),
+        ("Price per Square Unit", f"₹{price_per_sq_unit:.4f}", "calculation"),
+        ("Estimated Price per PCB", f"₹{per_unit_price:.2f}", "calculation"),
+        ("Unit Cost", f"₹{per_unit_price:.2f} per piece", "calculation")
+    ])
 
+    # Set up the table
+    self.results_table.setRowCount(len(rows))
+    
+    # Populate table items with the same formatting as before
+    for row_idx, (param, value, row_type) in enumerate(rows):
+        param_item = QTableWidgetItem(param)
+        value_item = QTableWidgetItem(value)
+        
+        # Apply formatting based on row type (same as before)
+        if row_type == "header":
+            param_item.setBackground(QColor(68, 114, 196))
+            param_item.setForeground(QColor(255, 255, 255))
+            value_item.setBackground(QColor(68, 114, 196))
+            value_item.setForeground(QColor(255, 255, 255))
+            font = QFont()
+            font.setBold(True)
+            font.setPointSize(14)
+            param_item.setFont(font)
+            param_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            
+        elif row_type == "section":
+            param_item.setBackground(QColor(213, 228, 247))
+            value_item.setBackground(QColor(213, 228, 247))
+            font = QFont()
+            font.setBold(True)
+            param_item.setFont(font)
+            value_item.setFont(font)
+            
+        elif row_type == "calculation":
+            param_item.setBackground(QColor(226, 239, 218))
+            value_item.setBackground(QColor(226, 239, 218))
+            font = QFont()
+            font.setBold(True)
+            param_item.setFont(font)
+            value_item.setFont(font)
+            value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+            
+        elif row_type == "data":
+            param_item.setBackground(QColor(242, 242, 242))
+            value_item.setBackground(QColor(255, 255, 255))
+            value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight)
+
+        self.results_table.setItem(row_idx, 0, param_item)
+        self.results_table.setItem(row_idx, 1, value_item)
+
+    # Resize columns and rows
+    self.results_table.resizeColumnsToContents()
+    self.results_table.resizeRowsToContents()
