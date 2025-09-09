@@ -1,20 +1,2 @@
-(defun doRotateSilkAssy ()
-   (axlClearSelSet)
-   (axlSetFindFilter ?enabled   (list "noall"  "text")
-                     ?onButtons (list "text"))
-   (axlMsgPut "Smart RD placement started.")
-   ; Get board outline for boundary checking
-   (setq BoardOutline (getBoardOutline))
-   (foreach layer Layer_List 
-            (axlVisibleDesign nil)
-            (axlVisibleLayer layer t)
-            (setq Text_List (axlGetSelSet (axlAddSelectAll)))
-            (cond
-              ((and Text_List (listp Text_List) (> (length Text_List) 0))
-                (rotateSilkAssy)
-              )
-            )
-            (axlClearSelSet)
-            (axlFlushDisplay)
-            (axlMsgPut (strcat layer " Smart placement completed."))
-          )
+PTH ---- From pad need to maintain 0.381mm airgap  Square or Rectangle shape Via Keep out all & Package keep out Bottom.
+NPTH----From pad need to maintain 0.381mm airgap  Square or Rectangle shape Via Keep out all & Package keep out Bottom. & Root keepout all need to maintain 0.3mm airgap circle
