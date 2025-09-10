@@ -1,1 +1,660 @@
 
+;###########################################################################
+;#                                                                         #
+;#   Smart Reference Designator Placement on Silkscreen and Assembly      #
+;#                                                                         #
+;#  This routine places Silkscreen and Assembly Reference Designators     #
+;#  beside components with intelligent space detection. It finds the      #
+;#  side with maximum available space, maintains minimum clearances,      #
+;#  and avoids overlapping components and vias.                           #
+;#                                                                         #
+;#  Features:                                                              #
+;#  - Places text beside components, not on them                          #
+;#  - Checks all sides for maximum available space                        #
+;#  - Maintains 0.6 unit clearance from components                        #
+;#  - Avoids overlapping vias when possible                               #
+;#  - Places outside board boundary when no space available               #
+;#  - User-configurable text size (default 0.81)                          #
+;#                                                                         #
+;#  Usage:  rotate_silkassy (from within Allegro)                          #
+;###########################################################################
+
+;##########################
+;#  Register Program Name #
+;##########################
+(axlCmdRegister "rotate_silkassy" 'RotateSilkAssyRD)
+
+;#############################
+;# MAIN Program Starts Here. #
+;#############################
+(defun RotateSilkAssyRD ()
+  ; ==== Initialize Global Variables ====
+  (setq Layer_List nil)
+  (setq Text_List  nil)
+  (setq justify    "")
+  (setq LRBT t)   ; Left to Right, Bottom to Top
+  (setq LRTB nil) ; Left to Right, Top to Bottom
+  (setq RLBT nil) ; Right to Left, Bottom to Top
+  (setq RLTB nil) ; Right to Left, Top to Bottom
+  (setq CenterAssy nil)  ; Changed to nil since we're placing beside components
+  (setq ChangeTextSize  t)  ; Enable text size changing
+  (setq TextBlockLarge  6)
+  (setq TextBlockMedium 3)
+  (setq TextBlockSmall  1)
+  (setq tblk_large  "6")
+  (setq tblk_medium "3")
+  (setq tblk_small  "1")
+  ; New variables for intelligent placement
+  (setq MinClearance 0.6)        ; Minimum clearance from components
+  (setq DefaultTextSize 0.81)    ; Default text size
+  (setq UserTextSize 0.81)       ; User-configurable text size
+  (setq AvoidVias t)             ; Try to avoid placing on vias
+  (setq PlaceOutsideBoard t)     ; Allow placement outside board if no space
+  (setq SilkTop nil)
+  (setq SilkBot nil)
+  (setq AssyTop nil)
+  (setq AssyBot nil)
+  (setq silktop_layer "REF DES/SILKSCREEN_TOP")
+  (setq silkbot_layer "REF DES/SILKSCREEN_BOTTOM")
+  (setq assytop_layer "REF DES/ASSEMBLY_TOP")
+  (setq assybot_layer "REF DES/ASSEMBLY_BOTTOM")
+  (setq BoardOutline nil)  ; Initialize board outline variable
+  (setq FormDir "./")
+  
+  (if (axlOKToProceed) then
+      ; ==== Create and Display the User Interface ====
+      (createRotateRDForm)
+      (setq fFile (strcat FormDir "rotateRDForm.form"))
+      (setq Form (axlFormCreate (gensym) fFile nil 'rotateRDForm_Action t))
+      (axlFormSetField Form "LRBT" LRBT)
+      (axlFormSetField Form "LRTB" LRTB)
+      (axlFormSetField Form "RLBT" RLBT)
+      (axlFormSetField Form "RLTB" RLTB)
+      (axlFormSetField Form "CenterAssy" CenterAssy)
+      (axlFormSetField Form "TextBlockLarge" TextBlockLarge)
+      (axlFormSetField Form "TextBlockMedium" TextBlockMedium)
+      (axlFormSetField Form "TextBlockSmall" TextBlockSmall)
+      (axlFormSetField Form "UserTextSize" UserTextSize)
+      (axlFormSetField Form "MinClearance" MinClearance)
+      (axlFormSetField Form "AvoidVias" AvoidVias)
+      (axlFormDisplay Form)
+  else
+      (printf "E- Please terminate your interactive command .\n")
+  )
+)
+
+;############################################################################
+;# doRotateSilkAssy - When OK is hit, perform Reference Designator Rotation #
+;############################################################################
+(defun doRotateSilkAssy ()
+   (axlClearSelSet)
+   (axlSetFindFilter '?enabled   '("noall"  "text")
+                     '?onButtons '("text"))
+   (axlMsgPut "Smart RD placement started.")
+   ; Get board outline for boundary checking
+   (setq BoardOutline (getBoardOutline))
+   (foreach layer Layer_List 
+            (axlVisibleDesign nil)
+            (axlVisibleLayer layer t)
+            (setq Text_List (axlGetSelSet (axlAddSelectAll)))
+            (cond
+              ((and Text_List (listp Text_List) (> (length Text_List) 0))
+              (rotateSilkAssy)
+              )
+            )
+            (axlClearSelSet)
+            (axlFlushDisplay)
+            (axlMsgPut (strcat layer " Smart placement completed."))
+          )
+; ==== Turn On Top/Bottom Silk & Assembly Layers, if they were changed. ====
+   (setq Display_List (list "paramLayerGroup:BOARD GEOMETRY/paramLayer:OUTLINE"))
+   (if (equal AssyTop t) then
+       (setq Display_List (cons "paramLayerGroup:PACKAGE GEOMETRY/paramLayer:ASSEMBLY_TOP" Display_List))
+       (setq Display_List (cons "paramLayerGroup:REF DES/paramLayer:ASSEMBLY_TOP" Display_List))
+     )
+   (if (equal AssyBot t) then
+       (setq Display_List (cons "paramLayerGroup:PACKAGE GEOMETRY/paramLayer:ASSEMBLY_BOTTOM" Display_List))
+       (setq Display_List (cons "paramLayerGroup:REF DES/paramLayer:ASSEMBLY_BOTTOM" Display_List))
+     ) 
+   (if (equal SilkTop t) then
+       (setq Display_List (cons "paramLayerGroup:PACKAGE GEOMETRY/paramLayer:SILKSCREEN_TOP" Display_List))
+       (setq Display_List (cons "paramLayerGroup:REF DES/paramLayer:SILKSCREEN_TOP" Display_List))
+     )
+   (if (equal SilkBot t) then
+       (setq Display_List (cons "paramLayerGroup:PACKAGE GEOMETRY/paramLayer:SILKSCREEN_BOTTOM" Display_List))
+       (setq Display_List (cons "paramLayerGroup:REF DES/paramLayer:SILKSCREEN_BOTTOM" Display_List))
+     )
+   (foreach Layer Display_List
+            (setq val (axlGetParam Layer))
+            (setq val->visible t)
+            (axlSetParam val)
+          )
+)
+
+;######################################################################  
+;# getBoardOutline - Get the board outline for boundary checking     #
+;######################################################################  
+(defun getBoardOutline ()
+  (let ((outlineList nil) (boardBBox nil))
+    (axlClearSelSet)
+    (axlSetFindFilter '?enabled '("noall" "shape")
+                      '?onButtons '("shape")
+                      '?layerName '("BOARD GEOMETRY/OUTLINE"))
+    (setq outlineList (axlGetSelSet (axlAddSelectAll)))
+    (if outlineList
+        (setq boardBBox (car outlineList)->bBox)
+        (setq boardBBox (list (list -10000 -10000) (list 10000 10000)))
+    )
+    (axlClearSelSet)
+    boardBBox
+  )
+)
+
+;######################################################################  
+;# findOptimalTextPosition - Find the best position for text placement#
+;######################################################################  
+(defun findOptimalTextPosition (componentBBox textWidth textHeight)
+  (let ((positions (list)) (bestPos nil) (maxSpace 0) (currentSpace 0) (testX 0) (testY 0) (testPositions nil)
+        (comp_llx 0) (comp_lly 0) (comp_urx 0) (comp_ury 0) (comp_centerX 0) (comp_centerY 0))
+    ; Calculate component center and dimensions
+    (setq comp_llx (xCoord (car componentBBox)))
+    (setq comp_lly (yCoord (car componentBBox)))
+    (setq comp_urx (xCoord (cadr componentBBox)))
+    (setq comp_ury (yCoord (cadr componentBBox)))
+    (setq comp_centerX (/ (+ comp_urx comp_llx) 2))
+    (setq comp_centerY (/ (+ comp_ury comp_lly) 2))
+    ; Test positions: Right, Left, Top, Bottom
+    (setq testPositions (list
+      (list (+ comp_urx MinClearance (/ textWidth 2)) comp_centerY "RIGHT")
+      (list (- comp_llx MinClearance (/ textWidth 2)) comp_centerY "LEFT")
+      (list comp_centerX (+ comp_ury MinClearance (/ textHeight 2)) "TOP")
+      (list comp_centerX (- comp_lly MinClearance (/ textHeight 2)) "BOTTOM")
+    ))
+    (foreach testPos testPositions
+      (setq testX (car testPos))
+      (setq testY (cadr testPos))
+      (setq side (caddr testPos))
+      ; Calculate available space in this position
+      (setq currentSpace (calculateAvailableSpace testX testY textWidth textHeight side))
+      ; Check if this position is better
+      (if (> currentSpace maxSpace) then
+          (setq maxSpace currentSpace)
+          (setq bestPos (list testX testY side maxSpace))
+      )
+    )
+    ; If no good position found, try outside board
+    (if (or (equal bestPos nil) (< maxSpace (* textWidth textHeight))) then
+        (if (equal PlaceOutsideBoard t) then
+            (setq bestPos (findPositionOutsideBoard componentBBox textWidth textHeight))
+        )
+    )
+    bestPos
+  )
+)
+
+;######################################################################  
+;# calculateAvailableSpace - Calculate available space at position   #
+;######################################################################  
+(defun calculateAvailableSpace (testX testY textWidth textHeight side)
+  (let ((space (* textWidth textHeight)) (conflictFound nil) (textBBox nil))
+    ; Create test bounding box for text
+    (setq textBBox (list
+      (list (- testX (/ textWidth 2)) (- testY (/ textHeight 2)))
+      (list (+ testX (/ textWidth 2)) (+ testY (/ textHeight 2)))
+    ))
+    ; Check for conflicts with other components
+    (setq conflictFound (checkComponentConflicts textBBox))
+    ; Check for conflicts with vias if avoiding them
+    (if (and (equal AvoidVias t) (equal conflictFound nil)) then
+        (setq conflictFound (checkViaConflicts textBBox))
+    )
+    ; If conflict found, reduce space significantly
+    (if (equal conflictFound t) then
+        (setq space 0)
+    )
+    space
+  )
+)
+
+;######################################################################  
+;# checkComponentConflicts - Check if text conflicts with components  #
+;######################################################################  
+(defun checkComponentConflicts (textBBox)
+  (let ((conflictFound nil) (componentList nil))
+    ; Get all components in the area
+    (axlClearSelSet)
+    (axlSetFindFilter '?enabled '("noall" "symbol")
+                      '?onButtons '("symbol"))
+    (setq componentList (axlGetSelSet (axlAddSelectAll)))
+    (foreach comp componentList
+      (if (boundingBoxOverlap textBBox comp->bBox MinClearance) then
+          (setq conflictFound t)
+      )
+    )
+    (axlClearSelSet)
+    conflictFound
+  )
+)
+
+;######################################################################  
+;# checkViaConflicts - Check if text conflicts with vias             #
+;######################################################################  
+(defun checkViaConflicts (textBBox)
+  (let ((conflictFound nil) (viaList nil))
+    ; Get all vias in the area
+    (axlClearSelSet)
+    (axlSetFindFilter '?enabled '("noall" "via")
+                      '?onButtons '("via"))
+    (setq viaList (axlGetSelSet (axlAddSelectAll)))
+    (foreach via viaList
+      (if (boundingBoxOverlap textBBox via->bBox (/ MinClearance 2)) then
+          (setq conflictFound t)
+      )
+    )
+    (axlClearSelSet)
+    conflictFound
+  )
+)
+
+;######################################################################  
+;# boundingBoxOverlap - Check if two bounding boxes overlap         #
+;######################################################################  
+(defun boundingBoxOverlap (bbox1 bbox2 clearance)
+  (let ((box1_llx 0) (box1_lly 0) (box1_urx 0) (box1_ury 0) 
+        (box2_llx 0) (box2_lly 0) (box2_urx 0) (box2_ury 0))
+    (setq box1_llx (- (xCoord (car bbox1)) clearance))
+    (setq box1_lly (- (yCoord (car bbox1)) clearance))
+    (setq box1_urx (+ (xCoord (cadr bbox1)) clearance))
+    (setq box1_ury (+ (yCoord (cadr bbox1)) clearance))
+    (setq box2_llx (xCoord (car bbox2)))
+    (setq box2_lly (yCoord (car bbox2)))
+    (setq box2_urx (xCoord (cadr bbox2)))
+    (setq box2_ury (yCoord (cadr bbox2)))
+    ; Check if boxes don't overlap (return nil), otherwise they overlap (return t)
+    (not (or (< box1_urx box2_llx) (> box1_llx box2_urx) (< box1_ury box2_lly) (> box1_lly box2_ury)))
+  )
+)
+
+;######################################################################  
+;# findPositionOutsideBoard - Find position outside board boundary   #
+;######################################################################  
+(defun findPositionOutsideBoard (componentBBox textWidth textHeight)
+  (let ((comp_centerX 0) (comp_centerY 0) (boardCenterX 0) (boardCenterY 0) (bestPos nil))
+    (setq comp_centerX (/ (+ (xCoord (car componentBBox)) (xCoord (cadr componentBBox))) 2))
+    (setq comp_centerY (/ (+ (yCoord (car componentBBox)) (yCoord (cadr componentBBox))) 2))
+    ; Get board center
+    (if BoardOutline then
+        (setq boardCenterX (/ (+ (xCoord (car BoardOutline)) (xCoord (cadr BoardOutline))) 2))
+        (setq boardCenterY (/ (+ (yCoord (car BoardOutline)) (yCoord (cadr BoardOutline))) 2))
+        ; Place text outside board in direction away from board center
+        (if (> comp_centerX boardCenterX) then
+            ; Place to the right of board
+            (setq bestPos (list (+ (xCoord (cadr BoardOutline)) (/ textWidth 2) MinClearance) comp_centerY "OUTSIDE_RIGHT" 1000))
+          else
+            ; Place to the left of board
+            (setq bestPos (list (- (xCoord (car BoardOutline)) (/ textWidth 2) MinClearance) comp_centerY "OUTSIDE_LEFT" 1000))
+        )
+      else
+        ; No board outline found, place to the right of component
+        (setq bestPos (list (+ (xCoord (cadr componentBBox)) (/ textWidth 2) (* MinClearance 2)) comp_centerY "OUTSIDE_DEFAULT" 1000))
+    )
+    bestPos
+  )
+)
+
+;######################################################################  
+;# rotateSilkAssy - Smart placement of reference designators         #
+;######################################################################  
+(defun rotateSilkAssy ()
+   (foreach text_id Text_List
+        ; ==== retrieve current information on text id ====
+        (setq changeit 0)
+        (setq text   text_id->text)
+        (setq xy     text_id->xy)
+        (setq txt_x  (xCoord xy))
+        (setq txt_y  (yCoord xy))
+        (setq txt_tblk text_id->textBlock)
+        ; ==== Change Text to "Center" Justification for ease of use ====
+        (setq txt_jus text_id->justify)
+        (if (!= txt_jus "CENTER") then (setq changeit 1))
+        ; ==== Check current rotation against preferred orientation ====
+        (setq txt_rot text_id->rotation)
+        (if (equal LRBT t) then
+            (if (equal txt_rot 180) then
+                (setq txt_rot  0)
+                (setq changeit 1)
+            )
+            (if (equal txt_rot 270) then 
+                (setq txt_rot  90)
+                (setq changeit 1)
+            )
+        )
+        (if (equal LRTB t) then
+            (if (equal txt_rot 180) then 
+                (setq txt_rot  0)
+                (setq changeit 1)
+            )
+            (if (equal txt_rot 90) then 
+                (setq txt_rot  270)
+                (setq changeit 1)
+            )
+        )
+        (if (equal RLBT t) then
+            (if (equal txt_rot 180) then 
+                (setq txt_rot  0)
+                (setq changeit 1)
+            )
+            (if (equal txt_rot 270) then 
+                (setq txt_rot  90)
+                (setq changeit 1)
+            )
+        )
+        (if (equal RLTB t) then
+            (if (equal txt_rot 180) then 
+                (setq txt_rot  0)
+                (setq changeit 1)
+            )
+            (if (equal txt_rot 90) then 
+                (setq txt_rot  270)
+                (setq changeit 1)
+            )
+        )
+        ; ==== Smart Positioning Logic ====
+        (setq txt_lyr text_id->layer)
+        (if (or (equal txt_lyr assytop_layer) (equal txt_lyr assybot_layer) (equal txt_lyr silktop_layer) (equal txt_lyr silkbot_layer)) then
+            (if (equal CenterAssy t) then
+                ; Legacy mode - center at component origin
+                (foreach childid text_id->parent->children
+                        (if (or (equal childid->layer "PACKAGE GEOMETRY/PLACE_BOUND_TOP")
+                                (equal childid->layer "PACKAGE GEOMETRY/PLACE_BOUND_BOTTOM")) then                
+                            (setq sym_llx (xCoord (car childid->bBox)))
+                            (setq sym_lly (yCoord (car childid->bBox)))
+                            (setq sym_urx (xCoord (cadr childid->bBox)))
+                            (setq sym_ury (yCoord (cadr childid->bBox))) 
+                            (setq sym_x   (/ (+ sym_urx sym_llx) 2))
+                            (setq sym_y   (/ (+ sym_ury sym_lly) 2))
+                        )
+                )
+                (if (equal txt_rot 0) then (setq sym_y (- sym_y 20)))
+                (if (equal txt_rot 90) then (setq sym_x (+ sym_x 20)))
+                (if (equal txt_rot 180) then (setq sym_y (+ sym_y 20))) 
+                (if (equal txt_rot 270) then (setq sym_x (- sym_x 20)))
+                (setq xy (list sym_x sym_y))
+                (setq changeit 1)
+            else
+                ; Smart placement mode
+                ; Get component bounding box
+                (setq componentBBox text_id->parent->bBox)
+                ; Estimate text dimensions based on user text size
+                (setq textWidth (* (length text) UserTextSize 0.7))
+                (setq textHeight (* UserTextSize 1.2))
+                ; Find optimal position
+                (setq optimalPos (findOptimalTextPosition componentBBox textWidth textHeight))
+                (if (!= optimalPos nil) then
+                    (setq xy (list (car optimalPos) (cadr optimalPos)))
+                    (setq changeit 1)
+                    ; Adjust rotation based on placement side
+                    (setq placementSide (caddr optimalPos))
+                    (case placementSide
+                      ("LEFT"
+                        (if (equal txt_rot 0) then (setq txt_rot 90))
+                        (if (equal txt_rot 180) then (setq txt_rot 270))
+                      )
+                      ("RIGHT" 
+                        (if (equal txt_rot 0) then (setq txt_rot 270))
+                        (if (equal txt_rot 180) then (setq txt_rot 90))
+                      )
+                    )
+                )
+            )
+            ; Apply user text size
+            (if (equal ChangeTextSize t) then 
+                (setq changeit 1)
+                ; Convert user text size to appropriate text block
+                (if (>= UserTextSize 1.0) then
+                    (setq txt_tblk tblk_large)
+                else (if (>= UserTextSize 0.6) then
+                    (setq txt_tblk tblk_medium)
+                else
+                    (setq txt_tblk tblk_small)
+                )
+            )
+        )
+        ; ==== Do text movement, if anything has changed ==== 
+        (if (equal changeit 1) then (createTextBlock_RD))
+    )
+)
+
+;####################################################################  
+;# createTextBlock_RD - Create text record with smart positioning   #
+;####################################################################  
+(defun createTextBlock_RD ()
+  (setq textBlock txt_tblk)
+  (setq rotation  txt_rot)
+  (setq parent_id text_id->parent)        ; symbol association
+  (setq mirrored  text_id->isMirrored)    ; t/nil
+  (setq justify   "CENTER")               ; "LEFT" "CENTER" "RIGHT"
+  ; ==== setup defstruct for text insertion ====
+  (setq textOrientation (make_axlTextOrientation ?textBlock textBlock
+                                                 ?rotation  rotation
+                                                 ?mirrored  mirrored
+                                                 ?justify   justify))
+  ; ==== Add new text and delete the existing text if successful ===
+  (setq update (axlDBCreateText text xy textOrientation
+                                text_id->layer parent_id))
+  (if (!= update nil) then
+      (axlDeleteObject (list text_id))
+  else
+      (axlMsgPut (strcat "Update Failed on " text))
+  )
+)
+
+;###########################################################
+;# Form CallBacks - Handle user interface interactions    #
+;###########################################################
+(defun rotateRDForm_Action (Form)
+   (case Form->curField
+     ("SilkTop"
+        (setq SilkTop Form->curValue)
+     )
+     ("SilkBot"
+        (setq SilkBot Form->curValue)
+     )
+     ("AssyTop"
+        (setq AssyTop Form->curValue)
+     )
+     ("AssyBot"
+        (setq AssyBot Form->curValue)
+     )
+     ("LRBT"
+        (setq LRBT Form->curValue)
+        (setq orient_0   t)
+        (setq orient_90  t)
+        (setq orient_180 nil)
+        (setq orient_270 nil)
+     )
+     ("LRTB"
+        (setq LRTB Form->curValue)
+        (setq orient_0   t)
+        (setq orient_90  nil)
+        (setq orient_180 nil)
+        (setq orient_270 t)
+     )
+     ("RLBT"
+        (setq RLBT Form->curValue)
+        (setq orient_0   nil)
+        (setq orient_90  t)
+        (setq orient_180 t)
+        (setq orient_270 nil)
+     )
+     ("RLTB"
+        (setq RLTB Form->curValue)
+        (setq orient_0   nil)
+        (setq orient_90  nil)
+        (setq orient_180 t)
+        (setq orient_270 t)
+     )
+     ("CenterAssy"
+        (setq CenterAssy Form->curValue)
+     )
+     ("ChangeTextSize"
+        (setq ChangeTextSize Form->curValue)
+     )
+     ("TextBlockLarge"
+        (setq TextBlockLarge Form->curValue)
+        (sprintf tblk_large "%L" TextBlockLarge)
+     )
+     ("TextBlockMedium"
+        (setq TextBlockMedium Form->curValue)
+        (sprintf tblk_medium "%L" TextBlockMedium)
+     )
+     ("TextBlockSmall"
+        (setq TextBlockSmall Form->curValue)
+        (sprintf tblk_small "%L" TextBlockSmall)
+     )
+     ("UserTextSize"
+        (setq UserTextSize Form->curValue)
+     )
+     ("MinClearance"
+        (setq MinClearance Form->curValue)
+     )
+     ("AvoidVias"
+        (setq AvoidVias Form->curValue)
+     )
+     ("done"
+        ; ==== cons puts the list together in reverse order
+        (if (equal AssyBot t) then (setq Layer_List (cons assybot_layer Layer_List)))
+        (if (equal AssyTop t) then (setq Layer_List (cons assytop_layer Layer_List)))
+        (if (equal SilkBot t) then (setq Layer_List (cons silkbot_layer Layer_List)))
+        (if (equal SilkTop t) then (setq Layer_List (cons silktop_layer Layer_List)))
+        (doRotateSilkAssy)
+        (axlFormClose Form)
+        (axlCancelEnterFun)
+        (deleteFile fFile)
+     )
+     ("cancel"
+        (axlFormClose Form)
+        (axlCancelEnterFun)
+        (deleteFile fFile)
+     )
+   )
+ )
+
+;###########################################################
+;# createRotateRDForm - Enhanced User Interface Form      #
+;###########################################################
+(defun createRotateRDForm ()  
+   (setq fFile (strcat FormDir "rotateRDForm.form"))
+   (setq Form  (outfile fFile "w"))
+   (fprintf Form "FILE_TYPE=FORM_DEFN VERSION=2\n")
+   (fprintf Form "FORM\n")
+   (fprintf Form "FIXED\n")
+   (fprintf Form "PORT 85 25\n")
+   (fprintf Form "HEADER \"Smart Reference Designator Placement V3.0\"\n")
+   (fprintf Form "TILE\n")
+   (fprintf Form "GROUP \"Select Layers to Process\"\n")
+   (fprintf Form "GLOC 2 1\n")
+   (fprintf Form "GSIZE 80 4\n")
+   (fprintf Form "ENDGROUP\n")
+   (fprintf Form "FIELD \"SilkTop\"\n")
+   (fprintf Form "FLOC 3 3 \n")
+   (fprintf Form "CHECKLIST \"Silkscreen-Top\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"SilkBot\"\n")
+   (fprintf Form "FLOC 20 3 \n")
+   (fprintf Form "CHECKLIST \"Silkscreen-Bottom\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"AssyTop\"\n")
+   (fprintf Form "FLOC 37 3 \n")
+   (fprintf Form "CHECKLIST \"Assembly-Top\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"AssyBot\"\n")
+   (fprintf Form "FLOC 54 3 \n")
+   (fprintf Form "CHECKLIST \"Assembly-Bottom\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "GROUP \"RD Orientation\"\n")
+   (fprintf Form "GLOC 2 5\n")
+   (fprintf Form "GSIZE 32 13\n")
+   (fprintf Form "ENDGROUP\n")
+   (fprintf Form "GROUP \"Smart Placement Settings\"\n")
+   (fprintf Form "GLOC 36 5\n")
+   (fprintf Form "GSIZE 46 13\n")
+   (fprintf Form "ENDGROUP\n")
+   (fprintf Form "TEXT \"Horizontal           Vertical \"\n")
+   (fprintf Form "TLOC 6 7 \n")
+   (fprintf Form "ENDTEXT\n")
+   (fprintf Form "FIELD \"LRBT\"\n")
+   (fprintf Form "FLOC 3 9 \n")
+   (fprintf Form "CHECKLIST \"Left to Right     Bottom to Top\" \"rotate_group\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"LRTB\"\n")
+   (fprintf Form "FLOC 3 11 \n")
+   (fprintf Form "CHECKLIST \"Left to Right     Top to Bottom\" \"rotate_group\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"RLBT\"\n")
+   (fprintf Form "FLOC 3 13 \n")
+   (fprintf Form "CHECKLIST \"Right to Left     Bottom to Top\" \"rotate_group\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"RLTB\"\n")
+   (fprintf Form "FLOC 3 15 \n")
+   (fprintf Form "CHECKLIST \"Right to Left     Top to Bottom\" \"rotate_group\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "TEXT \"Text Size: \"\n")
+   (fprintf Form "TLOC 38 7 \n")
+   (fprintf Form "ENDTEXT\n")
+   (fprintf Form "FIELD \"UserTextSize\"\n")
+   (fprintf Form "FLOC 48 7 \n")
+   (fprintf Form "FLOATSLIDEBAR 6 3\n MIN 0.3\n MAX 2.0\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "TEXT \"Min Clearance: \"\n")
+   (fprintf Form "TLOC 38 9 \n")
+   (fprintf Form "ENDTEXT\n")
+   (fprintf Form "FIELD \"MinClearance\"\n")
+   (fprintf Form "FLOC 52 9 \n")
+   (fprintf Form "FLOATSLIDEBAR 6 3\n MIN 0.1\n MAX 2.0\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"AvoidVias\"\n")
+   (fprintf Form "FLOC 38 11 \n")
+   (fprintf Form "CHECKLIST \"Avoid Placing Over Vias\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"CenterAssy\"\n")
+   (fprintf Form "FLOC 38 13 \n")
+   (fprintf Form "CHECKLIST \"Legacy Center Mode (Override Smart)\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"ChangeTextSize\"\n")
+   (fprintf Form "FLOC 38 15 \n")
+   (fprintf Form "CHECKLIST \"Apply Custom Text Sizing\" \n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "TEXT \"Large  Text Block: \"\n")
+   (fprintf Form "TLOC 5 19 \n")
+   (fprintf Form "ENDTEXT\n")
+   (fprintf Form "TEXT \"Medium Text Block: \"\n")
+   (fprintf Form "TLOC 5 20 \n")
+   (fprintf Form "ENDTEXT\n")
+   (fprintf Form "TEXT \"Small Text Block: \"\n")
+   (fprintf Form "TLOC 5 21 \n")
+   (fprintf Form "ENDTEXT\n")
+   (fprintf Form "FIELD \"TextBlockLarge\"\n")
+   (fprintf Form "FLOC 23 19 \n")
+   (fprintf Form "INTSLIDEBAR 3 3\n MIN 1\n MAX 60\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"TextBlockMedium\"\n")
+   (fprintf Form "FLOC 23 20 \n")
+   (fprintf Form "INTSLIDEBAR 3 3\n MIN 1\n MAX 60\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD \"TextBlockSmall\"\n")
+   (fprintf Form "FLOC 23 21 \n")
+   (fprintf Form "INTSLIDEBAR 3 3\n MIN 1\n MAX 60\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD done\n")
+   (fprintf Form "FLOC 35 23\n")
+   (fprintf Form "MENUBUTTON \"Done\" 8 3\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "FIELD cancel\n")
+   (fprintf Form "FLOC 45 23\n")
+   (fprintf Form "MENUBUTTON \"CANCEL\" 8 3\n")
+   (fprintf Form "ENDFIELD\n")
+   (fprintf Form "ENDTILE\n")
+   (fprintf Form "ENDFORM\n")
+   (close Form)
+)
