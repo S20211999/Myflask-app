@@ -1,1135 +1,181 @@
-import sys
-import sqlite3
-import requests
-import pandas as pd
-import re
-import time
-from datetime import datetime
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
-                             QWidget, QToolBar, QPushButton, QTableWidget, QTableWidgetItem,
-                             QComboBox, QLineEdit, QLabel, QTextEdit, QFileDialog,
-                             QMessageBox, QTabWidget, QSpinBox, QDoubleSpinBox,
-                             QProgressBar, QSplitter, QHeaderView, QCheckBox, QGroupBox,
-                             QFormLayout, QDialog)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSettings
-from PyQt6.QtGui import QAction, QIcon, QColor, QFont
-import json
-import urllib.parse
-
-class TrustedPartsAPIClient:
-    def __init__(self, api_key="", base_url="https://api.trustedparts.com"):
-        self.api_key = api_key
-        self.base_url = base_url
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'BOM-Analyzer/1.0',
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        })
-        
-        if self.api_key:
-            self.session.headers.update({
-                'Authorization': f'Bearer {self.api_key}',
-                'X-API-Key': self.api_key
-            })
-
-    def search_part(self, part_number, limit=10):
-        """Search for parts using TrustedParts API"""
-        try:
-            # Try different API endpoints based on common patterns
-            endpoints = [
-                f"/v2/search",
-                f"/inventory/search",
-                f"/parts/search",
-                f"/api/v2/search"
-            ]
-            
-            params = {
-                'q': part_number,
-                'query': part_number,
-                'mpn': part_number,
-                'partnumber': part_number,
-                'limit': limit,
-                'offset': 0
-            }
-            
-            for endpoint in endpoints:
-                try:
-                    url = f"{self.base_url}{endpoint}"
-                    print(f"Trying API endpoint: {url}")
-                    
-                    # Try GET request
-                    response = self.session.get(url, params=params, timeout=15)
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data and self.is_valid_response(data):
-                            return self.parse_api_response(data, part_number)
-                    elif response.status_code == 401:
-                        print(f"Authentication required for {url}")
-                        continue
-                    elif response.status_code == 404:
-                        print(f"Endpoint not found: {url}")
-                        continue
-                    else:
-                        print(f"API returned status {response.status_code} for {url}")
-                        continue
-                        
-                except requests.exceptions.RequestException as e:
-                    print(f"Request failed for {url}: {str(e)}")
-                    continue
-            
-            # If all endpoints fail, try a mock response for testing
-            return self.create_mock_response(part_number)
-            
-        except Exception as e:
-            print(f"API search failed for {part_number}: {str(e)}")
-            return None
-
-    def is_valid_response(self, data):
-        """Check if API response contains valid data"""
-        if not data:
-            return False
-        
-        # Check for common response structures
-        valid_keys = ['results', 'parts', 'inventory', 'data', 'items', 'products']
-        
-        if isinstance(data, dict):
-            return any(key in data for key in valid_keys) or len(data) > 0
-        elif isinstance(data, list):
-            return len(data) > 0
-        
-        return False
-
-    def parse_api_response(self, data, part_number):
-        """Parse API response into standardized format"""
-        distributors = []
-        
-        try:
-            # Handle different response structures
-            items = []
-            if isinstance(data, dict):
-                for key in ['results', 'parts', 'inventory', 'data', 'items', 'products']:
-                    if key in data:
-                        if isinstance(data[key], list):
-                            items = data[key]
-                            break
-                        elif isinstance(data[key], dict):
-                            items = [data[key]]
-                            break
-                
-                # If no list found, treat the whole response as a single item
-                if not items and data:
-                    items = [data]
-                    
-            elif isinstance(data, list):
-                items = data
-            
-            for item in items[:10]:  # Limit to 10 results
-                try:
-                    distributor_data = self.parse_single_item(item, part_number)
-                    if distributor_data:
-                        distributors.append(distributor_data)
-                except Exception as e:
-                    print(f"Error parsing item: {str(e)}")
-                    continue
-                    
-        except Exception as e:
-            print(f"Error parsing API response: {str(e)}")
-        
-        return distributors if distributors else None
-
-    def parse_single_item(self, item, part_number):
-        """Parse a single item from API response"""
-        try:
-            # Extract basic information with multiple possible field names
-            part_num = self.get_field_value(item, ['partNumber', 'mpn', 'partnumber', 'part_number', 'sku'])
-            manufacturer = self.get_field_value(item, ['manufacturer', 'brand', 'mfg', 'make', 'vendor'])
-            description = self.get_field_value(item, ['description', 'desc', 'name', 'title', 'summary'])
-            
-            # Extract distributor information
-            distributor = self.get_field_value(item, ['distributor', 'supplier', 'vendor', 'company', 'source'])
-            
-            # Extract stock information
-            stock = self.get_numeric_value(item, ['stock', 'inventory', 'qty', 'quantity', 'available', 'inStock'])
-            
-            # Extract currency
-            currency = self.get_field_value(item, ['currency', 'curr']) or 'USD'
-            
-            # Extract price tiers
-            price_tiers = self.extract_price_tiers(item)
-            
-            # Extract additional information
-            datasheet = self.get_field_value(item, ['datasheet', 'datasheet_url', 'spec_sheet'])
-            category = self.get_field_value(item, ['category', 'type', 'classification', 'family'])
-            
-            return {
-                'distributor': distributor or 'TrustedParts',
-                'manufacturer': manufacturer or 'Unknown',
-                'mpn': part_num or part_number,
-                'price_tiers': price_tiers,
-                'stock': stock,
-                'currency': currency,
-                'description': description,
-                'datasheet': datasheet,
-                'category': category
-            }
-            
-        except Exception as e:
-            print(f"Error parsing single item: {str(e)}")
-            return None
-
-    def get_field_value(self, item, field_names):
-        """Get value from item using multiple possible field names"""
-        for field in field_names:
-            if field in item and item[field]:
-                return str(item[field]).strip()
-        return ''
-
-    def get_numeric_value(self, item, field_names):
-        """Get numeric value from item"""
-        for field in field_names:
-            if field in item:
-                try:
-                    return int(item[field])
-                except (ValueError, TypeError):
-                    # Try to extract number from string
-                    if isinstance(item[field], str):
-                        numbers = re.findall(r'\d+', item[field])
-                        if numbers:
-                            return int(numbers[0])
-        return 0
-
-    def extract_price_tiers(self, item):
-        """Extract price tiers from item"""
-        price_tiers = []
-        
-        try:
-            # Look for price tiers in various formats
-            if 'pricing' in item and isinstance(item['pricing'], list):
-                for tier in item['pricing']:
-                    if isinstance(tier, dict):
-                        qty = self.get_numeric_value(tier, ['quantity', 'qty', 'break']) or 1
-                        price = self.get_numeric_value(tier, ['price', 'cost', 'amount']) or 0.0
-                        
-                        if isinstance(price, str):
-                            price = self.parse_price_string(price)
-                        
-                        if price > 0:
-                            price_tiers.append({'quantity': qty, 'price': float(price)})
-            
-            elif 'prices' in item and isinstance(item['prices'], list):
-                for tier in item['prices']:
-                    qty = tier.get('qty', 1)
-                    price = self.parse_price_string(tier.get('price', '0'))
-                    if price > 0:
-                        price_tiers.append({'quantity': qty, 'price': price})
-            
-            # Single price fallback
-            elif 'price' in item:
-                price = self.parse_price_string(item['price'])
-                if price > 0:
-                    price_tiers.append({'quantity': 1, 'price': price})
-            
-            # Look for unit price
-            elif 'unitPrice' in item:
-                price = self.parse_price_string(item['unitPrice'])
-                if price > 0:
-                    price_tiers.append({'quantity': 1, 'price': price})
-            
-        except Exception as e:
-            print(f"Error extracting price tiers: {str(e)}")
-        
-        # If no price tiers found, add a default one
-        if not price_tiers:
-            price_tiers.append({'quantity': 1, 'price': 0.0})
-        
-        return sorted(price_tiers, key=lambda x: x['quantity'])
-
-    def parse_price_string(self, price_str):
-        """Parse price from string"""
-        if not price_str:
-            return 0.0
-        
-        try:
-            # Remove currency symbols and extract number
-            clean_str = re.sub(r'[^\d.,]', '', str(price_str))
-            clean_str = clean_str.replace(',', '')
-            
-            if clean_str:
-                return float(clean_str)
-        except:
-            pass
-        
-        return 0.0
-
-    def create_mock_response(self, part_number):
-        """Create a mock response for testing when API is not available"""
-        print(f"Creating mock response for {part_number}")
-        
-        # Generate realistic mock data
-        mock_distributors = ['Digi-Key', 'Mouser', 'Arrow', 'Avnet', 'Newark']
-        manufacturers = ['Texas Instruments', 'STMicroelectronics', 'Microchip', 'Analog Devices', 'NXP']
-        
-        distributors = []
-        
-        for i, dist in enumerate(mock_distributors[:3]):  # Create 3 mock distributors
-            price_base = round(0.50 + (i * 0.25), 2)
-            
-            distributor_data = {
-                'distributor': dist,
-                'manufacturer': manufacturers[i % len(manufacturers)],
-                'mpn': part_number,
-                'price_tiers': [
-                    {'quantity': 1, 'price': price_base * 1.5},
-                    {'quantity': 10, 'price': price_base * 1.2},
-                    {'quantity': 100, 'price': price_base},
-                    {'quantity': 1000, 'price': price_base * 0.8}
-                ],
-                'stock': 1000 + (i * 500),
-                'currency': 'USD',
-                'description': f'Electronic Component - {part_number}',
-                'datasheet': f'https://example.com/datasheets/{part_number}.pdf',
-                'category': 'Electronic Components'
-            }
-            distributors.append(distributor_data)
-        
-        return distributors
-
-class APIKeyDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("TrustedParts API Configuration")
-        self.setModal(True)
-        self.setFixedSize(400, 200)
-        
-        layout = QFormLayout()
-        
-        self.api_key_input = QLineEdit()
-        self.api_key_input.setPlaceholderText("Enter your TrustedParts API key (optional)")
-        layout.addRow("API Key:", self.api_key_input)
-        
-        self.base_url_input = QLineEdit("https://api.trustedparts.com")
-        layout.addRow("Base URL:", self.base_url_input)
-        
-        info_label = QLabel("API Key is optional. The app will use mock data for testing if no key is provided.")
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: #666; font-size: 10px;")
-        layout.addRow(info_label)
-        
-        buttons = QHBoxLayout()
-        self.ok_button = QPushButton("OK")
-        self.cancel_button = QPushButton("Cancel")
-        
-        self.ok_button.clicked.connect(self.accept)
-        self.cancel_button.clicked.connect(self.reject)
-        
-        buttons.addWidget(self.ok_button)
-        buttons.addWidget(self.cancel_button)
-        
-        layout.addRow(buttons)
-        self.setLayout(layout)
-
-class TrustedPartsWorker(QThread):
-    progress_updated = pyqtSignal(int)
-    log_updated = pyqtSignal(str)
-    data_scraped = pyqtSignal(str, list)
-    finished_scraping = pyqtSignal()
-
-    def __init__(self, mpn_list, api_client):
-        super().__init__()
-        self.mpn_list = mpn_list
-        self.api_client = api_client
-
-    def run(self):
-        total = len(self.mpn_list)
-        
-        for i, mpn in enumerate(self.mpn_list):
-            try:
-                self.log_updated.emit(f"Searching TrustedParts API for: {mpn}")
-                distributors = self.api_client.search_part(mpn)
-                
-                if distributors:
-                    self.data_scraped.emit(mpn, distributors)
-                    self.log_updated.emit(f"Found {len(distributors)} distributors for {mpn}")
-                else:
-                    self.log_updated.emit(f"No data found for {mpn}")
-                    
-                self.progress_updated.emit(int((i + 1) / total * 100))
-                time.sleep(1)  # Rate limiting
-                
-            except Exception as e:
-                self.log_updated.emit(f"Error searching {mpn}: {str(e)}")
-        
-        self.finished_scraping.emit()
-
-class DatabaseManager:
-    def __init__(self, db_path="trustedparts_bom_data.db"):
-        self.db_path = db_path
-        self.init_database()
-
-    def init_database(self):
-        """Initialize the database tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS component_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mpn TEXT NOT NULL,
-            distributor TEXT,
-            manufacturer TEXT,
-            price_tiers TEXT,  -- Store as JSON string
-            stock INTEGER DEFAULT 0,
-            currency TEXT DEFAULT 'USD',
-            description TEXT,
-            datasheet TEXT,
-            category TEXT,
-            scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(mpn, distributor)
-        )
-        ''')
-        conn.commit()
-        conn.close()
-
-    def save_component_data(self, mpn, distributors):
-        """Save component data to database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        for dist_data in distributors:
-            try:
-                distributor = dist_data['distributor']
-                manufacturer = dist_data['manufacturer']
-                currency = dist_data['currency']
-                stock = dist_data.get('stock', 0)
-                price_tiers = dist_data['price_tiers']
-                description = dist_data.get('description', '')
-                datasheet = dist_data.get('datasheet', '')
-                category = dist_data.get('category', '')
-                
-                price_tiers_json = json.dumps(price_tiers)
-                
-                cursor.execute('''
-                INSERT OR REPLACE INTO component_data
-                (mpn, distributor, manufacturer, price_tiers, stock, currency, 
-                 description, datasheet, category)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (mpn, distributor, manufacturer, price_tiers_json, stock, 
-                      currency, description, datasheet, category))
-                      
-            except Exception as e:
-                print(f"Error saving data for {mpn}: {str(e)}")
-                continue
-        
-        conn.commit()
-        conn.close()
-
-    def get_component_data(self, mpn):
-        """Get component data from database"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        SELECT distributor, manufacturer, price_tiers, stock, currency
-        FROM component_data
-        WHERE mpn = ?
-        ORDER BY distributor
-        ''', (mpn,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        # Parse JSON price tiers and flatten the data
-        flattened_results = []
-        for dist, mfg, price_tiers_json, stock, currency in results:
-            try:
-                price_tiers = json.loads(price_tiers_json)
-                for tier in price_tiers:
-                    flattened_results.append((
-                        dist, mfg, tier['quantity'], tier['price'], currency, stock
-                    ))
-            except json.JSONDecodeError:
-                continue
-        
-        return flattened_results
-
-    def get_component_details_by_mpn(self, mpn):
-        """Get detailed component data by MPN"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        SELECT distributor, manufacturer, price_tiers, stock, currency, 
-               description, datasheet, category
-        FROM component_data
-        WHERE mpn = ?
-        ORDER BY distributor
-        ''', (mpn,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        component_details = []
-        for dist, mfg, price_tiers_json, stock, currency, desc, datasheet, category in results:
-            try:
-                price_tiers = json.loads(price_tiers_json)
-                component_details.append({
-                    'distributor': dist,
-                    'manufacturer': mfg,
-                    'stock': stock,
-                    'currency': currency,
-                    'price_tiers': price_tiers,
-                    'description': desc,
-                    'datasheet': datasheet,
-                    'category': category
-                })
-            except json.JSONDecodeError:
-                continue
-        
-        return component_details
-
-class TrustedPartsBOMAnalyzer(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("TrustedParts API BOM Analyzer")
-        self.setGeometry(100, 100, 1600, 900)
-        
-        # Initialize settings
-        self.settings = QSettings('TrustedPartsBOM', 'Analyzer')
-        
-        # Initialize components
-        self.db_manager = DatabaseManager()
-        self.bom_data = None
-        self.scraped_data = {}
-        self.api_client = None
-        
-        # Exchange rates
-        self.exchange_rates = {"USD": 1.0, "INR": 83.2, "EUR": 0.92, "GBP": 0.79}
-        
-        self.setup_api_client()
-        self.setup_ui()
-        self.setup_connections()
-
-    def setup_api_client(self):
-        """Setup API client with saved or new credentials"""
-        api_key = self.settings.value('api_key', '')
-        base_url = self.settings.value('base_url', 'https://api.trustedparts.com')
-        
-        if not api_key:
-            dialog = APIKeyDialog(self)
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                api_key = dialog.api_key_input.text().strip()
-                base_url = dialog.base_url_input.text().strip()
-                
-                # Save settings
-                self.settings.setValue('api_key', api_key)
-                self.settings.setValue('base_url', base_url)
-        
-        self.api_client = TrustedPartsAPIClient(api_key, base_url)
-
-    def setup_ui(self):
-        """Setup the user interface"""
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Create toolbar
-        self.create_toolbar()
-        
-        # Create main layout
-        main_layout = QVBoxLayout(central_widget)
-        
-        # Create controls
-        controls_layout = self.create_controls()
-        main_layout.addLayout(controls_layout)
-        
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        main_layout.addWidget(self.progress_bar)
-        
-        # Create splitter for main content
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        
-        # Create tab widget
-        self.tab_widget = QTabWidget()
-        
-        # BOM Results Tab
-        self.result_table = QTableWidget()
-        self.tab_widget.addTab(self.result_table, "BOM Results")
-        
-        # Component Details Tab
-        self.detail_table = QTableWidget()
-        self.tab_widget.addTab(self.detail_table, "Component Details")
-        
-        splitter.addWidget(self.tab_widget)
-        
-        # Log area
-        self.log_text = QTextEdit()
-        self.log_text.setMaximumHeight(150)
-        self.log_text.setReadOnly(True)
-        splitter.addWidget(self.log_text)
-        
-        splitter.setStretchFactor(0, 4)
-        splitter.setStretchFactor(1, 1)
-        
-        main_layout.addWidget(splitter)
-
-    def create_toolbar(self):
-        """Create toolbar"""
-        toolbar = QToolBar()
-        self.addToolBar(toolbar)
-        
-        # Upload BOM
-        upload_action = QAction("📁 Upload BOM", self)
-        upload_action.triggered.connect(self.upload_bom)
-        toolbar.addAction(upload_action)
-        
-        toolbar.addSeparator()
-        
-        # API Settings
-        api_action = QAction("⚙️ API Settings", self)
-        api_action.triggered.connect(self.configure_api)
-        toolbar.addAction(api_action)
-        
-        toolbar.addSeparator()
-        
-        # Fetch Data
-        fetch_action = QAction("🔍 Fetch Data", self)
-        fetch_action.triggered.connect(self.fetch_data)
-        toolbar.addAction(fetch_action)
-        
-        toolbar.addSeparator()
-        
-        # Export
-        export_action = QAction("💾 Export to Excel", self)
-        export_action.triggered.connect(self.export_to_excel)
-        toolbar.addAction(export_action)
-
-    def create_controls(self):
-        """Create control widgets"""
-        layout = QHBoxLayout()
-        
-        # Column selection
-        layout.addWidget(QLabel("MPN Column:"))
-        self.mpn_column_combo = QComboBox()
-        layout.addWidget(self.mpn_column_combo)
-        
-        layout.addWidget(QLabel("QTY Column:"))
-        self.qty_column_combo = QComboBox()
-        layout.addWidget(self.qty_column_combo)
-        
-        layout.addWidget(QLabel("Package Column:"))
-        self.package_column_combo = QComboBox()
-        layout.addWidget(self.package_column_combo)
-        
-        # PCB Quantity
-        layout.addWidget(QLabel("PCB Qty:"))
-        self.pcb_qty_input = QSpinBox()
-        self.pcb_qty_input.setMinimum(1)
-        self.pcb_qty_input.setMaximum(1000000)
-        self.pcb_qty_input.setValue(1)
-        layout.addWidget(self.pcb_qty_input)
-        
-        # Currency
-        layout.addWidget(QLabel("Currency:"))
-        self.currency_combo = QComboBox()
-        self.currency_combo.addItems(["USD", "INR", "EUR", "GBP"])
-        layout.addWidget(self.currency_combo)
-        
-        # Exchange rate
-        layout.addWidget(QLabel("USD to INR:"))
-        self.exchange_rate_input = QDoubleSpinBox()
-        self.exchange_rate_input.setMinimum(0.01)
-        self.exchange_rate_input.setMaximum(1000.0)
-        self.exchange_rate_input.setValue(83.2)
-        self.exchange_rate_input.setDecimals(2)
-        layout.addWidget(self.exchange_rate_input)
-        
-        layout.addStretch()
-        return layout
-
-    def setup_connections(self):
-        """Setup signal connections"""
-        self.currency_combo.currentTextChanged.connect(self.on_currency_changed)
-        self.exchange_rate_input.valueChanged.connect(self.on_exchange_rate_changed)
-        self.pcb_qty_input.valueChanged.connect(self.recalculate_results)
-
-    def configure_api(self):
-        """Configure API settings"""
-        dialog = APIKeyDialog(self)
-        
-        # Load current settings
-        dialog.api_key_input.setText(self.settings.value('api_key', ''))
-        dialog.base_url_input.setText(self.settings.value('base_url', 'https://api.trustedparts.com'))
-        
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            api_key = dialog.api_key_input.text().strip()
-            base_url = dialog.base_url_input.text().strip()
-            
-            # Save settings
-            self.settings.setValue('api_key', api_key)
-            self.settings.setValue('base_url', base_url)
-            
-            # Recreate API client
-            self.api_client = TrustedPartsAPIClient(api_key, base_url)
-            self.log_message("API settings updated")
-
-    def upload_bom(self):
-        """Upload BOM file"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open BOM File", "", "Excel files (*.xlsx *.xls);;CSV files (*.csv)"
-        )
-        
-        if file_path:
-            try:
-                # Read file
-                if file_path.lower().endswith('.csv'):
-                    self.bom_data = pd.read_csv(file_path)
-                else:
-                    self.bom_data = pd.read_excel(file_path)
-                
-                self.log_message(f"BOM loaded: {len(self.bom_data)} rows")
-                
-                # Populate column dropdowns
-                columns = list(self.bom_data.columns)
-                
-                self.mpn_column_combo.clear()
-                self.qty_column_combo.clear()
-                self.package_column_combo.clear()
-                
-                self.mpn_column_combo.addItems(columns)
-                self.qty_column_combo.addItems(columns)
-                
-                self.package_column_combo.addItem("(None)")
-                self.package_column_combo.addItems(columns)
-                
-                # Auto-select columns
-                self.auto_select_columns(columns)
-                
-                # Display BOM
-                self.display_bom_data()
-                self.load_component_details()
-                
-                self.log_message("BOM uploaded successfully")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load BOM: {str(e)}")
-                self.log_message(f"Error loading BOM: {str(e)}")
-
-    def auto_select_columns(self, columns):
-        """Auto-select columns based on names"""
-        # MPN patterns
-        mpn_patterns = ['MPN', 'PART NUMBER', 'PART_NUMBER', 'PARTNUMBER', 'P/N', 'PN']
-        for i, col in enumerate(columns):
-            if any(pattern in col.upper() for pattern in mpn_patterns):
-                self.mpn_column_combo.setCurrentIndex(i)
-                break
-        
-        # QTY patterns
-        qty_patterns = ['QTY', 'QUANTITY', 'COUNT', 'QT', 'AMOUNT']
-        for i, col in enumerate(columns):
-            if any(pattern in col.upper() for pattern in qty_patterns):
-                self.qty_column_combo.setCurrentIndex(i)
-                break
-        
-        # Package patterns
-        package_patterns = ['PACKAGE', 'PKG', 'FOOTPRINT', 'CASE']
-        for i, col in enumerate(columns):
-            if any(pattern in col.upper() for pattern in package_patterns):
-                self.package_column_combo.setCurrentIndex(i + 1)  # +1 for "(None)"
-                break
-
-    def display_bom_data(self):
-        """Display BOM data in results table"""
-        if self.bom_data is None:
-            return
-        
-        self.result_table.setRowCount(len(self.bom_data))
-        self.result_table.setColumnCount(len(self.bom_data.columns))
-        self.result_table.setHorizontalHeaderLabels(list(self.bom_data.columns))
-        
-        # Set column widths
-        for i, col_name in enumerate(self.bom_data.columns):
-            self.result_table.setColumnWidth(i, 120)
-        
-        # Fill data
-        for row in range(len(self.bom_data)):
-            for col in range(len(self.bom_data.columns)):
-                item = QTableWidgetItem(str(self.bom_data.iloc[row, col]))
-                self.result_table.setItem(row, col, item)
-
-    def load_component_details(self):
-        """Load component details tab"""
-        if self.bom_data is None:
-            return
-        
-        # Find MPN column
-        mpn_column = None
-        for col in self.bom_data.columns:
-            if 'MPN' in col.upper() or 'PART' in col.upper():
-                mpn_column = col
-                break
-        
-        if not mpn_column:
-            mpn_column = self.bom_data.columns[0]
-        
-        # Create detail dataframe
-        detail_df = self.bom_data.copy()
-        
-        # Add columns for TrustedParts data
-        distributors = ['Digi-Key', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'TrustedParts']
-        max_tiers = 5
-        
-        detail_df['Manufacturer'] = ''
-        detail_df['Description'] = ''
-        detail_df['Category'] = ''
-        
-        for distributor in distributors:
-            for tier_num in range(1, max_tiers + 1):
-                qty_col = f'{distributor} T{tier_num} Qty'
-                price_col = f'{distributor} T{tier_num} Price'
-                detail_df[qty_col] = ''
-                detail_df[price_col] = ''
-            
-            stock_col = f'{distributor} Stock'
-            detail_df[stock_col] = ''
-        
-        # Fill with existing data from database
-        for idx, row in detail_df.iterrows():
-            mpn = str(row[mpn_column]).strip()
-            if mpn and mpn != 'nan':
-                component_details = self.db_manager.get_component_details_by_mpn(mpn)
-                
-                manufacturers = set()
-                descriptions = set()
-                categories = set()
-                
-                for detail in component_details:
-                    manufacturers.add(detail['manufacturer'])
-                    if detail['description']:
-                        descriptions.add(detail['description'])
-                    if detail['category']:
-                        categories.add(detail['category'])
-                    
-                    dist = detail['distributor']
-                    matched_dist = None
-                    for target_dist in distributors:
-                        if target_dist.lower() in dist.lower():
-                            matched_dist = target_dist
-                            break
-                    
-                    if matched_dist:
-                        sorted_tiers = sorted(detail['price_tiers'], key=lambda x: x['quantity'])
-                        
-                        for tier_idx, tier in enumerate(sorted_tiers[:max_tiers]):
-                            tier_num = tier_idx + 1
-                            qty_col = f'{matched_dist} T{tier_num} Qty'
-                            price_col = f'{matched_dist} T{tier_num} Price'
+                <tr data-id="200" data-distributor_name="DigiKey" data-mfr="KEMET Corporation" data-instock="1878" data-stock="1878&lt;br/&gt;In Stock" data-mfrpartnumber="T521X336M050ATE050" data-price="[[3500,&#34;default&#34;,&#34;229.0035&#34;],[2500,&#34;default&#34;,&#34;231.7053&#34;],[1500,&#34;default&#34;,&#34;236.3264&#34;],[1000,&#34;default&#34;,&#34;240.4938&#34;],[500,&#34;default&#34;,&#34;248.8115&#34;],[100,&#34;default&#34;,&#34;275.6600&#34;],[50,&#34;default&#34;,&#34;291.5326&#34;],[10,&#34;default&#34;,&#34;342.8250&#34;],[1,&#34;default&#34;,&#34;471.6300&#34;]]" class="row" data-sub_position="1" data-distino="399-18662-1-ND">
+                    <td class="td-part first">
+                        <button class="hyperlink expand-details"><span class="arrow-right"></span> <span>Details</span></button>
+                        <div class="part-name">
                             
-                            detail_df.at[idx, qty_col] = str(tier['quantity'])
-                            detail_df.at[idx, price_col] = f"${tier['price']:.4f}"
+                                <a 
+                                    class="onclick j-click j-sa-event"
+                                    href="//analytics.supplyframe.com/trackingservlet/track/?r=gPVv3S5fz9WS0muSSENj7rNI8Lg4w91QwvjyILyNhUtiRftq7xll_E1iKiEoxKG3opSfXcX10QXZwcfg-pYS0-IwEWJMtyo6Ed-uwQ2mNn9CVOr81XkA-0NGK-g-BbvSLy6ShlUCngp52YIaDdVbXyIpQHO27w8dM6xJkOalUyg3Z4sqaWLHFnkDc_CaMVBzJfu7s1cdJYoMazEiPRGODS9E4TNGC3K7AjLthA0h1hhP1uYVYzOs1bL7KRK-1tJmpTcJ12Plz3XUCam88sH5SJMWy3uk399EOj2f0CU3iSdSIZ66SEW330k527LQTBNIBE7kdsGSlnj-SYm2cn6Hs6SWpR3MLaajKQfRiFBtJPO8XEmPghtP9DdHy2DSQck6kSgJQghYVD4ltx1p2RyLUjaL1nFBlAeQ4GTAoQHzErvZaodmv9vDAw_JG3FJYlIoeyh9fVfSAAwR6aSqOukQrt0F5DiQUFnqHlNiOUWms22klOeY1ObVHx9FhI83TIaCZ3s06fa9esmqJUGOEYCY5v7YXjZPXRxZsKUI-2K44oJkcark_ed-gj4SD7RIV_dgzHiSCP9iSiNpS8pFiGee0RvqKKpEtBUlMFcqDIcGsHSUgSeTCqq2CxXkPmCAAj0i36wdeLEma1fcBUp9-t6sopXt0Wy9NbJ2hbY3nlWNnynOm4vFj5fFDC63IxHu94gqAtfFWrdNkEzwUFGnlgJ5NXVnTcnoX_2-sTOVcAxQ6jHCsMbfjS-EOfeQO9tuMbLowzDvz4_G7zixyf9Zuv0ah_RA-5ZDEFDKWqqMYOT-nf1d6mm59wFbbwjdMGujPtrxqcx4gFDG-O7uszY7mPE4wRa4oglSL6z_vH6l056iFqU"
+                                    target="_blank"
+                                    data-onclick="recordUserClick('Outbound Links', 'DigiKey', 'MFG_PN', {partNumber: 'T521X336M050ATE050'});"
+                                    data-click-name="part number"
+                                    data-row-id="200"
+                                    data-sa-event-element="mpn"
+                                >
+                                    T521X336M050ATE050
+                                </a>
+                            
+                            
+                                <span class="additional-description td-desc-distributor">
+                                    <span class="additional-title">DISTI #</span>
+                                    <span class="additional-value">399-18662-1-ND</span>
+                                </span>
+                            
+                        </div>
                         
-                        stock_col = f'{matched_dist} Stock'
-                        detail_df.at[idx, stock_col] = str(detail['stock'])
-                
-                if manufacturers:
-                    detail_df.at[idx, 'Manufacturer'] = ' | '.join(sorted(manufacturers))
-                if descriptions:
-                    detail_df.at[idx, 'Description'] = list(descriptions)[0][:100]
-                if categories:
-                    detail_df.at[idx, 'Category'] = list(categories)[0]
-        
-        # Setup detail table
-        self.detail_table.setRowCount(len(detail_df))
-        self.detail_table.setColumnCount(len(detail_df.columns))
-        self.detail_table.setHorizontalHeaderLabels(list(detail_df.columns))
-        
-        # Fill table
-        for row in range(len(detail_df)):
-            for col in range(len(detail_df.columns)):
-                cell_value = str(detail_df.iloc[row, col])
-                item = QTableWidgetItem(cell_value)
-                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
-                self.detail_table.setItem(row, col, item)
+                    </td>
+                    <td class="td-mfg">
+                        <span>
+                            KEMET Corporation
+                        </span>
+                    </td>
+                    <td class="td-desc more">
 
-    def fetch_data(self):
-        """Fetch data from TrustedParts API"""
-        if self.bom_data is None:
-            QMessageBox.warning(self, "Warning", "Please upload BOM first")
-            return
-        
-        mpn_column = self.mpn_column_combo.currentText()
-        if not mpn_column:
-            QMessageBox.warning(self, "Warning", "Please select MPN column")
-            return
-        
-        mpn_list = self.bom_data[mpn_column].dropna().unique().tolist()
-        if not mpn_list:
-            QMessageBox.warning(self, "Warning", "No MPNs found")
-            return
-        
-        self.log_message(f"Starting TrustedParts API search for {len(mpn_list)} MPNs")
-        
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        
-        self.scraping_worker = TrustedPartsWorker(mpn_list, self.api_client)
-        self.scraping_worker.progress_updated.connect(self.progress_bar.setValue)
-        self.scraping_worker.log_updated.connect(self.log_message)
-        self.scraping_worker.data_scraped.connect(self.process_scraped_data)
-        self.scraping_worker.finished_scraping.connect(self.scraping_finished)
-        self.scraping_worker.start()
+                        
+                            <span class="td-description more">CAP TANT POLY 33UF 50V 2917</span>
+                        
 
-    def process_scraped_data(self, mpn, distributors):
-        """Process scraped data"""
-        self.scraped_data[mpn] = distributors
-        self.db_manager.save_component_data(mpn, distributors)
+                        
 
-    def scraping_finished(self):
-        """Handle scraping completion"""
-        self.progress_bar.setVisible(False)
-        self.log_message("TrustedParts API search completed")
-        self.calculate_bom_results()
-        self.load_component_details()
 
-    def calculate_bom_results(self):
-        """Calculate BOM results with pricing"""
-        if self.bom_data is None:
-            return
-        
-        mpn_column = self.mpn_column_combo.currentText()
-        qty_column = self.qty_column_combo.currentText()
-        
-        if not mpn_column or not qty_column:
-            QMessageBox.warning(self, "Warning", "Please select MPN and QTY columns")
-            return
-        
-        results_df = self.bom_data.copy()
-        
-        new_columns = ['Stock', 'MOQ', 'Total Required Qty', 'Procure Qty', 'Distributor',
-                       'Qty Tier', 'Unit Price (USD)', 'PCB Per Unit Price', 'Total Project Price']
-        
-        for col in new_columns:
-            results_df[col] = ""
-        
-        pcb_qty = self.pcb_qty_input.value()
-        currency = self.currency_combo.currentText()
-        usd_to_inr_rate = self.exchange_rate_input.value()
-        
-        for idx, row in results_df.iterrows():
-            mpn = str(row[mpn_column])
-            bom_qty = float(row[qty_column]) if pd.notna(row[qty_column]) else 0
-            
-            component_data = self.db_manager.get_component_data(mpn)
-            
-            if component_data:
-                best_option = self.find_best_pricing_option(component_data, bom_qty * pcb_qty, currency, usd_to_inr_rate)
-                
-                if best_option:
-                    results_df.at[idx, 'Stock'] = best_option.get('stock', 'N/A')
-                    results_df.at[idx, 'MOQ'] = best_option['moq']
-                    results_df.at[idx, 'Total Required Qty'] = int(bom_qty * pcb_qty)
-                    results_df.at[idx, 'Procure Qty'] = int(bom_qty * pcb_qty)
-                    results_df.at[idx, 'Distributor'] = best_option['distributor']
-                    results_df.at[idx, 'Qty Tier'] = best_option['qty_tier']
-                    results_df.at[idx, 'Unit Price (USD)'] = round(best_option['unit_price'], 4)
-                    results_df.at[idx, 'PCB Per Unit Price'] = round(best_option['unit_price'] * bom_qty, 4)
-                    results_df.at[idx, 'Total Project Price'] = round(best_option['unit_price'] * bom_qty * pcb_qty, 2)
-        
-        self.display_results(results_df)
-        self.log_message("BOM analysis completed")
 
-    def find_best_pricing_option(self, component_data, required_qty, currency, usd_to_inr_rate):
-        """Find best pricing option"""
-        distributors = {}
-        
-        for dist, mfg, qty, price_usd, curr, stock in component_data:
-            if dist not in distributors:
-                distributors[dist] = {'tiers': [], 'stock': stock}
-            
-            # Convert currency if needed
-            if currency == 'INR':
-                converted_price = price_usd * usd_to_inr_rate
-            elif currency == 'EUR':
-                converted_price = price_usd * self.exchange_rates['EUR']
-            elif currency == 'GBP':
-                converted_price = price_usd * self.exchange_rates['GBP']
-            else:
-                converted_price = price_usd
-            
-            distributors[dist]['tiers'].append({
-                'quantity': qty,
-                'price': converted_price,
-                'manufacturer': mfg
-            })
-            
-            distributors[dist]['stock'] = max(distributors[dist]['stock'], stock)
-        
-        # Find best option
-        best_option = None
-        best_distributor = None
-        
-        priority_order = ['Digi-Key', 'Mouser', 'Arrow', 'Avnet', 'Newark']
-        
-        for priority_dist in priority_order:
-            for dist_name in distributors.keys():
-                if priority_dist.lower() in dist_name.lower():
-                    option = self.calculate_pricing_for_distributor(distributors[dist_name]['tiers'], required_qty)
-                    if option and (best_option is None or option['unit_price'] < best_option['unit_price']):
-                        best_option = option
-                        best_distributor = dist_name
-                    break
-            if best_option:
-                break
-        
-        if not best_option:
-            for dist_name, dist_data in distributors.items():
-                option = self.calculate_pricing_for_distributor(dist_data['tiers'], required_qty)
-                if option and (best_option is None or option['unit_price'] < best_option['unit_price']):
-                    best_option = option
-                    best_distributor = dist_name
-        
-        if best_option:
-            best_option['distributor'] = best_distributor
-            best_option['stock'] = distributors[best_distributor]['stock']
-        
-        return best_option
 
-    def calculate_pricing_for_distributor(self, price_tiers, required_qty):
-        """Calculate pricing for distributor"""
-        if not price_tiers:
-            return None
-        
-        sorted_tiers = sorted(price_tiers, key=lambda x: x['quantity'])
-        moq = sorted_tiers[0]['quantity']
-        
-        selected_tier = None
-        for tier in sorted_tiers:
-            if required_qty >= tier['quantity']:
-                selected_tier = tier
-            else:
-                break
-        
-        if not selected_tier:
-            selected_tier = sorted_tiers[0]
-        
-        return {
-            'moq': moq,
-            'qty_tier': selected_tier['quantity'],
-            'unit_price': selected_tier['price']
-        }
 
-    def display_results(self, results_df):
-        """Display results with totals"""
-        sum_columns = ['PCB Per Unit Price', 'Total Project Price']
-        totals = {}
-        
-        for col in sum_columns:
-            if col in results_df.columns:
-                try:
-                    numeric_values = pd.to_numeric(results_df[col].replace('', 0), errors='coerce').fillna(0)
-                    totals[col] = numeric_values.sum()
-                except:
-                    totals[col] = 0
-        
-        total_rows = len(results_df) + 1
-        self.result_table.setRowCount(total_rows)
-        self.result_table.setColumnCount(len(results_df.columns))
-        self.result_table.setHorizontalHeaderLabels(list(results_df.columns))
-        
-        # Fill data
-        for row in range(len(results_df)):
-            for col in range(len(results_df.columns)):
-                item = QTableWidgetItem(str(results_df.iloc[row, col]))
-                self.result_table.setItem(row, col, item)
-        
-        # Add total row
-        total_row_index = len(results_df)
-        for col in range(len(results_df.columns)):
-            col_name = results_df.columns[col]
-            
-            if col == 0:
-                total_item = QTableWidgetItem("TOTAL")
-            elif col_name in totals:
-                total_value = round(totals[col_name], 2)
-                total_item = QTableWidgetItem(str(total_value))
-            else:
-                total_item = QTableWidgetItem("")
-            
-            font = QFont()
-            font.setBold(True)
-            total_item.setFont(font)
-            total_item.setBackground(QColor(220, 220, 220))
-            
-            self.result_table.setItem(total_row_index, col, total_item)
 
-    def export_to_excel(self):
-        """Export results to Excel"""
-        if self.result_table.rowCount() == 0:
-            QMessageBox.warning(self, "Warning", "No data to export")
-            return
-        
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Excel File", "", "Excel files (*.xlsx)"
-        )
-        
-        if file_path:
-            try:
-                data = []
-                headers = []
-                
-                for col in range(self.result_table.columnCount()):
-                    headers.append(self.result_table.horizontalHeaderItem(col).text())
-                
-                for row in range(self.result_table.rowCount()):
-                    row_data = []
-                    for col in range(self.result_table.columnCount()):
-                        item = self.result_table.item(row, col)
-                        row_data.append(item.text() if item else "")
-                    data.append(row_data)
-                
-                df = pd.DataFrame(data, columns=headers)
-                df.to_excel(file_path, index=False)
-                
-                self.log_message(f"Data exported to {file_path}")
-                QMessageBox.information(self, "Success", "Data exported successfully!")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to export: {str(e)}")
+                        <span class="additional-description">
+                            <span class="additional-title">Min Qty:</span>
+                            <span class="additional-value" data-title="Min Qty">1</span>
+                        </span>
+                    
+                        <span class="additional-description">
+                            <span class="additional-title">Lead time:</span>
+                            <span class="additional-value" data-title="Lead time">30 Weeks</span>
+                        </span>
+                    
+                        <span class="additional-description">
+                            <span class="additional-title">Container:</span>
+                            <span class="additional-value" data-title="Container">Digi-Reel®, Tape &amp; Reel (TR), Cut Tape (CT)</span>
+                        </span>
+                    
 
-    def on_currency_changed(self, currency):
-        """Handle currency change"""
-        if self.bom_data is not None and len(self.scraped_data) > 0:
-            self.log_message(f"Currency changed to {currency}")
-            self.calculate_bom_results()
 
-    def on_exchange_rate_changed(self, rate):
-        """Handle exchange rate change"""
-        self.exchange_rates["INR"] = rate
-        if self.bom_data is not None and len(self.scraped_data) > 0:
-            self.calculate_bom_results()
 
-    def recalculate_results(self):
-        """Recalculate when PCB qty changes"""
-        if self.bom_data is not None and self.scraped_data:
-            self.calculate_bom_results()
 
-    def log_message(self, message):
-        """Add message to log"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
-
-def main():
-    app = QApplication(sys.argv)
-    app.setApplicationName("TrustedParts BOM Analyzer")
-    app.setOrganizationName("TrustedPartsBOM")
+                        
+                            <span class="additional-description mobile-hide">
+                                <a class="pdp-link-desktop" href="/detail/T521X336M050ATE050/KEMET-Corporation">T521X336M050ATE050 Part Details</a>
+                            </span>
+                        
+                    </td>
+                    <td class="td-stock">
+                        
+                            1878<br/>In Stock
+                        
+                    </td>
+                    <td class="td-price">
+                        
+<ul class="price-list">
     
-    window = TrustedPartsBOMAnalyzer()
-    window.show()
+        <li class="">
+            <span class="label">
+                
+                    3500
+                
+            </span>
+            <span class="value" data-baseprice="229.0035" data-basecurrency="INR">
+                &#8377;229.0035
+            </span>
+        </li>
     
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()
-
+        <li class="">
+            <span class="label">
+                
+                    2500
+                
+            </span>
+            <span class="value" data-baseprice="231.70525" data-basecurrency="INR">
+                &#8377;231.7053
+            </span>
+        </li>
+    
+        <li class="">
+            <span class="label">
+                
+                    1500
+                
+            </span>
+            <span class="value" data-baseprice="236.32642" data-basecurrency="INR">
+                &#8377;236.3264
+            </span>
+        </li>
+    
+        <li class="hide">
+            <span class="label">
+                
+                    1000
+                
+            </span>
+            <span class="value" data-baseprice="240.49375" data-basecurrency="INR">
+                &#8377;240.4938
+            </span>
+        </li>
+    
+        <li class="hide">
+            <span class="label">
+                
+                    500
+                
+            </span>
+            <span class="value" data-baseprice="248.8115" data-basecurrency="INR">
+                &#8377;248.8115
+            </span>
+        </li>
+    
+        <li class="hide">
+            <span class="label">
+                
+                    100
+                
+            </span>
+            <span class="value" data-baseprice="275.66" data-basecurrency="INR">
+                &#8377;275.6600
+            </span>
+        </li>
+    
+        <li class="hide">
+            <span class="label">
+                
+                    50
+                
+            </span>
+            <span class="value" data-baseprice="291.5326" data-basecurrency="INR">
+                &#8377;291.5326
+            </span>
+        </li>
+    
+        <li class="hide">
+            <span class="label">
+                
+                    10
+                
+            </span>
+            <span class="value" data-baseprice="342.825" data-basecurrency="INR">
+                &#8377;342.8250
+            </span>
+        </li>
+    
+        <li class="hide">
+            <span class="label">
+                
+                    1
+                
+            </span>
+            <span class="value" data-baseprice="471.63" data-basecurrency="INR">
+                &#8377;471.6300
+            </span>
+        </li>
+    
+    
+        <li><button class="hyperlink">See More</button></li>
+    
+</ul>
