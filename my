@@ -1,1 +1,668 @@
 
+import sys
+import sqlite3
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import requests
+import pandas as pd
+import re
+import time
+from datetime import datetime
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
+                             QWidget, QToolBar, QPushButton, QTableWidget, QTableWidgetItem,
+                             QComboBox, QLineEdit, QLabel, QTextEdit, QFileDialog,
+                             QMessageBox, QTabWidget, QSpinBox, QDoubleSpinBox,
+                             QProgressBar, QSplitter, QHeaderView, QCheckBox, QGroupBox)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QAction, QIcon, QColor, QFont
+import json
+import urllib.parse
+
+class TrustedPartsScraper:
+    def __init__(self):
+        self.setup_driver()
+        self.base_url = "https://www.trustedparts.com"
+        self.api_base = "https://api.trustedparts.com"
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.trustedparts.com/'
+        })
+        
+    def setup_driver(self):
+        """Setup Chrome WebDriver with options"""
+        chrome_options = Options()
+        chrome_options.add_argument('--headless')  # Run in background
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
+        
+        try:
+            self.driver = webdriver.Chrome(options=chrome_options)
+            self.wait = WebDriverWait(self.driver, 15)
+        except Exception as e:
+            print(f"Error setting up WebDriver: {str(e)}")
+            self.driver = None
+
+    def search_part_api(self, part_number):
+        """Try to search using TrustedParts API first"""
+        try:
+            # Try different API endpoints
+            api_endpoints = [
+                f"{self.api_base}/v2/search?q={urllib.parse.quote(part_number)}",
+                f"{self.api_base}/inventory/search?query={urllib.parse.quote(part_number)}",
+                f"{self.api_base}/search?part={urllib.parse.quote(part_number)}"
+            ]
+            
+            for endpoint in api_endpoints:
+                try:
+                    response = self.session.get(endpoint, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data and isinstance(data, dict):
+                            return self.parse_api_response(data, part_number)
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"API search failed for {part_number}: {str(e)}")
+        
+        return None
+
+    def parse_api_response(self, data, part_number):
+        """Parse API response data"""
+        parts_data = []
+        
+        try:
+            # Handle different API response structures
+            items = []
+            if 'results' in data:
+                items = data['results']
+            elif 'parts' in data:
+                items = data['parts']
+            elif 'inventory' in data:
+                items = data['inventory']
+            elif isinstance(data, list):
+                items = data
+            
+            for item in items[:10]:  # Limit to first 10 results
+                part_data = {
+                    'part_number': item.get('partNumber', item.get('mpn', part_number)),
+                    'manufacturer': item.get('manufacturer', item.get('brand', '')),
+                    'description': item.get('description', item.get('name', '')),
+                    'price_tiers': [],
+                    'stock': item.get('stock', item.get('quantity', 0)),
+                    'currency': item.get('currency', 'USD'),
+                    'distributor': item.get('distributor', item.get('supplier', 'TrustedParts')),
+                    'availability': item.get('availability', 'Unknown'),
+                    'datasheet': item.get('datasheet', ''),
+                    'category': item.get('category', '')
+                }
+                
+                # Extract price tiers
+                if 'pricing' in item:
+                    for tier in item['pricing']:
+                        if isinstance(tier, dict):
+                            part_data['price_tiers'].append({
+                                'quantity': tier.get('quantity', 1),
+                                'price': tier.get('price', 0.0)
+                            })
+                elif 'price' in item:
+                    part_data['price_tiers'].append({
+                        'quantity': 1,
+                        'price': item['price']
+                    })
+                
+                if part_data['price_tiers']:
+                    parts_data.append(part_data)
+                    
+        except Exception as e:
+            print(f"Error parsing API response: {str(e)}")
+        
+        return parts_data
+
+    def search_part_web(self, part_number):
+        """Fallback to web scraping if API fails"""
+        if not self.driver:
+            return None
+            
+        try:
+            # Navigate to TrustedParts search page
+            search_url = f"{self.base_url}/en/search/{urllib.parse.quote(part_number)}"
+            print(f"Searching web: {search_url}")
+            
+            self.driver.get(search_url)
+            time.sleep(3)  # Wait for page load
+            
+            # Accept cookies if popup appears
+            try:
+                cookie_accept = self.wait.until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, 
+                    '.cookie-accept, #accept-cookies, [data-accept-cookies], .btn-accept'))
+                )
+                cookie_accept.click()
+                time.sleep(1)
+            except:
+                pass
+            
+            # Wait for results to load
+            time.sleep(2)
+            
+            parts_data = []
+            
+            # Strategy 1: Extract from results table
+            parts_data.extend(self.extract_results_table())
+            
+            # Strategy 2: Extract from product cards
+            if not parts_data:
+                parts_data.extend(self.extract_product_cards())
+            
+            # Strategy 3: Extract from list items
+            if not parts_data:
+                parts_data.extend(self.extract_list_items())
+            
+            return parts_data
+            
+        except Exception as e:
+            print(f"Error searching web for {part_number}: {str(e)}")
+            return None
+
+    def extract_results_table(self):
+        """Extract data from results table"""
+        parts_data = []
+        
+        try:
+            # Look for table rows with part data
+            table_selectors = [
+                'table tbody tr',
+                '.results-table tr',
+                '.inventory-table tr',
+                '.parts-table tr'
+            ]
+            
+            for selector in table_selectors:
+                try:
+                    rows = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if rows:
+                        print(f"Found {len(rows)} table rows with selector: {selector}")
+                        
+                        for row in rows[:10]:  # Limit to first 10
+                            part_data = self.extract_table_row_data(row)
+                            if part_data:
+                                parts_data.append(part_data)
+                        
+                        if parts_data:
+                            break
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"Error extracting table results: {str(e)}")
+        
+        return parts_data
+
+    def extract_product_cards(self):
+        """Extract data from product cards"""
+        parts_data = []
+        
+        try:
+            card_selectors = [
+                '.product-card, .part-card, .component-card',
+                '.search-result, .result-item',
+                '[data-part], [data-product]',
+                '.inventory-item, .stock-item'
+            ]
+            
+            for selector in card_selectors:
+                try:
+                    cards = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if cards:
+                        print(f"Found {len(cards)} product cards with selector: {selector}")
+                        
+                        for card in cards[:10]:
+                            part_data = self.extract_card_data(card)
+                            if part_data:
+                                parts_data.append(part_data)
+                        
+                        if parts_data:
+                            break
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"Error extracting product cards: {str(e)}")
+        
+        return parts_data
+
+    def extract_list_items(self):
+        """Extract data from list items"""
+        parts_data = []
+        
+        try:
+            list_selectors = [
+                'li.result, li.product, li.part',
+                '.result-list li, .product-list li',
+                'ul.results li, ol.results li'
+            ]
+            
+            for selector in list_selectors:
+                try:
+                    items = self.driver.find_elements(By.CSS_SELECTOR, selector)
+                    if items:
+                        print(f"Found {len(items)} list items with selector: {selector}")
+                        
+                        for item in items[:10]:
+                            part_data = self.extract_card_data(item)
+                            if part_data:
+                                parts_data.append(part_data)
+                        
+                        if parts_data:
+                            break
+                except:
+                    continue
+                    
+        except Exception as e:
+            print(f"Error extracting list items: {str(e)}")
+        
+        return parts_data
+
+    def extract_table_row_data(self, row):
+        """Extract data from a table row"""
+        try:
+            cells = row.find_elements(By.CSS_SELECTOR, 'td')
+            if len(cells) < 3:  # Not enough data
+                return None
+            
+            part_data = {
+                'part_number': '',
+                'manufacturer': '',
+                'description': '',
+                'price_tiers': [],
+                'stock': 0,
+                'currency': 'USD',
+                'distributor': 'TrustedParts',
+                'availability': '',
+                'category': ''
+            }
+            
+            # Extract text from cells
+            cell_texts = [cell.text.strip() for cell in cells]
+            
+            # Common patterns for TrustedParts table structure
+            if len(cell_texts) >= 3:
+                part_data['part_number'] = cell_texts[0] if cell_texts[0] else ''
+                part_data['manufacturer'] = cell_texts[1] if len(cell_texts) > 1 else ''
+                part_data['description'] = cell_texts[2] if len(cell_texts) > 2 else ''
+                
+                # Look for price and stock in remaining cells
+                for i, text in enumerate(cell_texts[3:], 3):
+                    if '$' in text or '€' in text or '£' in text or '₹' in text:
+                        price = self.parse_price(text)
+                        currency = self.detect_currency(text)
+                        part_data['price_tiers'].append({'quantity': 1, 'price': price})
+                        part_data['currency'] = currency
+                    elif any(word in text.lower() for word in ['stock', 'qty', 'available', 'inventory']):
+                        part_data['stock'] = self.parse_stock(text)
+                        part_data['availability'] = text
+            
+            # Extract additional data from links and attributes
+            links = row.find_elements(By.CSS_SELECTOR, 'a')
+            for link in links:
+                href = link.get_attribute('href')
+                if href and 'datasheet' in href.lower():
+                    part_data['datasheet'] = href
+            
+            if part_data['part_number'] or part_data['description']:
+                return part_data
+                
+        except Exception as e:
+            print(f"Error extracting table row: {str(e)}")
+        
+        return None
+
+    def extract_card_data(self, element):
+        """Extract data from a product card or container"""
+        try:
+            part_data = {
+                'part_number': '',
+                'manufacturer': '',
+                'description': '',
+                'price_tiers': [],
+                'stock': 0,
+                'currency': 'USD',
+                'distributor': 'TrustedParts',
+                'availability': '',
+                'category': ''
+            }
+            
+            # Extract part number
+            part_selectors = [
+                '.part-number, .mpn, .partnumber, .part-id',
+                '[data-part-number], [data-mpn]',
+                '.product-code, .item-code',
+                'h3, h4, .title, .name'
+            ]
+            
+            part_data['part_number'] = self.extract_text_by_selectors(element, part_selectors)
+            
+            # Extract manufacturer
+            mfg_selectors = [
+                '.manufacturer, .brand, .mfg, .make',
+                '[data-manufacturer], [data-brand]',
+                '.supplier, .vendor'
+            ]
+            
+            part_data['manufacturer'] = self.extract_text_by_selectors(element, mfg_selectors)
+            
+            # Extract description
+            desc_selectors = [
+                '.description, .desc, .product-description',
+                '.title:not(.part-number), .name:not(.part-number)',
+                '.summary, .details'
+            ]
+            
+            part_data['description'] = self.extract_text_by_selectors(element, desc_selectors)
+            
+            # Extract price
+            price_selectors = [
+                '.price, .cost, .amount, .unit-price',
+                '[data-price], .price-value',
+                '.selling-price, .list-price'
+            ]
+            
+            price_text = self.extract_text_by_selectors(element, price_selectors)
+            if price_text:
+                price = self.parse_price(price_text)
+                currency = self.detect_currency(price_text)
+                part_data['price_tiers'].append({'quantity': 1, 'price': price})
+                part_data['currency'] = currency
+            
+            # Extract stock/availability
+            stock_selectors = [
+                '.stock, .inventory, .qty, .quantity',
+                '.availability, .in-stock, .available',
+                '[data-stock], [data-qty]'
+            ]
+            
+            stock_text = self.extract_text_by_selectors(element, stock_selectors)
+            if stock_text:
+                part_data['stock'] = self.parse_stock(stock_text)
+                part_data['availability'] = stock_text
+            
+            # Extract category
+            cat_selectors = [
+                '.category, .type, .classification',
+                '.breadcrumb, .nav-path'
+            ]
+            
+            part_data['category'] = self.extract_text_by_selectors(element, cat_selectors)
+            
+            # Extract distributor info
+            dist_selectors = [
+                '.distributor, .supplier, .vendor',
+                '.company, .seller'
+            ]
+            
+            distributor = self.extract_text_by_selectors(element, dist_selectors)
+            if distributor:
+                part_data['distributor'] = distributor
+            
+            if part_data['part_number'] or part_data['description']:
+                return part_data
+                
+        except Exception as e:
+            print(f"Error extracting card data: {str(e)}")
+        
+        return None
+
+    def extract_text_by_selectors(self, element, selectors):
+        """Try multiple selectors to extract text"""
+        for selector in selectors:
+            try:
+                found_element = element.find_element(By.CSS_SELECTOR, selector)
+                text = found_element.text.strip()
+                if text:
+                    return text
+            except:
+                continue
+        return ''
+
+    def parse_price(self, price_text):
+        """Parse price from text"""
+        if not price_text:
+            return 0.0
+        
+        try:
+            # Remove currency symbols and extract number
+            clean_text = re.sub(r'[^\d.,]', '', price_text)
+            clean_text = clean_text.replace(',', '')
+            
+            if clean_text:
+                return float(clean_text)
+        except:
+            pass
+        
+        return 0.0
+
+    def detect_currency(self, price_text):
+        """Detect currency from price text"""
+        if not price_text:
+            return 'USD'
+        
+        if '$' in price_text or 'usd' in price_text.lower():
+            return 'USD'
+        elif '₹' in price_text or 'inr' in price_text.lower() or 'rupee' in price_text.lower():
+            return 'INR'
+        elif '€' in price_text or 'eur' in price_text.lower():
+            return 'EUR'
+        elif '£' in price_text or 'gbp' in price_text.lower():
+            return 'GBP'
+        
+        return 'USD'
+
+    def parse_stock(self, stock_text):
+        """Parse stock quantity from text"""
+        if not stock_text:
+            return 0
+        
+        try:
+            # Look for numbers in stock text
+            numbers = re.findall(r'\d+', stock_text)
+            if numbers:
+                return int(numbers[0])
+        except:
+            pass
+        
+        return 0
+
+    def search_part(self, part_number):
+        """Main search method - try API first, then web scraping"""
+        print(f"Searching TrustedParts for: {part_number}")
+        
+        # Try API first
+        results = self.search_part_api(part_number)
+        
+        # Fall back to web scraping if API fails
+        if not results:
+            print(f"API failed for {part_number}, trying web scraping...")
+            results = self.search_part_web(part_number)
+        
+        # Convert to distributor format for compatibility
+        if results:
+            distributors = []
+            for result in results:
+                distributor_data = {
+                    'distributor': result.get('distributor', 'TrustedParts'),
+                    'manufacturer': result.get('manufacturer', ''),
+                    'mpn': result.get('part_number', part_number),
+                    'price_tiers': result.get('price_tiers', []),
+                    'stock': result.get('stock', 0),
+                    'currency': result.get('currency', 'USD')
+                }
+                distributors.append(distributor_data)
+            
+            return distributors
+        
+        return None
+
+    def close(self):
+        """Close the WebDriver"""
+        if self.driver:
+            self.driver.quit()
+
+class TrustedPartsScrapingWorker(QThread):
+    progress_updated = pyqtSignal(int)
+    log_updated = pyqtSignal(str)
+    data_scraped = pyqtSignal(str, list)
+    finished_scraping = pyqtSignal()
+
+    def __init__(self, mpn_list):
+        super().__init__()
+        self.mpn_list = mpn_list
+        self.scraper = None
+
+    def run(self):
+        self.scraper = TrustedPartsScraper()
+        
+        if not self.scraper.driver:
+            self.log_updated.emit("Failed to initialize WebDriver")
+            self.finished_scraping.emit()
+            return
+            
+        total = len(self.mpn_list)
+        for i, mpn in enumerate(self.mpn_list):
+            try:
+                self.log_updated.emit(f"Searching MPN on TrustedParts: {mpn}")
+                distributors = self.scraper.search_part(mpn)
+                
+                if distributors:
+                    self.data_scraped.emit(mpn, distributors)
+                    self.log_updated.emit(f"Found {len(distributors)} distributors for {mpn}")
+                else:
+                    self.log_updated.emit(f"No data found for {mpn}")
+                    
+                self.progress_updated.emit(int((i + 1) / total * 100))
+                time.sleep(2)  # Rate limiting
+                
+            except Exception as e:
+                self.log_updated.emit(f"Error scraping {mpn}: {str(e)}")
+        
+        if self.scraper:
+            self.scraper.close()
+        self.finished_scraping.emit()
+
+# Updated BOM Analyzer with TrustedParts integration
+class BOMAnalyzer(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("BOM Web Scraper & Analyzer - TrustedParts Integration")
+        self.setGeometry(100, 100, 1400, 800)
+        
+        # Initialize components
+        self.db_manager = DatabaseManager()
+        self.bom_data = None
+        self.scraped_data = {}
+        
+        # Exchange rates (default values)
+        self.exchange_rates = {"USD": 1.0, "INR": 83.2}
+        
+        self.setup_ui()
+        self.setup_connections()
+
+    # ... (Keep all existing methods from your original BOMAnalyzer class)
+
+    def create_toolbar(self):
+        """Create the application toolbar with TrustedParts option"""
+        toolbar = QToolBar()
+        self.addToolBar(toolbar)
+        
+        # Upload BOM action
+        upload_action = QAction("Upload BOM", self)
+        upload_action.triggered.connect(self.upload_bom)
+        toolbar.addAction(upload_action)
+        
+        toolbar.addSeparator()
+        
+        # Data source selection
+        toolbar.addWidget(QLabel("Data Source:"))
+        self.data_source_combo = QComboBox()
+        self.data_source_combo.addItems(["FindChips", "TrustedParts", "Both"])
+        self.data_source_combo.setCurrentText("TrustedParts")
+        toolbar.addWidget(self.data_source_combo)
+        
+        toolbar.addSeparator()
+        
+        # Fetch Data action
+        fetch_action = QAction("Fetch Data", self)
+        fetch_action.triggered.connect(self.fetch_data)
+        toolbar.addAction(fetch_action)
+        
+        toolbar.addSeparator()
+        
+        # Export to Excel action
+        export_action = QAction("Export to Excel", self)
+        export_action.triggered.connect(self.export_to_excel)
+        toolbar.addAction(export_action)
+
+    def fetch_data(self):
+        """Start fetching data from selected source"""
+        if self.bom_data is None:
+            QMessageBox.warning(self, "Warning", "Please upload BOM first")
+            return
+        
+        mpn_column = self.mpn_column_combo.currentText()
+        if not mpn_column:
+            QMessageBox.warning(self, "Warning", "Please select MPN column")
+            return
+        
+        # Get unique MPNs
+        mpn_list = self.bom_data[mpn_column].dropna().unique().tolist()
+        if not mpn_list:
+            QMessageBox.warning(self, "Warning", "No MPNs found in selected column")
+            return
+        
+        data_source = self.data_source_combo.currentText()
+        self.log_message(f"Starting to scrape {len(mpn_list)} MPNs from {data_source}")
+        
+        # Show progress bar
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(0)
+        
+        # Start appropriate scraping worker
+        if data_source == "TrustedParts":
+            self.scraping_worker = TrustedPartsScrapingWorker(mpn_list)
+        elif data_source == "FindChips":
+            self.scraping_worker = ScrapingWorker(mpn_list)  # Your original FindChips worker
+        else:  # Both
+            # You could implement a combined worker here
+            self.scraping_worker = TrustedPartsScrapingWorker(mpn_list)
+        
+        self.scraping_worker.progress_updated.connect(self.progress_bar.setValue)
+        self.scraping_worker.log_updated.connect(self.log_message)
+        self.scraping_worker.data_scraped.connect(self.process_scraped_data)
+        self.scraping_worker.finished_scraping.connect(self.scraping_finished)
+        self.scraping_worker.start()
+
+    # ... (Keep all other existing methods from your BOMAnalyzer class)
+
+# Keep your existing DatabaseManager class
+class DatabaseManager:
+    # ... (Your existing DatabaseManager code)
+    pass
+
+def main():
+    app = QApplication(sys.argv)
+    window = BOMAnalyzer()
+    window.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
