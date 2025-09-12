@@ -1,761 +1,231 @@
-import sys
-import sqlite3
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import pandas as pd
-import re
-import time
-from datetime import datetime
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QVBoxLayout, QHBoxLayout,
-                             QWidget, QToolBar, QPushButton, QTableWidget, QTableWidgetItem,
-                             QComboBox, QLineEdit, QLabel, QTextEdit, QFileDialog,
-                             QMessageBox, QTabWidget, QSpinBox, QDoubleSpinBox,
-                             QProgressBar, QSplitter, QHeaderView)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QAction, QIcon, QColor, QFont
-import json
-import urllib.parse
+Type
 
-class FindChipScraper:
-    def __init__(self):
-        self.setup_driver()
-        # Current exchange rates (you can update these or fetch from an API)
-        self.exchange_rates = {
-            'USD': 1.0,
-            'INR': 0.012,  # 1 INR = 0.012 USD (approximate)
-            'EUR': 1.08,   # 1 EUR = 1.08 USD (approximate)
-            'GBP': 1.26,   # 1 GBP = 1.26 USD (approximate)
-        }
+Package
 
-    def setup_driver(self):
-        """Setup Chrome WebDriver with options"""
-        chrome_options = Options()
-        chrome_options.add_argument('--headless')  # Run in background
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
-        
-        try:
-            self.driver = webdriver.Chrome(options=chrome_options)
-            self.wait = WebDriverWait(self.driver, 10)
-        except Exception as e:
-            print(f"Error setting up WebDriver: {str(e)}")
-            self.driver = None
+Required qty
 
-    def search_mpn(self, mpn):
-        """Search for MPN on findchips.com and return pricing data"""
-        if not self.driver:
-            return None
-            
-        try:
-            search_url = f"https://www.findchips.com/search/{urllib.parse.quote(mpn)}"
-            self.driver.get(search_url)
-            
-            # Wait for results to load
-            time.sleep(3)
-            
-            # Look for table rows with data attributes
-            distributor_rows = self.driver.find_elements(By.CSS_SELECTOR, 'tr.row')
-            
-            distributors = []
-            
-            for row in distributor_rows:
-                try:
-                    distributor_data = self.parse_distributor_row(row)
-                    if distributor_data:
-                        distributors.append(distributor_data)
-                except Exception as e:
-                    continue
-            
-            return distributors
-            
-        except Exception as e:
-            print(f"Error scraping {mpn}: {str(e)}")
-            return None
+Excess Required
 
-    def parse_distributor_row(self, row):
-        """Parse distributor data from a table row with data attributes"""
-        try:
-            # Extract basic data from attributes
-            distributor_name = row.get_attribute('data-distributor_name') or 'Unknown'
-            manufacturer = row.get_attribute('data-mfr') or 'Unknown'
-            mpn = row.get_attribute('data-mfrpartnumber') or ''
-            stock_raw = row.get_attribute('data-instock') or '0'
-            
-            # Parse stock information
-            try:
-                stock = int(stock_raw) if stock_raw.isdigit() else 0
-            except (ValueError, AttributeError):
-                stock = 0
-            
-            # Extract price tiers from the price list structure
-            price_tiers_usd = self.extract_price_list_data(row)
-            
-            if not price_tiers_usd:
-                return None
-                
-            return {
-                'distributor': distributor_name,
-                'manufacturer': manufacturer,
-                'mpn': mpn,
-                'price_tiers': price_tiers_usd,
-                'stock': stock,
-                'currency': 'USD'  # All prices are now converted to USD
-            }
-            
-        except Exception as e:
-            return None
+Less value
 
-    def extract_price_list_data(self, row):
-        """Extract price data from the <ul class="price-list"> structure"""
-        price_tiers = []
-        
-        try:
-            # Find the price list within this row
-            price_list = row.find_element(By.CSS_SELECTOR, 'ul.price-list')
-            if not price_list:
-                return []
-            
-            # Find all price items (li elements with spans)
-            price_items = price_list.find_elements(By.CSS_SELECTOR, 'li')
-            
-            for item in price_items:
-                try:
-                    # Skip items that don't have pricing data (like "See More" button)
-                    label_span = item.find_element(By.CSS_SELECTOR, 'span.label')
-                    value_span = item.find_element(By.CSS_SELECTOR, 'span.value')
-                    
-                    if not label_span or not value_span:
-                        continue
-                    
-                    # Extract quantity from label
-                    qty_text = label_span.text.strip()
-                    if not qty_text.isdigit():
-                        continue
-                    qty = int(qty_text)
-                    
-                    # Extract price and currency from value span
-                    price_str = value_span.get_attribute('data-baseprice')
-                    currency = value_span.get_attribute('data-basecurrency') or 'USD'
-                    
-                    if not price_str:
-                        continue
-                    
-                    price = float(price_str)
-                    
-                    # Convert price to USD
-                    usd_price = self.convert_to_usd(price, currency)
-                    
-                    price_tiers.append({
-                        'quantity': qty,
-                        'price': usd_price
-                    })
-                    
-                except Exception as e:
-                    # Skip this price tier if there's an error
-                    continue
-            
-        except Exception as e:
-            # Fallback to data-price attribute if price list extraction fails
-            return self.fallback_price_data_extraction(row)
-        
-        # Sort by quantity (ascending)
-        return sorted(price_tiers, key=lambda x: x['quantity'])
+0201 to 0603
 
-    def fallback_price_data_extraction(self, row):
-        """Fallback method to extract from data-price attribute"""
-        try:
-            price_data_raw = row.get_attribute('data-price') or '[]'
-            return self.parse_price_data_to_usd(price_data_raw)
-        except:
-            return []
+Less than 100
 
-    def parse_price_data_to_usd(self, price_data_raw):
-        """Parse price data from JSON string and convert all prices to USD"""
-        price_tiers = []
-        
-        try:
-            # The price data is in format: [[qty, "currency", "price"], ...]
-            price_list = json.loads(price_data_raw)
-            
-            for tier in price_list:
-                if len(tier) >= 3:
-                    qty = int(tier[0])
-                    currency = tier[1].upper() if tier[1] != "default" else "USD"
-                    price = float(tier[2])
-                    
-                    # Convert price to USD
-                    usd_price = self.convert_to_usd(price, currency)
-                    
-                    price_tiers.append({
-                        'quantity': qty,
-                        'price': usd_price
-                    })
-                    
-        except (json.JSONDecodeError, ValueError, IndexError) as e:
-            return []
-        
-        # Sort by quantity (ascending)
-        return sorted(price_tiers, key=lambda x: x['quantity'])
+50
 
-    def convert_to_usd(self, price, from_currency):
-        """Convert price from any currency to USD"""
-        from_currency = from_currency.upper()
-        
-        if from_currency == 'USD':
-            return price
-        elif from_currency in self.exchange_rates:
-            return price * self.exchange_rates[from_currency]
-        else:
-            # If currency not recognized, log and assume it's already USD
-            print(f"Warning: Unknown currency {from_currency}, assuming USD")
-            return price
+Less value
 
-    def close(self):
-        """Close the WebDriver"""
-        if self.driver:
-            self.driver.quit()
+0201 to 0603
 
-class ScrapingWorker(QThread):
-    progress_updated = pyqtSignal(int)
-    log_updated = pyqtSignal(str)
-    data_scraped = pyqtSignal(str, list)  # mpn, distributors
-    finished_scraping = pyqtSignal()
+100 to 250
 
-    def __init__(self, mpn_list):
-        super().__init__()
-        self.mpn_list = mpn_list
-        self.scraper = None
+80
 
-    def run(self):
-        self.scraper = FindChipScraper()
-        
-        if not self.scraper.driver:
-            self.log_updated.emit("Failed to initialize WebDriver")
-            self.finished_scraping.emit()
-            return
-            
-        total = len(self.mpn_list)
-        for i, mpn in enumerate(self.mpn_list):
-            try:
-                self.log_updated.emit(f"Scraping MPN: {mpn} - extracting from price list")
-                distributors = self.scraper.search_mpn(mpn)
-                if distributors:
-                    self.data_scraped.emit(mpn, distributors)
-                    self.log_updated.emit(f"Found {len(distributors)} distributors for {mpn}")
-                else:
-                    self.log_updated.emit(f"No data found for {mpn}")
-                    
-                self.progress_updated.emit(int((i + 1) / total * 100))
-                time.sleep(2)  # Rate limiting for Selenium
-                
-            except Exception as e:
-                self.log_updated.emit(f"Error scraping {mpn}: {str(e)}")
-        
-        if self.scraper:
-            self.scraper.close()
-        self.finished_scraping.emit()
+Less value
 
-# DatabaseManager class remains the same as before...
-class DatabaseManager:
-    def __init__(self, db_path="bom_data.db"):
-        self.db_path = db_path
-        self.init_database()
-        self.migrate_database()
+0201 to 0603
 
-    def init_database(self):
-        """Initialize the database tables"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS component_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mpn TEXT NOT NULL,
-            distributor TEXT,
-            manufacturer TEXT,
-            price_tiers TEXT,  -- Store as JSON string
-            stock INTEGER DEFAULT 0,
-            currency TEXT DEFAULT 'USD',
-            scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(mpn, distributor)
-        )
-        ''')
-        conn.commit()
-        conn.close()
+250 to 500
 
-    def migrate_database(self):
-        """Migrate old database format to new format"""
-        import json
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        # Check if we need to migrate
-        cursor.execute("PRAGMA table_info(component_data)")
-        columns = [column[1] for column in cursor.fetchall()]
-        
-        if 'price_tiers' not in columns and 'quantity' in columns:
-            # Old format - need to migrate
-            print("Migrating database to new format...")
-            
-            # Create new table
-            cursor.execute('''
-            CREATE TABLE component_data_new (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                mpn TEXT NOT NULL,
-                distributor TEXT,
-                manufacturer TEXT,
-                price_tiers TEXT,
-                stock INTEGER DEFAULT 0,
-                currency TEXT DEFAULT 'USD',
-                scraped_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(mpn, distributor)
-            )
-            ''')
-            
-            # Migrate data
-            cursor.execute('''
-            SELECT mpn, distributor, manufacturer, quantity, price, stock, currency
-            FROM component_data
-            ORDER BY mpn, distributor, quantity
-            ''')
-            
-            old_data = cursor.fetchall()
-            
-            # Group by mpn+distributor
-            grouped_data = {}
-            for mpn, dist, mfg, qty, price, stock, currency in old_data:
-                key = (mpn, dist)
-                if key not in grouped_data:
-                    grouped_data[key] = {
-                        'mpn': mpn,
-                        'distributor': dist,
-                        'manufacturer': mfg,
-                        'stock': stock or 0,
-                        'currency': currency,
-                        'price_tiers': []
-                    }
-                grouped_data[key]['price_tiers'].append({'quantity': qty, 'price': price})
-            
-            # Insert merged data
-            for key, data in grouped_data.items():
-                price_tiers_json = json.dumps(data['price_tiers'])
-                cursor.execute('''
-                INSERT INTO component_data_new
-                (mpn, distributor, manufacturer, price_tiers, stock, currency)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ''', (data['mpn'], data['distributor'], data['manufacturer'], 
-                      price_tiers_json, data['stock'], data['currency']))
-            
-            # Replace old table
-            cursor.execute('DROP TABLE component_data')
-            cursor.execute('ALTER TABLE component_data_new RENAME TO component_data')
-            
-            print("Database migration completed")
-        
-        conn.commit()
-        conn.close()
+15% or 80 whichever is high
 
-    def save_component_data(self, mpn, distributors):
-        """Save component data to database"""
-        import json
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        for dist_data in distributors:
-            distributor = dist_data['distributor']
-            manufacturer = dist_data['manufacturer']
-            currency = dist_data['currency']  # Should be USD now
-            stock = dist_data.get('stock', 0)
-            price_tiers = dist_data['price_tiers']
-            
-            # Check if this distributor+MPN combination already exists
-            cursor.execute('''
-            SELECT price_tiers FROM component_data 
-            WHERE mpn = ? AND distributor = ?
-            ''', (mpn, distributor))
-            
-            existing = cursor.fetchone()
-            
-            if existing:
-                # Merge with existing price tiers
-                existing_tiers = json.loads(existing[0])
-                
-                # Create a dictionary for easy merging
-                tier_dict = {tier['quantity']: tier for tier in existing_tiers}
-                
-                # Add new tiers or update existing ones
-                for tier in price_tiers:
-                    tier_dict[tier['quantity']] = tier
-                
-                # Convert back to list and sort
-                merged_tiers = sorted(tier_dict.values(), key=lambda x: x['quantity'])
-                price_tiers_json = json.dumps(merged_tiers)
-            else:
-                # No existing data, use new tiers
-                price_tiers_json = json.dumps(price_tiers)
-            
-            cursor.execute('''
-            INSERT OR REPLACE INTO component_data
-            (mpn, distributor, manufacturer, price_tiers, stock, currency)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ''', (mpn, distributor, manufacturer, price_tiers_json, stock, currency))
-        
-        conn.commit()
-        conn.close()
+Less value
 
-    def get_component_data(self, mpn):
-        """Get component data from database"""
-        import json
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        SELECT distributor, manufacturer, price_tiers, stock, currency
-        FROM component_data
-        WHERE mpn = ?
-        ORDER BY distributor
-        ''', (mpn,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        # Parse JSON price tiers and flatten the data
-        flattened_results = []
-        for dist, mfg, price_tiers_json, stock, currency in results:
-            try:
-                price_tiers = json.loads(price_tiers_json)
-                for tier in price_tiers:
-                    flattened_results.append((
-                        dist, mfg, tier['quantity'], tier['price'], currency, stock
-                    ))
-            except json.JSONDecodeError:
-                continue
-        
-        return flattened_results
+0201 to 0603
 
-    def get_component_details_by_mpn(self, mpn):
-        """Get detailed component data by MPN for Component Details tab"""
-        import json
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-        SELECT distributor, manufacturer, price_tiers, stock, currency
-        FROM component_data
-        WHERE mpn = ?
-        ORDER BY distributor
-        ''', (mpn,))
-        
-        results = cursor.fetchall()
-        conn.close()
-        
-        # Return structured data with all tiers per distributor
-        component_details = []
-        for dist, mfg, price_tiers_json, stock, currency in results:
-            try:
-                price_tiers = json.loads(price_tiers_json)
-                component_details.append({
-                    'distributor': dist,
-                    'manufacturer': mfg,
-                    'stock': stock,
-                    'currency': currency,
-                    'price_tiers': price_tiers
-                })
-            except json.JSONDecodeError:
-                continue
-        
-        return component_details
+500 to 1000
 
-class BOMAnalyzer(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("BOM Web Scraper & Analyzer (Price List Extractor)")
-        self.setGeometry(100, 100, 1400, 800)
-        
-        # Initialize components
-        self.db_manager = DatabaseManager()
-        self.bom_data = None
-        self.scraped_data = {}
-        
-        # Exchange rates (default values) - All prices are now in USD
-        self.exchange_rates = {"USD": 1.0, "INR": 83.2}
-        
-        self.setup_ui()
-        self.setup_connections()
+8% or 80 whichever is high
 
-    def setup_ui(self):
-        """Setup the user interface"""
-        # Create central widget
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        # Create toolbar
-        self.create_toolbar()
-        
-        # Create main layout
-        main_layout = QVBoxLayout(central_widget)
-        
-        # Create top controls
-        controls_layout = self.create_controls()
-        main_layout.addLayout(controls_layout)
-        
-        # Create progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        main_layout.addWidget(self.progress_bar)
-        
-        # Create splitter for main content
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        
-        # Create tab widget for data display
-        self.tab_widget = QTabWidget()
-        
-        # BOM Result View
-        self.result_table = QTableWidget()
-        self.tab_widget.addTab(self.result_table, "BOM Results")
-        
-        # Detail View
-        self.detail_table = QTableWidget()
-        self.tab_widget.addTab(self.detail_table, "Component Details")
-        
-        splitter.addWidget(self.tab_widget)
-        
-        # Create log area
-        self.log_text = QTextEdit()
-        self.log_text.setMaximumHeight(150)
-        self.log_text.setReadOnly(True)
-        splitter.addWidget(self.log_text)
-        
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
-        
-        main_layout.addWidget(splitter)
+Less value
 
-    def create_toolbar(self):
-        """Create the application toolbar"""
-        toolbar = QToolBar()
-        self.addToolBar(toolbar)
-        
-        # Upload BOM action
-        upload_action = QAction("Upload BOM", self)
-        upload_action.triggered.connect(self.upload_bom)
-        toolbar.addAction(upload_action)
-        
-        toolbar.addSeparator()
-        
-        # Fetch Data action
-        fetch_action = QAction("Fetch Data", self)
-        fetch_action.triggered.connect(self.fetch_data)
-        toolbar.addAction(fetch_action)
-        
-        toolbar.addSeparator()
-        
-        # Export to Excel action
-        export_action = QAction("Export to Excel", self)
-        export_action.triggered.connect(self.export_to_excel)
-        toolbar.addAction(export_action)
+0201 to 0603
 
-    def create_controls(self):
-        """Create control widgets with package column selection"""
-        layout = QHBoxLayout()
-        
-        # Column selection - Added Package column
-        layout.addWidget(QLabel("MPN Column:"))
-        self.mpn_column_combo = QComboBox()
-        layout.addWidget(self.mpn_column_combo)
-        
-        layout.addWidget(QLabel("QTY Column:"))
-        self.qty_column_combo = QComboBox()
-        layout.addWidget(self.qty_column_combo)
-        
-        # NEW: Package column selection
-        layout.addWidget(QLabel("Package Column:"))
-        self.package_column_combo = QComboBox()
-        layout.addWidget(self.package_column_combo)
-        
-        # PCB Quantity
-        layout.addWidget(QLabel("PCB Qty:"))
-        self.pcb_qty_input = QSpinBox()
-        self.pcb_qty_input.setMinimum(1)
-        self.pcb_qty_input.setMaximum(1000000)
-        self.pcb_qty_input.setValue(1)
-        layout.addWidget(self.pcb_qty_input)
-        
-        # Currency selection (for display purposes - internal is always USD)
-        layout.addWidget(QLabel("Display Currency:"))
-        self.currency_combo = QComboBox()
-        self.currency_combo.addItems(["USD", "INR", "EUR", "GBP"])
-        layout.addWidget(self.currency_combo)
-        
-        # Exchange rate
-        layout.addWidget(QLabel("USD to INR Rate:"))
-        self.exchange_rate_input = QDoubleSpinBox()
-        self.exchange_rate_input.setMinimum(0.01)
-        self.exchange_rate_input.setMaximum(1000.0)
-        self.exchange_rate_input.setValue(83.2)
-        self.exchange_rate_input.setDecimals(2)
-        layout.addWidget(self.exchange_rate_input)
-        
-        layout.addStretch()
-        
-        return layout
+greater than 1000
 
-    def setup_connections(self):
-        """Setup signal connections"""
-        self.currency_combo.currentTextChanged.connect(self.on_currency_changed)
-        self.exchange_rate_input.valueChanged.connect(self.on_exchange_rate_changed)
-        self.pcb_qty_input.valueChanged.connect(self.recalculate_results)
+5% or 80 whichever is high
 
-    def on_currency_changed(self, currency):
-        """Handle currency change"""
-        if self.bom_data is not None and len(self.scraped_data) > 0:
-            self.log_message(f"Display currency changed to {currency}, recalculating results...")
-            self.calculate_bom_results()
+Less value
 
-    def on_exchange_rate_changed(self, rate):
-        """Handle exchange rate change"""
-        self.exchange_rates["INR"] = rate
-        if self.bom_data is not None and len(self.scraped_data) > 0:
-            self.log_message(f"Exchange rate updated to {rate}, recalculating results...")
-            self.calculate_bom_results()
+0805 to 1210
 
-    def log_message(self, message):
-        """Add message to log"""
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        self.log_text.append(f"[{timestamp}] {message}")
+Less than 100
 
-    def upload_bom(self):
-        """Upload and process BOM file with improved column handling"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "Open BOM file", "", "Excel files (*.xlsx *.xls)"
-        )
-        
-        if file_path:
-            try:
-                # Read Excel file
-                self.bom_data = pd.read_excel(file_path)
-                self.log_message(f"BOM loaded: {len(self.bom_data)} rows")
-                
-                # Populate column dropdowns
-                columns = list(self.bom_data.columns)
-                
-                # Clear and populate all column dropdowns
-                self.mpn_column_combo.clear()
-                self.qty_column_combo.clear()
-                self.package_column_combo.clear()
-                
-                self.mpn_column_combo.addItems(columns)
-                self.qty_column_combo.addItems(columns)
-                
-                # Package column with "None" option
-                self.package_column_combo.addItem("(None)")
-                self.package_column_combo.addItems(columns)
-                
-                # Smart column selection based on common names
-                self.auto_select_columns(columns)
-                
-                # Display BOM in result table
-                self.display_bom_data()
-                
-                # Load component details
-                self.load_component_details()
-                
-                self.log_message("BOM uploaded successfully")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to load BOM: {str(e)}")
-                self.log_message(f"Error loading BOM: {str(e)}")
+25
 
-    def auto_select_columns(self, columns):
-        """Automatically select columns based on common naming patterns"""
-        # Auto-select MPN column
-        mpn_patterns = ['MPN', 'PART NUMBER', 'PART_NUMBER', 'PARTNUMBER', 'P/N', 'PN']
-        for i, col in enumerate(columns):
-            if any(pattern in col.upper() for pattern in mpn_patterns):
-                self.mpn_column_combo.setCurrentIndex(i)
-                break
-        
-        # Auto-select QTY column
-        qty_patterns = ['QTY', 'QUANTITY', 'COUNT', 'QT', 'AMOUNT']
-        for i, col in enumerate(columns):
-            if any(pattern in col.upper() for pattern in qty_patterns):
-                self.qty_column_combo.setCurrentIndex(i)
-                break
-        
-        # Auto-select Package column
-        package_patterns = ['PACKAGE', 'PKG', 'FOOTPRINT', 'CASE', 'ENCLOSURE']
-        for i, col in enumerate(columns):
-            if any(pattern in col.upper() for pattern in package_patterns):
-                self.package_column_combo.setCurrentIndex(i + 1)  # +1 because of "(None)" option
-                break
+Less value
 
-    # All the other methods remain the same as in the previous version...
-    # (display_bom_data, load_component_details, fetch_data, etc.)
-    
-    def fetch_data(self):
-        """Start fetching data from findchips.com"""
-        if self.bom_data is None:
-            QMessageBox.warning(self, "Warning", "Please upload BOM first")
-            return
-        
-        mpn_column = self.mpn_column_combo.currentText()
-        if not mpn_column:
-            QMessageBox.warning(self, "Warning", "Please select MPN column")
-            return
-        
-        # Get unique MPNs
-        mpn_list = self.bom_data[mpn_column].dropna().unique().tolist()
-        if not mpn_list:
-            QMessageBox.warning(self, "Warning", "No MPNs found in selected column")
-            return
-        
-        self.log_message(f"Starting to scrape {len(mpn_list)} MPNs (extracting from price list HTML)")
-        
-        # Show progress bar
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setValue(0)
-        
-        # Start scraping thread
-        self.scraping_worker = ScrapingWorker(mpn_list)
-        self.scraping_worker.progress_updated.connect(self.progress_bar.setValue)
-        self.scraping_worker.log_updated.connect(self.log_message)
-        self.scraping_worker.data_scraped.connect(self.process_scraped_data)
-        self.scraping_worker.finished_scraping.connect(self.scraping_finished)
-        self.scraping_worker.start()
+0805 to 1210
 
-    def process_scraped_data(self, mpn, distributors):
-        """Process scraped data for an MPN"""
-        self.scraped_data[mpn] = distributors
-        self.db_manager.save_component_data(mpn, distributors)
+100 to 250
 
-    def scraping_finished(self):
-        """Handle scraping completion"""
-        self.progress_bar.setVisible(False)
-        self.log_message("Scraping completed - Prices extracted from HTML price list")
-        self.calculate_bom_results()
-        # Refresh component details with new data
-        self.load_component_details()
+40
 
-    # Add all other remaining methods from the previous version here...
-    # (calculate_bom_results, find_best_pricing_option, display_results, etc.)
+Less value
 
-def main():
-    app = QApplication(sys.argv)
-    window = BOMAnalyzer()
-    window.show()
-    sys.exit(app.exec())
+0805 to 1210
 
-if __name__ == "__main__":
-    main()
+250 to 500
 
+10% or 40 whichever is high
+
+Less value
+
+0805 to 1210
+
+500 to 1000
+
+7% or 40 whichever is high
+
+Less value
+
+0805 to 1210
+
+greater than 1000
+
+3% or 40 whichever is high
+
+Less value
+
+Greater than 1210
+
+Less than 100
+
+12
+
+Less value
+
+Greater than 1210
+
+100 to 250
+
+20
+
+Less value
+
+Greater than 1210
+
+250 to 500
+
+5% or 20 whichever is high
+
+Less value
+
+Greater than 1210
+
+500 to 1000
+
+3% or 20 whichever is high
+
+Less value
+
+Greater than 1210
+
+greater than 1000
+
+2% or 20 whichever is high
+
+High Value
+
+0805 to 1210
+
+Less than 100
+
+15
+
+High Value
+
+0805 to 1210
+
+100 to 250
+
+20
+
+High Value
+
+0805 to 1210
+
+250 to 500
+
+4% or 20 whichever is high
+
+High Value
+
+0805 to 1210
+
+500 to 1000
+
+3% or 20 whichever is high
+
+High Value
+
+0805 to 1210
+
+greater than 1000
+
+2% or 20 whichever is high
+
+High Value
+
+Greater than 1210
+
+Less than 250
+
+5
+
+High Value
+
+Greater than 1210
+
+250 to 500
+
+3% or 5 whichever is high
+
+High Value
+
+Greater than 1210
+
+500 to 1000
+
+2% or 5 whichever is high
+
+High Value
+
+Greater than 1210
+
+greater than 1000
+
+1% or 5 whichever is high
+
+A class Items(Very High value)
+
+NA
+
+Less than 250
+
+1
+
+A class Items(Very High value)
+
+NA
+
+250 to 500
+
+2
+
+A class Items(Very High value)
+
+NA
+
+500 to 1000
+
+3
+
+A class Items(Very High value)
+
+NA
+
+greater than 1000
+
+3
