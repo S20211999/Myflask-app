@@ -183,89 +183,106 @@ class DiscreteN(BaseGeneratorPage):
         # Load the SVG vector image directly into the widget for sharp rendering
 
         self.image_label.load("generator_resistor_chip.svg")
-    
-def generate_script(self, data, path):
-    """Generate Ultra Librarian-style footprint and save as .txt file."""
-    try:
-        part_number = data.get('Part Number', '')
-        footprint_name = data.get('Footprint Name', '')
-        body_l = float(data.get('Body Length (mm)', ))
-        body_w = float(data.get('Body Width (mm)', ))
-        pad_l = float(data.get('pad Length (mm)', ))
-        pad_w = float(data.get('pad Width (mm)', ))
-        mask_expansion = float(data.get('mask expansion (mm)', ))
-        paste_expansion = float(data.get('paste expansion (mm)', ))
-        airgap = float(data.get('airgap (mm)', ))
-    except (ValueError, TypeError):
-        raise ValueError("All dimensions must be valid numbers.")
 
-    # Convert mm to Ultra Librarian ASCII units (1 mm = 3937.007874 units)
-    def mm_to_ul(val):
-        return round(val / 0.000254)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
 
-    pad_offset = (body_l - pad_l) / 2
-    pad_x = mm_to_ul(pad_offset)
-    pad_y = 0
-    pad_w_ul = mm_to_ul(pad_w)
-    pad_l_ul = mm_to_ul(pad_l)
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
 
-    # Helper functions
-    # Predefined outlines and shapes (static from reference)
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
 
 
-    # Generate script
-    script = f"""# Created by Footprint Generator
-# Part Number: {part_number}
-# Footprint: {footprint_name}
+    def generate_script(self, data):
+        """Generate Ultra Librarian-style footprint and save as .txt file."""
+        try:
+            part_number = data.get('Part Number', '')
+            footprint_name = data.get('Footprint Name', '')
+            body_l = float(data.get('Body Length (mm)', ))
+            body_w = float(data.get('Body Width (mm)', ))
+            pad_l = float(data.get('pad Length (mm)', ))
+            pad_w = float(data.get('pad Width (mm)', ))
+            mask_expansion = float(data.get('mask expansion (mm)', ))
+            paste_expansion = float(data.get('paste expansion (mm)', ))
+            airgap = float(data.get('airgap (mm)', ))
+        except (ValueError, TypeError):
+            raise ValueError("All dimensions must be valid numbers.")
 
-StartFootprints
+        # Convert mm to Ultra Librarian ASCII units (1 mm = 3937.007874 units)
+        def mm_to_ul(val):
+            return round(val / 0.000254)
 
-Footprint (Name "{footprint_name}")
-Pad (Name "1") (Location -{pad_x}, {pad_y}) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
-PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
-EndPad
-Pad (Name "2") (Location {pad_x}, {pad_y}) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
-PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
-EndPad
+        pad_offset = (body_l - pad_l) / 2
+        pad_x = mm_to_ul(pad_offset)
+        pad_y = 0
+        pad_w_ul = mm_to_ul(pad_w)
+        pad_l_ul = mm_to_ul(pad_l)
 
-Polygon (PointCount 4) (Type KeepOut) (Layer KeepOutLayer) 
-
-EndPolygon
-
-Polygon (PointCount 4) (Type KeepOut) (Layer TopLayer) 
-
-EndPolygon
-
-
-
-Polygon (PointCount 4) (Layer Mechanical15) 
-Point (-67.5, -38.5)
-Point (-67.5, 38.5)
-Point (67.5, 38.5)
-Point (67.5, -38.5)
-EndPolygon
-
-Text (Location -75, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "RefDes")
-Text (Location -87.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "REFDES")
-Text (Location -87.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer Mechanical13) (Value "RefDes2")
+        # Helper functions
+        # Predefined outlines and shapes (static from reference)
 
 
+        # Generate script
+        script = f"""# Created by Footprint Generator
+    # Part Number: {part_number}
+    # Footprint: {footprint_name}
 
-Arc (Width 0) (Radius 0) (Location -30.5, 0) (StartAngle 0) (EndAngle 360) (Layer Mechanical13)
+    StartFootprints
+    {mask_expansion}
+    {body_w}
+    {paste_expansion}
+    {airgap}
 
-Step (Name {footprint_name}.step)
-EndFootprint
+    Footprint (Name "{footprint_name}")
+    Pad (Name "1") (Location -{pad_x}, {pad_y}) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
+    PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
+    EndPad
+    Pad (Name "2") (Location {pad_x}, {pad_y}) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
+    PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
+    EndPad
 
-EndFootprints
-"""
+    Polygon (PointCount 4) (Type KeepOut) (Layer KeepOutLayer) 
 
-    # Save to .txt file
-    full_path = os.path.join(path, f"{part_number}.txt")
-    with open(full_path, "w") as f:
-        f.write(script)
+    EndPolygon
 
-    return script, f"{part_number}.txt"
-    
+    Polygon (PointCount 4) (Type KeepOut) (Layer TopLayer) 
+
+    EndPolygon
+
+
+
+    Polygon (PointCount 4) (Layer Mechanical15) 
+    Point (-67.5, -38.5)
+    Point (-67.5, 38.5)
+    Point (67.5, 38.5)
+    Point (67.5, -38.5)
+    EndPolygon
+
+    Text (Location -75, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "RefDes")
+    Text (Location -87.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "REFDES")
+    Text (Location -87.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer Mechanical13) (Value "RefDes2")
+
+
+
+    Arc (Width 0) (Radius 0) (Location -30.5, 0) (StartAngle 0) (EndAngle 360) (Layer Mechanical13)
+
+    Step (Name {footprint_name}.step)
+    EndFootprint
+
+    EndFootprints
+    """
+
+        # Save to .txt file
+        full_path = os.path.join(self.altium_script_path, f"{part_number}.txt")
+        with open(full_path, "w") as f:
+            f.write(script)
+
+        return script, f"{part_number}.txt"
+        
 
 
 class DiscreteF(BaseGeneratorPage):
@@ -274,90 +291,162 @@ class DiscreteF(BaseGeneratorPage):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-class DiscreteFMPE(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
 
-class Sot23N(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
 
 class Sot23NMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
-class Sot23F(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
+
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
+
+
 
 class Sot23FMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
 
-class TOPackageN(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
 
 class TOPackageNMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
-class TOPackageF(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
+
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
 
 class TOPackageFMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
+        
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
 
-class DualSideN(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
 
 class DualSideNMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
-class DualSideF(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
+
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
 
 class DualSideFMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
-class DualSideTN(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
+
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
 
 class DualSideTNMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
 
-class DualSideTF(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
+
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
+
+
 
 class DualSideTFMPE(BaseGeneratorPage):
     """Generator page for chip resistors with its own script logic and file format."""
     def __init__(self, parent=None):
         super().__init__(parent)
+
+    def set_altium_output_path(self, path):
+        self.altium_script_path = path
+
+    def set_allegro_output_path(self, path):
+        self.allegro_script_path = path
+
+    def set_Pads_output_path(self, path):
+        self.Pads_script_path = path
+
+    def set_xpedition_output_path(self, path):
+        self.Pads_script_path = path
 
 
 # --- Main Application Window ---
@@ -393,7 +482,10 @@ class MainWindow(QMainWindow):
         if not os.path.exists(DEFAULT_SCRIPT_PATH):
             os.makedirs(DEFAULT_SCRIPT_PATH)
             
-        self.current_script_path = DEFAULT_SCRIPT_PATH
+        self.altium_script_path = DEFAULT_SCRIPT_PATH
+        self.allegro_script_path = DEFAULT_SCRIPT_PATH
+        self.Pads_script_path = DEFAULT_SCRIPT_PATH
+        self.xpedition_script_path = DEFAULT_SCRIPT_PATH
         self.init_database()
         
         # --- FIX IS HERE ---
@@ -477,21 +569,13 @@ class MainWindow(QMainWindow):
         page_map = {
             ("Discrete", "Discrete Narmal"): DiscreteN,
             ("Discrete", "Discrete Fillet-Shape"): DiscreteF,
-            ("Sot-23", "Narmal"): Sot23N,
             ("Sot-23", "Narmal with MP Expantion"): Sot23NMPE,
-            ("Sot-23", "Fillet-Shape"): Sot23F,
             ("Sot-23", "Fillet with MP Expantion"): Sot23FMPE,
-            ("TO Package", "Narmal"): TOPackageN,
             ("TO Package", "Narmal with MP Expantion"): TOPackageNMPE,
-            ("TO Package", "Fillet-Shape"): TOPackageF,
             ("TO Package", "Fillet with MP Expantion"): TOPackageFMPE,
-            ("Dual Side", "Narmal"): DualSideN,
             ("Dual Side", "Narmal with MP Expantion"): DualSideNMPE,
-            ("Dual Side", "Fillet-Shape"): DualSideF,
             ("Dual Side", "Fillet with MP Expantion"): DualSideFMPE,
-            ("Dual with thermal", "Narmal"): DualSideTN,
             ("Dual with thermal", "Narmal with MP Expantion"): DualSideTNMPE,
-            ("Dual with thermal", "Fillet-Shape"): DualSideTF,
             ("Dual with thermal", "Fillet with MP Expantion"): DualSideTFMPE,
             # Add more mappings as needed for other component types/options
             }
@@ -501,7 +585,10 @@ class MainWindow(QMainWindow):
         for (comp_type, opt_name), PageClass in page_map.items():
             page_instance = PageClass()
             page_instance.generationFinalized.connect(self.handle_save_to_database)
-            page_instance.set_output_path(self.current_script_path)
+            page_instance.set_altium_output_path(self.altium_script_path)
+            page_instance.set_allegro_output_path(self.allegro_script_path)
+            page_instance.set_Pads_output_path(self.Pads_script_path)
+            page_instance.set_xpedition_output_path(self.xpedition_script_path)
             self.stacked_widget.addWidget(page_instance)
             self.generator_pages[(comp_type, opt_name)] = page_instance
 
@@ -687,34 +774,63 @@ class MainWindow(QMainWindow):
         main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         main_layout.setSpacing(15)
 
-        path_layout = QHBoxLayout()
-        self.path_edit = QLineEdit(self.current_script_path)
-        self.path_edit.setReadOnly(True)
-        browse_button = QPushButton("Browse")
-        browse_button.clicked.connect(self.browse_for_path)
-        path_layout.addWidget(QLabel("Altium Script Output Path:"))
-        path_layout.addWidget(self.path_edit)
-        path_layout.addWidget(browse_button)
-        main_layout.addLayout(path_layout)
-
-
-        path_layout = QHBoxLayout()
-        self.path_edit = QLineEdit(self.current_script_path)
-        self.path_edit.setReadOnly(True)
-        browse_button = QPushButton("Browse")
-        browse_button.clicked.connect(self.browse_for_path)
-        path_layout.addWidget(QLabel("Allegro Script Output Path:"))
-        path_layout.addWidget(self.path_edit)
-        path_layout.addWidget(browse_button)
-        main_layout.addLayout(path_layout)
-
-
-
+        main_layout.addWidget(self._create_path_settings_group())
         main_layout.addWidget(self._create_clearance_settings_group())
         main_layout.addWidget(self._create_layer_settings_group())
         main_layout.addWidget(self._create_3d_settings_group())
 
         return tab_widget
+    
+
+    def _create_path_settings_group(self):
+        group = QGroupBox("Default Script Output Path")
+        path_layout = QFormLayout(group)
+
+        # --- Altium ---
+        Altium_layout = QHBoxLayout()
+        self.altium_path_edit = QLineEdit(self.altium_script_path)
+        self.altium_path_edit.setReadOnly(True)
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(self.browse_for_altium_path)
+        Altium_layout.addWidget(QLabel("Altium Script Output Path:"))
+        Altium_layout.addWidget(self.altium_path_edit)
+        Altium_layout.addWidget(browse_button)
+        path_layout.addRow(Altium_layout)
+
+        # --- Allegro ---
+        Allegro_layout = QHBoxLayout()
+        self.allegro_path_edit = QLineEdit(self.allegro_script_path)
+        self.allegro_path_edit.setReadOnly(True)
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(self.browse_for_allegro_path)
+        Allegro_layout.addWidget(QLabel("Allegro Script Output Path:"))
+        Allegro_layout.addWidget(self.allegro_path_edit)
+        Allegro_layout.addWidget(browse_button)
+        path_layout.addRow(Allegro_layout)
+
+        # --- Pads ---
+        Pads_layout = QHBoxLayout()
+        self.pads_path_edit = QLineEdit(self.Pads_script_path)
+        self.pads_path_edit.setReadOnly(True)
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(self.browse_for_Pads_path)
+        Pads_layout.addWidget(QLabel("Pads Script Output Path:"))
+        Pads_layout.addWidget(self.pads_path_edit)
+        Pads_layout.addWidget(browse_button)
+        path_layout.addRow(Pads_layout)
+
+        # --- Xpedition ---
+        Xpedition_layout = QHBoxLayout()
+        self.xpedition_path_edit = QLineEdit(self.xpedition_script_path)
+        self.xpedition_path_edit.setReadOnly(True)
+        browse_button = QPushButton("Browse")
+        browse_button.clicked.connect(self.browse_for_xpedition_path)
+        Xpedition_layout.addWidget(QLabel("Xpedition Script Output Path:"))
+        Xpedition_layout.addWidget(self.xpedition_path_edit)
+        Xpedition_layout.addWidget(browse_button)
+        path_layout.addRow(Xpedition_layout)
+
+        return group
 
 
 
@@ -778,7 +894,10 @@ class MainWindow(QMainWindow):
     def go_to_generator(self, component_type, option_name):
         page_widget = self.generator_pages.get((component_type, option_name))
         if page_widget:
-            page_widget.set_output_path(self.current_script_path)
+            page_widget.set_altium_output_path(self.altium_script_path)
+            page_widget.set_allegro_output_path(self.allegro_script_path)
+            page_widget.set_Pads_output_path(self.Pads_script_path)
+            page_widget.set_xpedition_output_path(self.xpedition_script_path)
             self.stacked_widget.setCurrentWidget(page_widget)
         else:
             QMessageBox.information(self, "Not Implemented", f"The generator for '{option_name}' is not yet available.")
@@ -788,14 +907,46 @@ class MainWindow(QMainWindow):
         for button in self.button_group:
             button.setChecked(False)
 
-    def browse_for_path(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.current_script_path)
+    def browse_for_altium_path(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.altium_script_path)
         if directory:
-            self.current_script_path = directory
-            self.path_edit.setText(self.current_script_path)
+            self.altium_script_path = directory
+            self.altium_path_edit.setText(self.altium_script_path)
             for page in self.generator_pages.values():
-                page.set_output_path(self.current_script_path)
+                page.set_altium_output_path(self.altium_script_path)
             QMessageBox.information(self, "Path Set", f"Script output path has been set to:\n{directory}")
+
+    def browse_for_allegro_path(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.allegro_script_path)
+        if directory:
+            self.allegro_script_path = directory
+            self.allegro_path_edit.setText(self.allegro_script_path)
+            for page in self.generator_pages.values():
+                page.set_allegro_output_path(self.allegro_script_path)
+            QMessageBox.information(self, "Path Set", f"Script output path has been set to:\n{directory}")
+
+
+
+    def browse_for_Pads_path(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.Pads_script_path)
+        if directory:
+            self.Pads_script_path = directory
+            self.pads_path_edit.setText(self.Pads_script_path)
+            for page in self.generator_pages.values():
+                page.set_Pads_output_path(self.Pads_script_path)
+            QMessageBox.information(self, "Path Set", f"Script output path has been set to:\n{directory}")
+
+
+
+    def browse_for_xpedition_path(self):
+        directory = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.xpedition_script_path)
+        if directory:
+            self.xpedition_script_path = directory
+            self.xpedition_path_edit.setText(self.xpedition_script_path)
+            for page in self.generator_pages.values():
+                page.set_xpedition_output_path(self.xpedition_script_path)
+            QMessageBox.information(self, "Path Set", f"Script output path has been set to:\n{directory}")
+
 
     def browse_for_step_path(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Default STEP Model Folder")
