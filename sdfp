@@ -27,7 +27,6 @@ from PySide6.QtSvgWidgets import QSvgWidget
 
 # --- Constants ---
 DATABASE_FILE = "footprint_data.db"
-DEFAULT_SCRIPT_PATH = os.path.join(os.path.expanduser("~"), "generated_scripts")
 # --- DEFINE THE CUSTOM WIDGET HERE ---
 class ToggleSwitch(QCheckBox):
     """A custom toggle switch widget. Its appearance is defined in the stylesheet."""
@@ -61,99 +60,113 @@ class ClickableLabel(QLabel):
 class BaseGeneratorPage(QWidget):
     """
     A base class that encapsulates generation AND file-saving logic.
-    Each page is a self-sufficient unit.
+    Each page is a self-sufficient unit that generates scripts for all 4 tools.
     """
-    # Signal is now simpler: just sends the data for the database
-
     generationFinalized = Signal(dict)
-
-    def __init__(self, parent=None):
+    
+    def __init__(self, table_name, parent=None):
         super().__init__(parent)
-        self.output_path = ""
+        self.table_name = table_name
+
+        # Initialize paths for all 4 script types
+        self.script_paths = {
+            'altium': os.path.join(os.path.expanduser("~"), "altium_scripts"),
+            'allegro': os.path.join(os.path.expanduser("~"), "allegro_scripts"),
+            'pads': os.path.join(os.path.expanduser("~"), "pads_scripts"),
+            'xpedition': os.path.join(os.path.expanduser("~"), "xpedition_scripts")
+        }
+        
         self.setObjectName("GeneratorPage")
         layout = QGridLayout(self)
         layout.setContentsMargins(25, 25, 25, 25)
         layout.setSpacing(20)
-
+        
         self.title_label = QLabel()
         layout.addWidget(self.title_label, 0, 0)
-
+        
         input_frame = QFrame()
         self.form_layout = QFormLayout(input_frame)
         self.form_layout.setSpacing(12)
         self.form_layout.setLabelAlignment(Qt.AlignRight)
         self.input_fields = {}
         layout.addWidget(input_frame, 0, 0)
-
+        
         right_panel_layout = QVBoxLayout()
-        # Use QSvgWidget for sharp vector graphics rendering
         self.image_label = QSvgWidget()
         self.image_label.setMinimumSize(250, 300)
         self.image_label.setStyleSheet("background-color: #232730; border-radius: 8px;")
         right_panel_layout.addWidget(self.image_label)
         layout.addLayout(right_panel_layout, 0, 1)
         layout.setColumnStretch(1, 1)
-
+        
         button_layout = QHBoxLayout()
-        self.generate_button = QPushButton("Generate Script")
+        self.generate_button = QPushButton("Generate All Scripts")
         self.generate_button.setObjectName("GenerateButton")
         self.generate_button.setCursor(Qt.PointingHandCursor)
         self.generate_button.clicked.connect(self._on_generate_clicked)
-
         button_layout.addWidget(self.generate_button)
         button_layout.addStretch()
         layout.addLayout(button_layout, 2, 0, 1, 2)
 
-
     def _on_generate_clicked(self):
-        """Workflow: Collect, validate, generate, save file, display, and emit."""
+        """Generate scripts for all 4 tools simultaneously"""
         data = self.collect_data()
         if not data.get("part_number") or not data.get("footprint_name"):
             QMessageBox.warning(self, "Input Error", "Part Number and Footprint Name are required.")
             return
-
+        
         try:
-            # 1. Let the specific page create the script
-            script_content, filename = self.generate_script(data, self.output_path)
+            generated_files = []
+            errors = []
             
+            # Generate scripts for all 4 tools
+            for script_type in ['altium', 'allegro', 'pads', 'xpedition']:
+                try:
+                    script_content, filename = self.generate_script_for_tool(data, script_type)
+                    self._write_script_to_file(script_type, filename, script_content)
+                    generated_files.append(f"{script_type.title()}: {filename}")
+                except Exception as e:
+                    errors.append(f"{script_type.title()}: {str(e)}")
+            
+            # Show results
+            if generated_files:
+                success_msg = "Successfully generated scripts:\n\n" + "\n".join(generated_files)
+                if errors:
+                    success_msg += f"\n\nErrors encountered:\n" + "\n".join(errors)
+                QMessageBox.information(self, "Scripts Generated", success_msg)
+                
+                # Emit with table name
+                self.generationFinalized.emit({"data": data, "table_name": self.table_name})
 
-            # 3. Save the script to the file system FROM THIS CLASS
-            self._write_script_to_file(filename, script_content)
-            
-            # 4. Show a success message for the file save part
-            QMessageBox.information(self, "File Saved", f"Script '{filename}' has been saved successfully to:\n{self.output_path}")
-
-            # 5. Emit the data for MainWindow to save to the database
-            self.generationFinalized.emit(data)
-            
+            else:
+                QMessageBox.critical(self, "Generation Failed", "Failed to generate any scripts:\n\n" + "\n".join(errors))
+                
         except Exception as e:
             QMessageBox.critical(self, "Error", f"An error occurred during the process:\n\n{e}")
 
-    def _write_script_to_file(self, filename, script_content):
-        """Internal helper to write the script file to the configured output path."""
-        if not self.output_path:
-            raise ValueError("Output path has not been set.")
+    def _write_script_to_file(self, script_type, filename, script_content):
+        """Write script file to the appropriate output path"""
+        output_path = self.script_paths.get(script_type)
+        if not output_path:
+            raise ValueError(f"Output path for {script_type} has not been set.")
         
-        # Check if directory exists, if not, create it
-        os.makedirs(self.output_path, exist_ok=True)
-        
-        output_filepath = os.path.join(self.output_path, filename)
+        os.makedirs(output_path, exist_ok=True)
+        output_filepath = os.path.join(output_path, filename)
         with open(output_filepath, "w") as f:
             f.write(script_content)
 
-    def generate_script(self, data, path):
-        """Abstract method - subclasses MUST implement this."""
-        raise NotImplementedError("Each generator page must implement generate_script and return a (script, filename) tuple.")
+    def generate_script_for_tool(self, data, tool_type):
+        """Generate script for specific tool - must be implemented by subclasses"""
+        raise NotImplementedError("Each generator page must implement generate_script_for_tool")
 
+    def set_script_paths(self, paths_dict):
+        """Update all script output paths"""
+        self.script_paths.update(paths_dict)
+        
+    # Keep backward compatibility
     def set_output_path(self, path):
-        self.output_path = path
-
-    def set_initial_values(self, title, footprint_name):
-        self.title_label.setText(title)
-        for field in self.input_fields.values():
-            field.clear()
-        if "Footprint Name" in self.input_fields:
-            self.input_fields["Footprint Name"].setText(footprint_name)
+        """Legacy method for backward compatibility"""
+        self.script_paths['altium'] = path
 
     def collect_data(self):
         return {k.replace(" ", "_").lower().replace("(mm)", "").strip(): v.text() for k, v in self.input_fields.items()}
@@ -161,111 +174,173 @@ class BaseGeneratorPage(QWidget):
 # --- Specific Generator Page Implementations ---
 
 class DiscreteN(BaseGeneratorPage):
-    """Generator page for chip resistors with its own script logic and file format."""
+    """Generator page for discrete normal packages"""
+    
     def __init__(self, parent=None):
-       
-        super().__init__(parent)
+        super().__init__("DiscreteN", parent)  # Pass table name
         self.input_fields = {
             "Part Number": QLineEdit(),
             "Footprint Name": QLineEdit(),
             "Body Length (mm)": QLineEdit(),
             "Body Width (mm)": QLineEdit(),
-            "body height (mm)": QLineEdit(),
-            "pad Length (mm)": QLineEdit(),
-            "pad Width (mm)": QLineEdit(),
-            "mask expansion (mm)": QLineEdit(),
-            "paste expansion (mm)": QLineEdit(),
-            "airgap (mm)": QLineEdit(),
+            "Body Height (mm)": QLineEdit(),
+            "Pad Length (mm)": QLineEdit(),
+            "Pad Width (mm)": QLineEdit(),
+            "Mask Expansion (mm)": QLineEdit(),
+            "Paste Expansion (mm)": QLineEdit(),
+            "Airgap (mm)": QLineEdit(),
         }
         for label, field in self.input_fields.items():
             self.form_layout.addRow(label, field)
         
-        # Load the SVG vector image directly into the widget for sharp rendering
-
         self.image_label.load("generator_resistor_chip.svg")
-    
-def generate_script(self, data, path):
-    """Generate Ultra Librarian-style footprint and save as .txt file."""
-    try:
-        part_number = data.get('Part Number', '')
-        footprint_name = data.get('Footprint Name', '')
-        body_l = float(data.get('Body Length (mm)', ))
-        body_w = float(data.get('Body Width (mm)', ))
-        pad_l = float(data.get('pad Length (mm)', ))
-        pad_w = float(data.get('pad Width (mm)', ))
-        mask_expansion = float(data.get('mask expansion (mm)', ))
-        paste_expansion = float(data.get('paste expansion (mm)', ))
-        airgap = float(data.get('airgap (mm)', ))
-    except (ValueError, TypeError):
-        raise ValueError("All dimensions must be valid numbers.")
 
-    # Convert mm to Ultra Librarian ASCII units (1 mm = 3937.007874 units)
-    def mm_to_ul(val):
-        return round(val / 0.000254)
+    def generate_script_for_tool(self, data, tool_type):
+        """Generate script for specific tool type"""
+        if tool_type == 'altium':
+            return self._generate_altium_script(data)
+        elif tool_type == 'allegro':
+            return self._generate_allegro_script(data)
+        elif tool_type == 'pads':
+            return self._generate_pads_script(data)
+        elif tool_type == 'xpedition':
+            return self._generate_xpedition_script(data)
+        else:
+            raise ValueError(f"Unsupported tool type: {tool_type}")
 
-    pad_offset = (body_l - pad_l) / 2
-    pad_x = mm_to_ul(pad_offset)
-    pad_y = 0
-    pad_w_ul = mm_to_ul(pad_w)
-    pad_l_ul = mm_to_ul(pad_l)
+    def _generate_altium_script(self, data):
+        """Generate Altium Designer script (Ultra Librarian format)"""
+        try:
+            part_number = data.get('part_number', '')
+            footprint_name = data.get('footprint_name', '')
+            body_l = float(data.get('body_length', 0))
+            body_w = float(data.get('body_width', 0))
+            pad_l = float(data.get('pad_length', 0))
+            pad_w = float(data.get('pad_width', 0))
+            mask_expansion = float(data.get('mask_expansion', 0))
+            paste_expansion = float(data.get('paste_expansion', 0))
+            airgap = float(data.get('airgap', 0))
+        except (ValueError, TypeError):
+            raise ValueError("All dimensions must be valid numbers.")
 
-    # Helper functions
-    # Predefined outlines and shapes (static from reference)
+        def mm_to_ul(val):
+            return round(val / 0.000254)
 
+        pad_offset = (body_l - pad_l) / 2
+        pad_x = mm_to_ul(pad_offset)
+        pad_w_ul = mm_to_ul(pad_w)
+        pad_l_ul = mm_to_ul(pad_l)
 
-    # Generate script
-    script = f"""# Created by Footprint Generator
+        script = f"""# Created by Footprint Generator - Altium Designer
+# Part Number: {part_number}
+# Footprint: {footprint_name}
+StartFootprints
+Footprint (Name "{footprint_name}")
+Pad (Name "1") (Location -{pad_x}, 0) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
+PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
+EndPad
+Pad (Name "2") (Location {pad_x}, 0) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
+PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
+EndPad
+Text (Location -75, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "RefDes")
+Step (Name {footprint_name}.step)
+EndFootprint
+EndFootprints
+"""
+        return script, f"{part_number}_altium.txt"
+
+    def _generate_allegro_script(self, data):
+        """Generate Cadence Allegro script"""
+        part_number = data.get('part_number', '')
+        footprint_name = data.get('footprint_name', '')
+        
+        script = f"""# Allegro PCB Editor Script
 # Part Number: {part_number}
 # Footprint: {footprint_name}
 
-StartFootprints
+# Create footprint
+create footprint {footprint_name}
 
-Footprint (Name "{footprint_name}")
-Pad (Name "1") (Location -{pad_x}, {pad_y}) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
-PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
-EndPad
-Pad (Name "2") (Location {pad_x}, {pad_y}) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
-PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
-EndPad
+# Add pads
+shape add rect {data.get('pad_length', '0')} {data.get('pad_width', '0')}
+pad add {data.get('body_length', '0')}/2 0 1 rect
+pad add -{data.get('body_length', '0')}/2 0 2 rect
 
-Polygon (PointCount 4) (Type KeepOut) (Layer KeepOutLayer) 
+# Add assembly outline
+line add assembly {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+line add assembly -{data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
 
-EndPolygon
+# Add reference designator
+text add refdes 0 {data.get('body_width', '0')}/2+0.5 \\$REFDES
 
-Polygon (PointCount 4) (Type KeepOut) (Layer TopLayer) 
-
-EndPolygon
-
-
-
-Polygon (PointCount 4) (Layer Mechanical15) 
-Point (-67.5, -38.5)
-Point (-67.5, 38.5)
-Point (67.5, 38.5)
-Point (67.5, -38.5)
-EndPolygon
-
-Text (Location -75, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "RefDes")
-Text (Location -87.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "REFDES")
-Text (Location -87.5, -25) (Height 50) (Width 3) (Rotation 0) (Layer Mechanical13) (Value "RefDes2")
-
-
-
-Arc (Width 0) (Radius 0) (Location -30.5, 0) (StartAngle 0) (EndAngle 360) (Layer Mechanical13)
-
-Step (Name {footprint_name}.step)
-EndFootprint
-
-EndFootprints
+done
 """
+        return script, f"{part_number}_allegro.scr"
 
-    # Save to .txt file
-    full_path = os.path.join(path, f"{part_number}.txt")
-    with open(full_path, "w") as f:
-        f.write(script)
+    def _generate_pads_script(self, data):
+        """Generate Mentor Graphics PADS script"""
+        part_number = data.get('part_number', '')
+        footprint_name = data.get('footprint_name', '')
+        
+        script = f"""! PADS PowerPCB Script
+! Part Number: {part_number}
+! Footprint: {footprint_name}
 
-    return script, f"{part_number}.txt"
-    
+*PART*
+{footprint_name}
+
+*PAD*
+P1 {data.get('pad_length', '0')} {data.get('pad_width', '0')} R 0 0 {data.get('body_length', '0')}/2 0
+P2 {data.get('pad_length', '0')} {data.get('pad_width', '0')} R 0 0 -{data.get('body_length', '0')}/2 0
+
+*LINE*
+15 0 {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+15 0 -{data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+15 0 -{data.get('body_length', '0')}/2 -{data.get('body_width', '0')}/2
+15 0 {data.get('body_length', '0')}/2 -{data.get('body_width', '0')}/2
+15 0 {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+
+*TEXT*
+0 0 {data.get('body_width', '0')}/2+1 0 \\$REFDES
+
+*END*
+"""
+        return script, f"{part_number}_pads.asc"
+
+    def _generate_xpedition_script(self, data):
+        """Generate Mentor Graphics Xpedition script"""
+        part_number = data.get('part_number', '')
+        footprint_name = data.get('footprint_name', '')
+        
+        script = f"""# Xpedition PCB Script
+# Part Number: {part_number}
+# Footprint: {footprint_name}
+
+# Create new cell
+cell new {footprint_name}
+
+# Define pad stack
+padstack new rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+layer TOP copper rectangle {data.get('pad_length', '0')} {data.get('pad_width', '0')}
+padstack end
+
+# Place pads
+pin new 1 {data.get('body_length', '0')}/2 0 rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+pin new 2 -{data.get('body_length', '0')}/2 0 rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+
+# Add assembly outline
+line new ASSEMBLY {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2 -{data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+line new ASSEMBLY -{data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2 -{data.get('body_length', '0')}/2 -{data.get('body_width', '0')}/2
+line new ASSEMBLY -{data.get('body_length', '0')}/2 -{data.get('body_width', '0')}/2 {data.get('body_length', '0')}/2 -{data.get('body_width', '0')}/2
+line new ASSEMBLY {data.get('body_length', '0')}/2 -{data.get('body_width', '0')}/2 {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+
+# Add reference designator
+text new SILKSCREEN_TOP 0 {data.get('body_width', '0')}/2+0.5 \\$REFDES
+
+cell save
+cell end
+"""
+        return script, f"{part_number}_xpedition.scr"    
 
 
 class DiscreteF(BaseGeneratorPage):
@@ -384,26 +459,31 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Modern UI Footprint Generator")
         self.setGeometry(100, 100, 1000, 600)
-
-        # Pre-load font lists so they are available as instance attributes.
-        # This must be done before create_main_content() is called.
+        
         self.system_fonts = QFontDatabase.families()
         self.stroke_fonts = ["Default", "Sans Serif", "Serif"]
         
-        if not os.path.exists(DEFAULT_SCRIPT_PATH):
-            os.makedirs(DEFAULT_SCRIPT_PATH)
-            
-        self.current_script_path = DEFAULT_SCRIPT_PATH
+        # Initialize script paths for all tools
+        self.script_paths = {
+            'altium': os.path.join(os.path.expanduser("~"), "altium_scripts"),
+            'allegro': os.path.join(os.path.expanduser("~"), "allegro_scripts"),
+            'pads': os.path.join(os.path.expanduser("~"), "pads_scripts"),
+            'xpedition': os.path.join(os.path.expanduser("~"), "xpedition_scripts")
+        }
+        
+        # Create directories if they don't exist
+        for path in self.script_paths.values():
+            os.makedirs(path, exist_ok=True)
+        
+        self.current_script_path = self.script_paths['altium']  # Backward compatibility
+        
         self.init_database()
         
-        # --- FIX IS HERE ---
-        # Rename 'self.central_widget' to avoid name collision with QMainWindow's methods.
         central_container = QWidget()
-        self.main_layout = QHBoxLayout(central_container) # The layout is applied to the container.
+        self.main_layout = QHBoxLayout(central_container)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
         
-        # This is the line that was causing the error. Now it works correctly.
         self.setCentralWidget(central_container)
         
         self.create_sidebar()
@@ -420,11 +500,165 @@ class MainWindow(QMainWindow):
     def init_database(self):
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
+        
+        # Discrete packages table
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS DiscreteN (
-                id INTEGER PRIMARY KEY AUTOINCREMENT, part_number TEXT NOT NULL,
-                footprint_name TEXT, component_type TEXT, dimensions_json TEXT
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'DiscreteN',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pad_length REAL,
+                pad_width REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                airgap REAL,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS DiscreteF (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'DiscreteF',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pad_length REAL,
+                pad_width REAL,
+                fillet_radius REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                airgap REAL,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        
+        # SOT-23 packages tables
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Sot23N (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'Sot23N',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pitch REAL,
+                pad_length REAL,
+                pad_width REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                pin_count INTEGER DEFAULT 3,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Sot23NMPE (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'Sot23NMPE',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pitch REAL,
+                pad_length REAL,
+                pad_width REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                mp_expansion REAL,
+                pin_count INTEGER DEFAULT 3,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Sot23F (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'Sot23F',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pitch REAL,
+                pad_length REAL,
+                pad_width REAL,
+                fillet_radius REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                pin_count INTEGER DEFAULT 3,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS Sot23FMPE (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'Sot23FMPE',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pitch REAL,
+                pad_length REAL,
+                pad_width REAL,
+                fillet_radius REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                mp_expansion REAL,
+                pin_count INTEGER DEFAULT 3,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        
+        # TO Package tables
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS TOPackageN (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'TOPackageN',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                tab_length REAL,
+                tab_width REAL,
+                pitch REAL,
+                pad_length REAL,
+                pad_width REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                pin_count INTEGER,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+            )''')
+        
+        # Continue with other package types...
+        # Dual Side packages
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS DualSideN (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                part_number TEXT NOT NULL,
+                footprint_name TEXT,
+                component_type TEXT DEFAULT 'DualSideN',
+                body_length REAL,
+                body_width REAL,
+                body_height REAL,
+                pitch REAL,
+                pad_length REAL,
+                pad_width REAL,
+                row_spacing REAL,
+                mask_expansion REAL,
+                paste_expansion REAL,
+                pin_count INTEGER,
+                created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''')
+        
+        # Add more tables for other package types as needed...
+        
         conn.commit()
         conn.close()
 
@@ -500,35 +734,328 @@ class MainWindow(QMainWindow):
 
         for (comp_type, opt_name), PageClass in page_map.items():
             page_instance = PageClass()
-            page_instance.generationFinalized.connect(self.handle_save_to_database)
-            page_instance.set_output_path(self.current_script_path)
+            page_instance.generationFinalized.connect(self.on_generation_finalized)  # ✅ FIXED
+            page_instance.set_script_paths(self.script_paths)  # Set all paths
             self.stacked_widget.addWidget(page_instance)
             self.generator_pages[(comp_type, opt_name)] = page_instance
 
-    def handle_save_to_database(self, data):
-        """Receives data and saves it to the database. File saving is done by the page."""
-        try:
-            self.save_footprint_to_db(data)
-            print(f"Successfully saved metadata for {data['footprint_name']} to database.")
-        except Exception as e:
-            QMessageBox.critical(self, "Database Error", f"The script file was saved, but a database error occurred:\n\n{e}")
+    def on_generation_finalized(self, payload):
+        self.handle_save_to_database(payload["data"], payload["table_name"])
 
-    def save_footprint_to_db(self, data):
+
+    def handle_save_to_database(self, data, table_name):
+        """Receives data and table name, saves to the specific table"""
+        try:
+            if table_name == "DiscreteN":
+                self.save_discrete_n_to_db(data)
+            elif table_name == "DiscreteF":
+                self.save_discrete_f_to_db(data)
+            elif table_name == "Sot23N":
+                self.save_sot23_n_to_db(data)
+            elif table_name == "Sot23NMPE":
+                self.save_sot23_nmpe_to_db(data)
+            elif table_name == "Sot23F":
+                self.save_sot23_f_to_db(data)
+            elif table_name == "Sot23FMPE":
+                self.save_sot23_fmpe_to_db(data)
+            elif table_name == "TOPackageN":
+                self.save_to_package_n_to_db(data)
+            elif table_name == "DualSideN":
+                self.save_dual_side_n_to_db(data)
+            # Add more package types as needed
+            else:
+                raise ValueError(f"Unknown table name: {table_name}")
+                
+            print(f"Successfully saved {data['footprint_name']} to {table_name} table.")
+        except Exception as e:
+            QMessageBox.critical(self, "Database Error", f"The script files were saved, but a database error occurred:\n\n{e}")
+
+    def save_discrete_n_to_db(self, data):
+        """Save DiscreteN package data to DiscreteN table"""
         conn = sqlite3.connect(DATABASE_FILE)
         cursor = conn.cursor()
-        footprint_name = data.get('footprint_name', 'N/A')
+        
+        part_number = data.get('part_number', 'N/A')
+        
         cursor.execute('''
-            INSERT INTO footprints (part_number, footprint_name, component_type, dimensions_json)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO DiscreteN (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height,
+                pad_length, pad_width, mask_expansion, paste_expansion, airgap,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            data.get('part_number', 'N/A'),
-            footprint_name,
-            footprint_name.split('_')[0],
-            json.dumps(data)
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'DiscreteN',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            float(data.get('airgap', 0)) if data.get('airgap') else None,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
         ))
         conn.commit()
         conn.close()
 
+    def save_discrete_f_to_db(self, data):
+        """Save DiscreteF package data to DiscreteF table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO DiscreteF (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height,
+                pad_length, pad_width, fillet_radius, mask_expansion, paste_expansion, airgap,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'DiscreteF',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('fillet_radius', 0)) if data.get('fillet_radius') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            float(data.get('airgap', 0)) if data.get('airgap') else None,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+
+    def save_sot23_n_to_db(self, data):
+        """Save Sot23N package data to Sot23N table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO Sot23N (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height, pitch,
+                pad_length, pad_width, mask_expansion, paste_expansion, pin_count,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'Sot23N',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pitch', 0)) if data.get('pitch') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            int(data.get('pin_count', 3)) if data.get('pin_count') else 3,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+
+    def save_sot23_nmpe_to_db(self, data):
+        """Save Sot23NMPE package data to Sot23NMPE table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO Sot23NMPE (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height, pitch,
+                pad_length, pad_width, mask_expansion, paste_expansion, mp_expansion, pin_count,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'Sot23NMPE',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pitch', 0)) if data.get('pitch') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            float(data.get('mp_expansion', 0)) if data.get('mp_expansion') else None,
+            int(data.get('pin_count', 3)) if data.get('pin_count') else 3,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+
+    def save_sot23_f_to_db(self, data):
+        """Save Sot23F package data to Sot23F table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO Sot23F (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height, pitch,
+                pad_length, pad_width, fillet_radius, mask_expansion, paste_expansion, pin_count,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'Sot23F',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pitch', 0)) if data.get('pitch') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('fillet_radius', 0)) if data.get('fillet_radius') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            int(data.get('pin_count', 3)) if data.get('pin_count') else 3,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+
+    def save_sot23_fmpe_to_db(self, data):
+        """Save Sot23FMPE package data to Sot23FMPE table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO Sot23FMPE (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height, pitch,
+                pad_length, pad_width, fillet_radius, mask_expansion, paste_expansion, mp_expansion, pin_count,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'Sot23FMPE',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pitch', 0)) if data.get('pitch') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('fillet_radius', 0)) if data.get('fillet_radius') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            float(data.get('mp_expansion', 0)) if data.get('mp_expansion') else None,
+            int(data.get('pin_count', 3)) if data.get('pin_count') else 3,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+
+    def save_to_package_n_to_db(self, data):
+        """Save TOPackageN package data to TOPackageN table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO TOPackageN (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height, tab_length, tab_width, pitch,
+                pad_length, pad_width, mask_expansion, paste_expansion, pin_count,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'TOPackageN',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('tab_length', 0)) if data.get('tab_length') else None,
+            float(data.get('tab_width', 0)) if data.get('tab_width') else None,
+            float(data.get('pitch', 0)) if data.get('pitch') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            int(data.get('pin_count', 3)) if data.get('pin_count') else 3,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+
+    def save_dual_side_n_to_db(self, data):
+        """Save DualSideN package data to DualSideN table"""
+        conn = sqlite3.connect(DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        part_number = data.get('part_number', 'N/A')
+        
+        cursor.execute('''
+            INSERT INTO DualSideN (
+                part_number, footprint_name, component_type,
+                body_length, body_width, body_height, pitch, row_spacing,
+                pad_length, pad_width, mask_expansion, paste_expansion, pin_count,
+                altium_script_path, allegro_script_path, pads_script_path, xpedition_script_path
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            part_number,
+            data.get('footprint_name', 'N/A'),
+            'DualSideN',
+            float(data.get('body_length', 0)) if data.get('body_length') else None,
+            float(data.get('body_width', 0)) if data.get('body_width') else None,
+            float(data.get('body_height', 0)) if data.get('body_height') else None,
+            float(data.get('pitch', 0)) if data.get('pitch') else None,
+            float(data.get('row_spacing', 0)) if data.get('row_spacing') else None,
+            float(data.get('pad_length', 0)) if data.get('pad_length') else None,
+            float(data.get('pad_width', 0)) if data.get('pad_width') else None,
+            float(data.get('mask_expansion', 0)) if data.get('mask_expansion') else None,
+            float(data.get('paste_expansion', 0)) if data.get('paste_expansion') else None,
+            int(data.get('pin_count', 8)) if data.get('pin_count') else 8,
+            os.path.join(self.script_paths['altium'], f"{part_number}_altium.txt"),
+            os.path.join(self.script_paths['allegro'], f"{part_number}_allegro.scr"),
+            os.path.join(self.script_paths['pads'], f"{part_number}_pads.asc"),
+            os.path.join(self.script_paths['xpedition'], f"{part_number}_xpedition.scr")
+        ))
+        conn.commit()
+        conn.close()
+        
     def get_sidebar_options(self):
         return {
             "Home": "fa5s.home",  # 🏠 Home Dashboard
@@ -687,26 +1214,63 @@ class MainWindow(QMainWindow):
         main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         main_layout.setSpacing(15)
 
-        group = QGroupBox("Default Clearance Settings")
-        path_layout = QGridLayout(group)
-
-        path_layout = QHBoxLayout()
-        self.path_edit = QLineEdit(self.current_script_path)
-        self.path_edit.setReadOnly(True)
-        browse_button = QPushButton("Browse")
-        browse_button.clicked.connect(self.browse_for_path)
-        path_layout.addWidget(QLabel("Altium Script Output Path:"))
-        path_layout.addWidget(self.path_edit)
-        path_layout.addWidget(browse_button)
-        main_layout.addLayout(path_layout)
-
-
+        # Script Output Paths Group
+        paths_group = QGroupBox("Script Output Paths")
+        paths_layout = QGridLayout(paths_group)
+        
+        # Initialize default paths if they don't exist
+        if not hasattr(self, 'script_paths'):
+            self.script_paths = {
+                'altium': self.current_script_path,
+                'allegro': os.path.join(os.path.expanduser("~"), "allegro_scripts"),
+                'pads': os.path.join(os.path.expanduser("~"), "pads_scripts"),
+                'xpedition': os.path.join(os.path.expanduser("~"), "xpedition_scripts")
+            }
+            # Create directories if they don't exist
+            for path in self.script_paths.values():
+                os.makedirs(path, exist_ok=True)
+        
+        # Altium Path
+        paths_layout.addWidget(QLabel("Altium Script Path:"), 0, 0)
+        self.altium_path_edit = QLineEdit(self.script_paths['altium'])
+        self.altium_path_edit.setReadOnly(True)
+        altium_browse_btn = QPushButton("Browse")
+        altium_browse_btn.clicked.connect(lambda: self.browse_for_script_path('altium'))
+        paths_layout.addWidget(self.altium_path_edit, 0, 1)
+        paths_layout.addWidget(altium_browse_btn, 0, 2)
+        
+        # Allegro Path
+        paths_layout.addWidget(QLabel("Allegro Script Path:"), 1, 0)
+        self.allegro_path_edit = QLineEdit(self.script_paths['allegro'])
+        self.allegro_path_edit.setReadOnly(True)
+        allegro_browse_btn = QPushButton("Browse")
+        allegro_browse_btn.clicked.connect(lambda: self.browse_for_script_path('allegro'))
+        paths_layout.addWidget(self.allegro_path_edit, 1, 1)
+        paths_layout.addWidget(allegro_browse_btn, 1, 2)
+        
+        # PADS Path
+        paths_layout.addWidget(QLabel("PADS Script Path:"), 2, 0)
+        self.pads_path_edit = QLineEdit(self.script_paths['pads'])
+        self.pads_path_edit.setReadOnly(True)
+        pads_browse_btn = QPushButton("Browse")
+        pads_browse_btn.clicked.connect(lambda: self.browse_for_script_path('pads'))
+        paths_layout.addWidget(self.pads_path_edit, 2, 1)
+        paths_layout.addWidget(pads_browse_btn, 2, 2)
+        
+        # Xpedition Path
+        paths_layout.addWidget(QLabel("Xpedition Script Path:"), 3, 0)
+        self.xpedition_path_edit = QLineEdit(self.script_paths['xpedition'])
+        self.xpedition_path_edit.setReadOnly(True)
+        xpedition_browse_btn = QPushButton("Browse")
+        xpedition_browse_btn.clicked.connect(lambda: self.browse_for_script_path('xpedition'))
+        paths_layout.addWidget(self.xpedition_path_edit, 3, 1)
+        paths_layout.addWidget(xpedition_browse_btn, 3, 2)
+        
+        main_layout.addWidget(paths_group)
         main_layout.addWidget(self._create_clearance_settings_group())
         main_layout.addWidget(self._create_layer_settings_group())
         main_layout.addWidget(self._create_3d_settings_group())
-
         return tab_widget
-    
 
 
 
@@ -781,14 +1345,35 @@ class MainWindow(QMainWindow):
         for button in self.button_group:
             button.setChecked(False)
 
-    def browse_for_path(self):
-        directory = QFileDialog.getExistingDirectory(self, "Select Output Folder", self.current_script_path)
+    def browse_for_script_path(self, script_type):
+        """Browse for script output path for specific tool type"""
+        current_path = self.script_paths.get(script_type, os.path.expanduser("~"))
+        directory = QFileDialog.getExistingDirectory(
+            self, f"Select {script_type.title()} Script Output Folder", current_path
+        )
         if directory:
-            self.current_script_path = directory
-            self.path_edit.setText(self.current_script_path)
+            self.script_paths[script_type] = directory
+            
+            # Update the corresponding UI field
+            if script_type == 'altium':
+                self.altium_path_edit.setText(directory)
+                self.current_script_path = directory  # Keep backward compatibility
+            elif script_type == 'allegro':
+                self.allegro_path_edit.setText(directory)
+            elif script_type == 'pads':
+                self.pads_path_edit.setText(directory)
+            elif script_type == 'xpedition':
+                self.xpedition_path_edit.setText(directory)
+            
+            # Update all generator pages
             for page in self.generator_pages.values():
-                page.set_output_path(self.current_script_path)
-            QMessageBox.information(self, "Path Set", f"Script output path has been set to:\n{directory}")
+                page.set_script_paths(self.script_paths)
+            
+            QMessageBox.information(
+                self, "Path Set", 
+                f"{script_type.title()} script output path has been set to:\n{directory}"
+            )
+
 
     def browse_for_step_path(self):
         directory = QFileDialog.getExistingDirectory(self, "Select Default STEP Model Folder")
