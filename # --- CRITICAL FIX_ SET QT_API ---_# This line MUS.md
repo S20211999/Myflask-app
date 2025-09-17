@@ -423,6 +423,8 @@ for (comp_type, opt_name), PageClass in page_map.items():
 6. **Flexible Schema**: Easy to add new package types and their specific fields
 
 This structure allows you to have dedicated tables for each package type with columns that exactly match the input parameters for that specific footprint generator.  
+
+```python
 def handle_save_to_database(self, data, table_name):
     """Receives data and table name, saves to the specific table"""
     try:
@@ -735,4 +737,4 @@ def save_dual_side_n_to_db(self, data):
     ))
     conn.commit()
     conn.close()
-    
+```
