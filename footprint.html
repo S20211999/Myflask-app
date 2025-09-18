@@ -4,162 +4,347 @@
 {% block page_title %}Footprint Database{% endblock %}
 
 {% block content %}
-<div class="row mb-4">
-    <div class="col-md-4">
-        <div class="card text-white bg-primary">
-            <div class="card-body text-center">
-                <h3>{{ total_footprints }}</h3>
-                <p class="mb-0">Total Footprints</p>
-            </div>
+<!-- Statistics Cards -->
+<div class="stats-grid">
+    <div class="card text-white bg-primary h-100">
+        <div class="card-body text-center">
+            <i class="fas fa-microchip fa-2x mb-2"></i>
+            <h3>{{ total_footprints }}</h3>
+            <p class="mb-0">Total Footprints</p>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card text-white bg-success">
-            <div class="card-body text-center">
-                <h3>{{ package_stats|length }}</h3>
-                <p class="mb-0">Package Types</p>
-            </div>
+    <div class="card text-white bg-success h-100">
+        <div class="card-body text-center">
+            <i class="fas fa-layer-group fa-2x mb-2"></i>
+            <h3>{{ package_stats|length }}</h3>
+            <p class="mb-0">Package Types</p>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card text-white bg-info">
-            <div class="card-body text-center">
-                <h3>{{ user_stats|length }}</h3>
-                <p class="mb-0">Contributors</p>
-            </div>
+    <div class="card text-white bg-info h-100">
+        <div class="card-body text-center">
+            <i class="fas fa-users fa-2x mb-2"></i>
+            <h3>{{ user_stats|length }}</h3>
+            <p class="mb-0">Contributors</p>
         </div>
     </div>
-</div>
-
-<!-- Table Widgets Section -->
-<div class="row mb-4">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Database Table Widgets</h5>
-                {% if current_user.is_admin %}
-                <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addTableModal">
-                    <i class="fas fa-plus me-1"></i>
-                    Add Table Widget
-                </button>
-                {% endif %}
-            </div>
-            <div class="card-body">
-                <div class="row">
-                    {% for widget in table_widgets %}
-                    <div class="col-md-4 mb-3">
-                        <div class="card border-primary">
-                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
-                                <h6 class="mb-0">{{ widget.widget_name }}</h6>
-                                {% if current_user.is_admin %}
-                                <a href="{{ url_for('delete_table_widget', widget_id=widget.id) }}" 
-                                   class="btn btn-sm btn-outline-light"
-                                   onclick="return confirm('Are you sure you want to delete this widget?')">
-                                    <i class="fas fa-trash"></i>
-                                </a>
-                                {% endif %}
-                            </div>
-                            <div class="card-body">
-                                <p class="card-text">Table: {{ widget.table_name }}</p>
-                                <p class="card-text"><small class="text-muted">Created: {{ widget.created_at.strftime('%Y-%m-%d') }}</small></p>
-                                <button class="btn btn-sm btn-outline-primary" onclick="viewTable('{{ widget.table_name }}')">View Table</button>
-                            </div>
-                        </div>
-                    </div>
-                    {% endfor %}
-                    
-                    {% if not table_widgets %}
-                    <div class="col-12">
-                        <div class="text-center text-muted">
-                            <i class="fas fa-table fa-3x mb-3"></i>
-                            <h5>No table widgets configured</h5>
-                            {% if current_user.is_admin %}
-                            <p>Click "Add Table Widget" to create your first table widget.</p>
-                            {% endif %}
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
+    <div class="card text-white bg-warning h-100">
+        <div class="card-body text-center">
+            <i class="fas fa-table fa-2x mb-2"></i>
+            <h3>{{ table_widgets|length }}</h3>
+            <p class="mb-0">Table Widgets</p>
         </div>
     </div>
 </div>
 
+<!-- Database Table Widgets Section -->
 <div class="row">
-    <div class="col-md-8">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Footprint Database</h5>
-                <div class="input-group" style="width: 300px;">
-                    <input type="text" class="form-control" id="searchInput" placeholder="Search footprints...">
-                    <button class="btn btn-outline-secondary" type="button" onclick="searchFootprints()">
-                        <i class="fas fa-search"></i>
-                    </button>
-                </div>
+    <div class="col-12">
+        <div class="card shadow-sm">
+            <div class="card-header bg-gradient-info text-white d-flex justify-content-between align-items-center flex-wrap">
+                <h5 class="mb-0">
+                    <i class="fas fa-list me-2"></i>
+                    Footprint Database
+                </h5>
+                    <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mt-2 mt-md-0">
+
+                        <!-- Group 1: Search -->
+                        <div class="input-group" style="min-width: 300px; max-width: 300px;">
+                            <input type="text" class="form-control" id="searchInput" placeholder="Search footprints..." onkeyup="searchFootprints()">
+                            <button class="btn btn-light" type="button" onclick="clearSearch()">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+
+                        <!-- Group 2: Export Buttons -->
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-light" onclick="exportTableData('csv')" title="Export as CSV">
+                                <i class="fas fa-file-csv"></i>
+                                <span class="d-none d-md-inline ms-1">CSV</span>
+                            </button>
+                            <button class="btn btn-light" onclick="exportTableData('excel')" title="Export as Excel">
+                                <i class="fas fa-file-excel"></i>
+                                <span class="d-none d-md-inline ms-1">Excel</span>
+                            </button>
+                            <button class="btn btn-light" onclick="refreshTable()" title="Refresh">
+                                <i class="fas fa-sync-alt"></i>
+                            </button>
+                        </div>
+
+                    </div>
+
             </div>
             <div class="card-body">
+                <!-- Filter Options -->
+                <div class="mb-3">
+                    <div class="row">
+                        <div class="col-md-4">
+                            <select class="form-select form-select-sm" id="packageFilter" onchange="filterTable()">
+                                <option value="">All Packages</option>
+                                {% for package in package_stats.keys() %}
+                                <option value="{{ package }}">{{ package }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <select class="form-select form-select-sm" id="userFilter" onchange="filterTable()">
+                                <option value="">All Users</option>
+                                {% for user in user_stats.keys() %}
+                                <option value="{{ user }}">{{ user }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <input type="date" class="form-control form-control-sm" id="dateFilter" onchange="filterTable()" placeholder="Filter by date">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Info -->
+                <div class="mb-3">
+                    <small class="text-muted" id="resultsInfo">
+                        Showing {{ footprints|length }} footprints
+                    </small>
+                </div>
+
+                {% if footprints %}
                 <div class="table-responsive">
-                    <table class="table table-hover" id="footprintTable">
-                        <thead>
+                    <table class="table table-hover table-striped" id="footprintTable">
+                        <thead class="table-dark">
                             <tr>
-                                <th>Name</th>
-                                <th>Package</th>
-                                <th>Created By</th>
-                                <th>Created Date</th>
-                                <th>Actions</th>
+                                <th style="cursor: pointer;" onclick="sortTable(0)">
+                                    Part Number <i class="fas fa-sort text-muted"></i>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortTable(1)">
+                                    Footprint Name <i class="fas fa-sort text-muted"></i>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortTable(2)">
+                                    Package Type <i class="fas fa-sort text-muted"></i>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortTable(3)">
+                                    Created By <i class="fas fa-sort text-muted"></i>
+                                </th>
+                                <th style="cursor: pointer;" onclick="sortTable(4)">
+                                    Created Date <i class="fas fa-sort text-muted"></i>
+                                </th>
+                                <th class="text-center">Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {% for footprint in footprints %}
                             <tr>
-                                <td>{{ footprint.name }}</td>
-                                <td>{{ footprint.package }}</td>
-                                <td>{{ footprint.user_created }}</td>
-                                <td>{{ footprint.created_at.strftime('%Y-%m-%d') }}</td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-primary" onclick="viewFootprint({{ footprint.id }})">
-                                        <i class="fas fa-eye"></i>
-                                    </button>
-                                    {% if current_user.is_admin %}
-                                    <button class="btn btn-sm btn-outline-warning" onclick="editFootprint({{ footprint.id }})">
-                                        <i class="fas fa-edit"></i>
-                                    </button>
-                                    {% endif %}
+                                    <strong>{{ footprint.part_number or 'N/A' }}</strong>
+                                </td>
+                                <td>
+                                    <span class="badge bg-secondary">{{ footprint.footprint_name or 'N/A' }}</span>
+                                </td>
+                                <td>
+                                    <span class="badge bg-primary">{{ footprint.package_type or 'N/A' }}</span>
+                                </td>
+                                <td>
+                                    <i class="fas fa-user text-muted me-1"></i>
+                                    {{ footprint.user_created or 'Unknown' }}
+                                </td>
+                                <td>
+                                    <i class="fas fa-calendar text-muted me-1"></i>
+                                    {{ footprint.created_at.strftime('%Y-%m-%d %H:%M') if footprint.created_at else 'N/A' }}
+                                </td>
+                                <td class="text-center">
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-outline-primary btn-sm" 
+                                                onclick="viewFootprint({{ footprint.id }})" 
+                                                title="View Details"
+                                                data-id="{{ footprint.id }}"
+                                                data-part-number="{{ footprint.part_number or 'N/A' }}"
+                                                data-footprint-name="{{ footprint.footprint_name or 'N/A' }}"
+                                                data-package-type="{{ footprint.package_type or 'N/A' }}"
+                                                data-user-created="{{ footprint.user_created or 'Unknown' }}"
+                                                data-created-at="{{ footprint.created_at.isoformat() if footprint.created_at else '' }}"
+                                                data-specifications="{{ footprint.specifications or '{}' }}">
+                                            <i class="fas fa-eye"></i>
+                                        </button>
+                                        <button class="btn btn-outline-info btn-sm" 
+                                                onclick="showSpecifications({{ footprint.id }})" 
+                                                title="View Specifications"
+                                                data-specs="{{ footprint.specifications or '{}' }}">
+                                            <i class="fas fa-info-circle"></i>
+                                        </button>
+                                        <button class="btn btn-outline-secondary btn-sm" 
+                                                onclick="copyToClipboard('{{ footprint.part_number or 'N/A' }}', '{{ footprint.footprint_name or 'N/A' }}')" 
+                                                title="Copy Details">
+                                            <i class="fas fa-copy"></i>
+                                        </button>
+                                        {% if current_user.is_admin %}
+                                        <button class="btn btn-outline-warning btn-sm" 
+                                                onclick="editFootprint({{ footprint.id }})" 
+                                                title="Edit">
+                                            <i class="fas fa-edit"></i>
+                                        </button>
+                                        <button class="btn btn-outline-danger btn-sm" 
+                                                onclick="deleteFootprint({{ footprint.id }}, '{{ footprint.footprint_name or 'N/A' }}')" 
+                                                title="Delete">
+                                            <i class="fas fa-trash"></i>
+                                        </button>
+                                        {% endif %}
+                                    </div>
                                 </td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-microchip fa-4x text-muted mb-3"></i>
+                    <h5 class="text-muted">No footprints found</h5>
+                    <p class="text-muted">Add footprints using the API or external tools.</p>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>
-    <div class="col-md-4">
-        <div class="card">
-            <div class="card-header">
-                <h5 class="mb-0">Package Statistics</h5>
+</div>
+
+
+<!-- Database Table Widgets Section -->
+<div class="row mb-4">
+    <div class="col-lg-8">
+        <div class="card shadow-sm">
+            <div class="card-header bg-gradient-primary text-white d-flex justify-content-between align-items-center flex-wrap">
+                <h5 class="mb-0">
+                    <i class="fas fa-database me-2"></i>
+                    Database Table Widgets
+                </h5>
+                {% if current_user.is_admin %}
+                <button type="button" class="btn btn-light btn-sm mt-2 mt-md-0" data-bs-toggle="modal" data-bs-target="#addTableModal">
+                    <i class="fas fa-plus me-1"></i>
+                    <span class="d-none d-sm-inline">Add Table Widget</span>
+                    <span class="d-sm-none">Add</span>
+                </button>
+                {% endif %}
             </div>
             <div class="card-body">
-                {% for package, count in package_stats.items() %}
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span>{{ package }}</span>
-                    <span class="badge bg-primary">{{ count }}</span>
+                {% if table_widgets %}
+                <div class="row">
+                    {% for widget in table_widgets %}
+                    <div class="col-lg-4 col-md-6 mb-3">
+                        <div class="card border-primary h-100 shadow-sm">
+                            <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">
+                                    <i class="fas fa-table me-1"></i>
+                                    {{ widget.widget_name }}
+                                </h6>
+                                {% if current_user.is_admin %}
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-light" type="button" data-bs-toggle="dropdown">
+                                        <i class="fas fa-ellipsis-v"></i>
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        <li>
+                                            <a class="dropdown-item" href="{{ url_for('footprint_by_package', package_type=widget.table_name) }}">
+                                                <i class="fas fa-eye me-1"></i> View
+                                            </a>
+                                        </li>
+                                        <li><hr class="dropdown-divider"></li>
+                                        <li>
+                                            <a class="dropdown-item text-danger" 
+                                               href="{{ url_for('delete_table_widget', widget_id=widget.id) }}"
+                                               onclick="return confirm('Are you sure you want to delete this widget?')">
+                                                <i class="fas fa-trash me-1"></i> Delete
+                                            </a>
+                                        </li>
+                                    </ul>
+                                </div>
+                                {% endif %}
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text">
+                                    <small class="text-muted">Table:</small><br>
+                                    <code>{{ widget.table_name }}</code>
+                                </p>
+                                <p class="card-text">
+                                    <small class="text-muted">Created: {{ widget.created_at.strftime('%Y-%m-%d %H:%M') }}</small>
+                                </p>
+                                <div class="d-grid">
+                                    <button class="btn btn-outline-primary btn-sm" onclick="viewTable('{{ widget.table_name }}')">
+                                        <i class="fas fa-external-link-alt me-1"></i>
+                                        View Table
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="fas fa-table fa-4x text-muted mb-3"></i>
+                    <h5 class="text-muted">No table widgets configured</h5>
+                    {% if current_user.is_admin %}
+                    <p class="text-muted">Click "Add Table Widget" to create your first table widget.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <!-- Package Statistics -->
+        <div class="card shadow-sm mb-3">
+            <div class="card-header bg-gradient-success text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-chart-pie me-2"></i>
+                    Package Statistics
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if package_stats %}
+                    {% for package, count in package_stats.items() %}
+                    <div class="d-flex justify-content-between align-items-center mb-2 p-2 rounded" style="background-color: #f8f9fa;">
+                        <span class="fw-medium">
+                            <i class="fas fa-cube text-primary me-1"></i>
+                            {{ package }}
+                        </span>
+                        <span class="badge bg-primary">{{ count }}</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                <p class="text-muted text-center">No package data available</p>
+                {% endif %}
             </div>
         </div>
         
-        <div class="card mt-3">
-            <div class="card-header">
-                <h5 class="mb-0">User Statistics</h5>
+        <!-- User Statistics -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-gradient-warning text-white">
+                <h5 class="mb-0">
+                    <i class="fas fa-user-chart me-2"></i>
+                    Top Contributors
+                </h5>
             </div>
             <div class="card-body">
-                {% for user, count in user_stats.items() %}
-                <div class="d-flex justify-content-between align-items-center mb-2">
-                    <span>{{ user }}</span>
-                    <span class="badge bg-success">{{ count }}</span>
-                </div>
-                {% endfor %}
+                {% if user_stats %}
+                    {% set user_items = user_stats.items() %}
+                    {% for user, count in user_items %}
+                        {% if loop.index <= 10 %}
+                    <div class="d-flex justify-content-between align-items-center mb-2 p-2 rounded" style="background-color: #f8f9fa;">
+                        <span class="fw-medium">
+                            <i class="fas fa-user text-success me-1"></i>
+                            {{ user }}
+                        </span>
+                        <span class="badge bg-success">{{ count }}</span>
+                    </div>
+                        {% endif %}
+                    {% endfor %}
+                    {% if user_stats|length > 10 %}
+                    <div class="text-center mt-2">
+                        <small class="text-muted">... and {{ user_stats|length - 10 }} more</small>
+                    </div>
+                    {% endif %}
+                {% else %}
+                <p class="text-muted text-center">No contributor data available</p>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -170,7 +355,10 @@
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Add Table Widget</h5>
+                <h5 class="modal-title">
+                    <i class="fas fa-plus-circle me-2"></i>
+                    Add Table Widget
+                </h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <form method="POST" action="{{ url_for('add_table_widget') }}">
@@ -178,7 +366,7 @@
                     <div class="mb-3">
                         <label for="table_name" class="form-label">Table Name</label>
                         <input type="text" class="form-control" id="table_name" name="table_name" required>
-                        <div class="form-text">Enter the actual database table name</div>
+                        <div class="form-text">Enter the actual database table name (e.g., DiscreteN, Sot23N)</div>
                     </div>
                     <div class="mb-3">
                         <label for="widget_name" class="form-label">Widget Display Name</label>
@@ -188,44 +376,594 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Add Widget</button>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="fas fa-save me-1"></i>
+                        Add Widget
+                    </button>
                 </div>
             </form>
         </div>
     </div>
 </div>
 
+<!-- Footprint Details Modal -->
+<div class="modal fade" id="footprintDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="fas fa-info-circle me-2"></i>
+                    Footprint Details
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="footprintDetailsContent">
+                <div class="text-center">
+                    <div class="spinner-border" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+.bg-gradient-primary {
+    background: linear-gradient(45deg, #007bff, #0056b3);
+}
+.bg-gradient-info {
+    background: linear-gradient(45deg, #17a2b8, #138496);
+}
+.bg-gradient-success {
+    background: linear-gradient(45deg, #28a745, #1e7e34);
+}
+.bg-gradient-warning {
+    background: linear-gradient(45deg, #ffc107, #e0a800);
+}
+.table th {
+    font-weight: 600;
+    font-size: 0.875rem;
+}
+.card {
+    transition: transform 0.2s ease-in-out;
+}
+.card:hover {
+    transform: translateY(-2px);
+}
+</style>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
 <script>
+let currentSortColumn = -1;
+let currentSortDirection = 1; // 1 for ascending, -1 for descending
+
 function searchFootprints() {
     const input = document.getElementById('searchInput');
     const filter = input.value.toUpperCase();
+    filterTable();
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    filterTable();
+}
+
+function filterTable() {
+    const searchFilter = document.getElementById('searchInput').value.toUpperCase();
+    const packageFilter = document.getElementById('packageFilter').value.toUpperCase();
+    const userFilter = document.getElementById('userFilter').value.toUpperCase();
+    const dateFilter = document.getElementById('dateFilter').value;
+    
     const table = document.getElementById('footprintTable');
     const tr = table.getElementsByTagName('tr');
+    let visibleCount = 0;
 
     for (let i = 1; i < tr.length; i++) {
         const td = tr[i].getElementsByTagName('td');
-        let txtValue = '';
-        for (let j = 0; j < td.length - 1; j++) {
-            txtValue += td[j].textContent || td[j].innerText;
+        let showRow = true;
+        
+        // Search filter
+        if (searchFilter) {
+            let txtValue = '';
+            for (let j = 0; j < td.length - 1; j++) {
+                txtValue += td[j].textContent || td[j].innerText;
+            }
+            if (txtValue.toUpperCase().indexOf(searchFilter) === -1) {
+                showRow = false;
+            }
         }
-        if (txtValue.toUpperCase().indexOf(filter) > -1) {
+        
+        // Package filter
+        if (packageFilter && showRow) {
+            const packageText = (td[2].textContent || td[2].innerText).toUpperCase();
+            if (packageText.indexOf(packageFilter) === -1) {
+                showRow = false;
+            }
+        }
+        
+        // User filter
+        if (userFilter && showRow) {
+            const userText = (td[3].textContent || td[3].innerText).toUpperCase();
+            if (userText.indexOf(userFilter) === -1) {
+                showRow = false;
+            }
+        }
+        
+        // Date filter
+        if (dateFilter && showRow) {
+            const dateText = (td[4].textContent || td[4].innerText);
+            if (dateText.indexOf(dateFilter) === -1) {
+                showRow = false;
+            }
+        }
+        
+        if (showRow) {
             tr[i].style.display = '';
+            visibleCount++;
         } else {
             tr[i].style.display = 'none';
+        }
+    }
+    
+    // Update results info
+    document.getElementById('resultsInfo').textContent = `Showing ${visibleCount} footprints`;
+}
+
+function sortTable(columnIndex) {
+    const table = document.getElementById('footprintTable');
+    const tbody = table.getElementsByTagName('tbody')[0];
+    const rows = Array.from(tbody.getElementsByTagName('tr'));
+    
+    // Toggle sort direction if same column
+    if (currentSortColumn === columnIndex) {
+        currentSortDirection *= -1;
+    } else {
+        currentSortDirection = 1;
+        currentSortColumn = columnIndex;
+    }
+    
+    // Sort rows
+    rows.sort((a, b) => {
+        const aText = a.getElementsByTagName('td')[columnIndex].textContent.trim();
+        const bText = b.getElementsByTagName('td')[columnIndex].textContent.trim();
+        
+        // Handle dates
+        if (columnIndex === 4) {
+            const aDate = new Date(aText);
+            const bDate = new Date(bText);
+            return (aDate - bDate) * currentSortDirection;
+        }
+        
+        // Handle text
+        return aText.localeCompare(bText) * currentSortDirection;
+    });
+    
+    // Rebuild tbody
+    rows.forEach(row => tbody.appendChild(row));
+    
+    // Update sort indicators
+    const headers = table.getElementsByTagName('th');
+    for (let i = 0; i < headers.length - 1; i++) {
+        const icon = headers[i].querySelector('i');
+        if (icon) {
+            if (i === columnIndex) {
+                icon.className = currentSortDirection === 1 ? 'fas fa-sort-up' : 'fas fa-sort-down';
+            } else {
+                icon.className = 'fas fa-sort text-muted';
+            }
         }
     }
 }
 
 function viewTable(tableName) {
-    alert('View table: ' + tableName + ' - Feature coming soon');
+    // Navigate to package-specific view
+    window.location.href = `/footprint/package/${tableName}`;
 }
 
 function viewFootprint(id) {
-    alert('View footprint ' + id + ' - Feature coming soon');
+    // Get footprint data from the button's data attributes
+    const button = event.target.closest('button');
+    const footprintData = {
+        id: button.getAttribute('data-id'),
+        part_number: button.getAttribute('data-part-number'),
+        footprint_name: button.getAttribute('data-footprint-name'),
+        package_type: button.getAttribute('data-package-type'),
+        user_created: button.getAttribute('data-user-created'),
+        created_at: button.getAttribute('data-created-at'),
+        specifications: button.getAttribute('data-specifications')
+    };
+    
+    const modal = new bootstrap.Modal(document.getElementById('footprintDetailsModal'));
+    const content = document.getElementById('footprintDetailsContent');
+    
+    // Show loading state
+    content.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading footprint details...</p>
+        </div>
+    `;
+    
+    modal.show();
+    
+    // Simulate loading delay and show details
+    setTimeout(() => {
+        let specs = {};
+        try {
+            specs = JSON.parse(footprintData.specifications || '{}');
+        } catch (e) {
+            specs = {};
+        }
+        
+        const createdDate = footprintData.created_at ? new Date(footprintData.created_at).toLocaleString() : 'N/A';
+        
+        content.innerHTML = `
+            <div class="row">
+                <div class="col-md-6">
+                    <h6><i class="fas fa-info-circle text-primary me-2"></i>Basic Information</h6>
+                    <table class="table table-sm">
+                        <tr><th>Part Number:</th><td>${footprintData.part_number}</td></tr>
+                        <tr><th>Footprint Name:</th><td>${footprintData.footprint_name}</td></tr>
+                        <tr><th>Package Type:</th><td><span class="badge bg-primary">${footprintData.package_type}</span></td></tr>
+                        <tr><th>Created By:</th><td>${footprintData.user_created}</td></tr>
+                        <tr><th>Created Date:</th><td>${createdDate}</td></tr>
+                    </table>
+                </div>
+                <div class="col-md-6">
+                    <h6><i class="fas fa-cog text-info me-2"></i>Specifications</h6>
+                    <div class="specifications-container" style="max-height: 200px; overflow-y: auto;">
+                        ${Object.keys(specs).length > 0 ? 
+                            Object.entries(specs).map(([key, value]) => 
+                                `<div class="mb-1"><strong>${key.replace(/_/g, ' ').toUpperCase()}:</strong> ${value}</div>`
+                            ).join('') 
+                            : '<p class="text-muted">No specifications available</p>'
+                        }
+                    </div>
+                </div>
+            </div>
+            <hr>
+            <div class="text-center">
+                <button class="btn btn-primary me-2" onclick="copyFootprintDetails(${footprintData.id})">
+                    <i class="fas fa-copy me-1"></i>Copy Details
+                </button>
+                <button class="btn btn-success me-2" onclick="exportFootprint(${footprintData.id}, 'json')">
+                    <i class="fas fa-download me-1"></i>Export JSON
+                </button>
+            </div>
+        `;
+    }, 500);
+}
+
+function showSpecifications(id) {
+    const button = event.target.closest('button');
+    const specs = JSON.parse(button.getAttribute('data-specs') || '{}');
+    
+    const modal = new bootstrap.Modal(document.getElementById('footprintDetailsModal'));
+    const content = document.getElementById('footprintDetailsContent');
+    
+    content.innerHTML = `
+        <div class="text-center mb-3">
+            <h5><i class="fas fa-microchip text-primary me-2"></i>Technical Specifications</h5>
+        </div>
+        <div class="row">
+            <div class="col-12">
+                ${Object.keys(specs).length > 0 ? 
+                    `<div class="table-responsive">
+                        <table class="table table-striped">
+                            ${Object.entries(specs).map(([key, value]) => 
+                                `<tr>
+                                    <th style="width: 40%;">${key.replace(/_/g, ' ').toUpperCase()}</th>
+                                    <td>${value} ${getUnit(key)}</td>
+                                </tr>`
+                            ).join('')}
+                        </table>
+                    </div>` 
+                    : '<div class="alert alert-info"><i class="fas fa-info-circle me-2"></i>No specifications available for this footprint.</div>'
+                }
+            </div>
+        </div>
+        <hr>
+        <div class="text-center">
+            <button class="btn btn-outline-primary me-2" onclick="copySpecifications(${id})">
+                <i class="fas fa-copy me-1"></i>Copy Specifications
+            </button>
+            <button class="btn btn-outline-success" onclick="printSpecifications(${id})">
+                <i class="fas fa-print me-1"></i>Print Specifications
+            </button>
+        </div>
+    `;
+    
+    modal.show();
+}
+
+function getUnit(parameter) {
+    const units = {
+        'body_length': 'mm',
+        'body_width': 'mm',
+        'body_height': 'mm',
+        'pad_length': 'mm',
+        'pad_width': 'mm',
+        'pitch': 'mm',
+        'mask_expansion': 'mm',
+        'paste_expansion': 'mm',
+        'fillet_radius': 'mm',
+        'airgap': 'mm',
+        'mp_expansion': 'mm'
+    };
+    return units[parameter] || '';
+}
+
+function copyToClipboard(partNumber, footprintName) {
+    const text = `Part Number: ${partNumber}\nFootprint Name: ${footprintName}`;
+    
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('Footprint details copied to clipboard!', 'success');
+        }).catch(() => {
+            fallbackCopyTextToClipboard(text);
+        });
+    } else {
+        fallbackCopyTextToClipboard(text);
+    }
+}
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    textArea.style.top = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+        document.execCommand('copy');
+        showToast('Footprint details copied to clipboard!', 'success');
+    } catch (err) {
+        showToast('Failed to copy to clipboard', 'error');
+    }
+    
+    document.body.removeChild(textArea);
 }
 
 function editFootprint(id) {
-    alert('Edit footprint ' + id + ' - Feature coming soon');
+    // For now, show a confirmation and redirect to edit page
+    if (confirm('Edit this footprint? This will open the edit interface.')) {
+        // This would typically redirect to an edit page
+        showToast('Edit functionality is under development. This will open a dedicated edit interface.', 'info');
+        // window.location.href = `/footprint/edit/${id}`;
+    }
 }
+
+function deleteFootprint(id, name) {
+    if (confirm(`Are you sure you want to delete the footprint "${name}"?\n\nThis action cannot be undone and will remove the footprint from both the main database and package-specific tables.`)) {
+        // Show loading state
+        const button = event.target.closest('button');
+        const originalContent = button.innerHTML;
+        button.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        button.disabled = true;
+        
+        // Simulate API call (replace with actual endpoint)
+        fetch(`/footprint/delete/${id}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken() // If you're using CSRF protection
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                showToast('Footprint deleted successfully!', 'success');
+                // Remove the row from the table
+                button.closest('tr').remove();
+                updateResultsInfo();
+            } else {
+                showToast(data.message || 'Failed to delete footprint', 'error');
+                button.innerHTML = originalContent;
+                button.disabled = false;
+            }
+        })
+        .catch(error => {
+            console.error('Delete error:', error);
+            showToast('Network error occurred while deleting', 'error');
+            button.innerHTML = originalContent;
+            button.disabled = false;
+        });
+    }
+}
+
+function exportTableData(format) {
+    const table = document.getElementById('footprintTable');
+    const rows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.style.display !== 'none');
+    
+    if (rows.length === 0) {
+        showToast('No data to export', 'warning');
+        return;
+    }
+    
+    showToast(`Preparing ${format.toUpperCase()} export...`, 'info');
+    
+    switch(format) {
+        case 'csv':
+            exportToCSV(rows);
+            break;
+        case 'excel':
+            exportToExcel(rows);
+            break;
+        default:
+            showToast('Unsupported export format', 'error');
+    }
+}
+
+function exportToCSV(rows) {
+    const headers = ['Part Number', 'Footprint Name', 'Package Type', 'Created By', 'Created Date'];
+    let csvContent = headers.join(',') + '\n';
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        const rowData = [
+            `"${cells[0].textContent.trim()}"`,
+            `"${cells[1].textContent.trim()}"`,
+            `"${cells[2].textContent.trim()}"`,
+            `"${cells[3].textContent.trim()}"`,
+            `"${cells[4].textContent.trim()}"`
+        ];
+        csvContent += rowData.join(',') + '\n';
+    });
+    
+    downloadFile(csvContent, 'footprints_export.csv', 'text/csv');
+}
+
+function exportToExcel(rows) {
+    if (typeof XLSX === 'undefined') {
+        showToast('Excel export library not loaded. Using fallback format.', 'warning');
+        exportToExcelFallback(rows);
+        return;
+    }
+    
+    const data = [
+        ['Part Number', 'Footprint Name', 'Package Type', 'Created By', 'Created Date']
+    ];
+    
+    rows.forEach(row => {
+        const cells = row.querySelectorAll('td');
+        data.push(Array.from(cells).map(cell => cell.textContent.trim()));
+    });
+    
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    
+    // Auto-size columns
+    ws['!cols'] = data[0].map((_, i) => ({
+        wch: Math.max(...data.map(row => String(row[i] || '').length)) + 2
+    }));
+    
+    XLSX.utils.book_append_sheet(wb, ws, 'Footprints');
+    
+    const fileName = `footprints_export_${new Date().toISOString().split('T')[0]}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+    
+    showToast(`${fileName} exported successfully!`, 'success');
+}
+
+function downloadFile(content, filename, mimeType) {
+    const blob = new Blob([content], { type: mimeType });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    showToast(`${filename} downloaded successfully!`, 'success');
+}
+
+function updateResultsInfo() {
+    const table = document.getElementById('footprintTable');
+    if (table) {
+        const visibleRows = Array.from(table.querySelectorAll('tbody tr')).filter(row => row.style.display !== 'none');
+        document.getElementById('resultsInfo').textContent = `Showing ${visibleRows.length} footprints`;
+    }
+}
+
+function showToast(message, type) {
+    // Create a toast notification
+    const toastContainer = getOrCreateToastContainer();
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'error' ? 'danger' : type} alert-dismissible fade show position-relative`;
+    toast.style.cssText = 'margin-bottom: 0.5rem; animation: slideInRight 0.3s ease;';
+    
+    toast.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    toastContainer.appendChild(toast);
+    
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.classList.remove('show');
+            setTimeout(() => {
+                if (toast.parentNode) {
+                    toast.parentNode.removeChild(toast);
+                }
+            }, 150);
+        }
+    }, 4000);
+}
+
+function getOrCreateToastContainer() {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1060;
+            max-width: 350px;
+        `;
+        document.body.appendChild(container);
+    }
+    return container;
+}
+
+function getCsrfToken() {
+    // Get CSRF token from meta tag or form
+    const token = document.querySelector('meta[name="csrf-token"]');
+    return token ? token.getAttribute('content') : '';
+}
+// Add CSS for toast animations
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideInRight {
+        from {
+            transform: translateX(100%);
+            opacity: 0;
+        }
+        to {
+            transform: translateX(0);
+            opacity: 1;
+        }
+    }
+    
+    .specifications-container::-webkit-scrollbar {
+        width: 6px;
+    }
+    
+    .specifications-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+    }
+    
+    .specifications-container::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 3px;
+    }
+    
+    .specifications-container::-webkit-scrollbar-thumb:hover {
+        background: #555;
+    }
+`;
+document.head.appendChild(style);
+
+function refreshTable() {
+    location.reload();
+}
+
+// Initialize filters on page load
+document.addEventListener('DOMContentLoaded', function() {
+    filterTable();
+});
 </script>
 {% endblock %}
