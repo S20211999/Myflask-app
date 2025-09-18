@@ -7,55 +7,98 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
+        :root {
+            --sidebar-width: 250px;
+            --sidebar-width-collapsed: 70px;
+        }
+        
+        * {
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow-x: hidden;
+        }
+        
         .sidebar {
             position: fixed;
             top: 0;
             left: 0;
             height: 100vh;
-            width: 250px;
+            width: var(--sidebar-width);
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             overflow-y: auto;
             z-index: 1000;
-            transition: transform 0.3s ease;
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar.collapsed {
+            width: var(--sidebar-width-collapsed);
         }
         
         .main-content {
             background: #f8f9fa;
             min-height: 100vh;
-            margin-left: 250px;
-            overflow-y: auto;
-            transition: margin-left 0.3s ease;
+            margin-left: var(--sidebar-width);
+            width: calc(100% - var(--sidebar-width));
+            overflow-x: hidden;
+            transition: all 0.3s ease;
         }
         
-        /* Mobile responsive */
-        @media (max-width: 768px) {
+        .main-content.expanded {
+            margin-left: var(--sidebar-width-collapsed);
+            width: calc(100% - var(--sidebar-width-collapsed));
+        }
+        
+        /* Mobile responsive - screens smaller than 768px */
+        @media (max-width: 767px) {
             .sidebar {
                 transform: translateX(-100%);
+                width: var(--sidebar-width);
             }
+            
             .sidebar.show {
                 transform: translateX(0);
             }
-            .main-content {
+            
+            .main-content,
+            .main-content.expanded {
                 margin-left: 0;
+                width: 100%;
             }
+            
             .mobile-toggle {
                 display: block !important;
             }
+            
+            .sidebar-collapse-btn {
+                display: none !important;
+            }
         }
         
-        @media (min-width: 769px) {
+        /* Tablet responsive - screens 768px to 991px */
+        @media (min-width: 768px) and (max-width: 991px) {
+            :root {
+                --sidebar-width: 200px;
+                --sidebar-width-collapsed: 60px;
+            }
+            
             .mobile-toggle {
                 display: none !important;
             }
         }
         
-        /* Tablet responsive */
-        @media (max-width: 992px) and (min-width: 769px) {
-            .sidebar {
-                width: 200px;
+        /* Desktop - screens larger than 991px */
+        @media (min-width: 992px) {
+            .mobile-toggle {
+                display: none !important;
             }
-            .main-content {
-                margin-left: 200px;
+        }
+        
+        /* Hide elements on mobile for better UX */
+        @media (max-width: 575px) {
+            .d-mobile-none {
+                display: none !important;
             }
         }
         
@@ -66,41 +109,126 @@
             border-radius: 8px;
             transition: all 0.3s;
             font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
         }
         
-        .sidebar .nav-link:hover, .sidebar .nav-link.active {
+        .sidebar.collapsed .nav-link {
+            padding: 12px 10px;
+            text-align: center;
+        }
+        
+        .sidebar.collapsed .nav-link span {
+            display: none;
+        }
+        
+        .sidebar .nav-link:hover, 
+        .sidebar .nav-link.active {
             color: white;
             background: rgba(255,255,255,0.1);
             transform: translateX(5px);
+        }
+        
+        .sidebar.collapsed .nav-link:hover,
+        .sidebar.collapsed .nav-link.active {
+            transform: none;
+        }
+        
+        .sidebar-brand {
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar.collapsed .sidebar-brand h4,
+        .sidebar.collapsed .sidebar-brand small {
+            display: none;
+        }
+        
+        .sidebar.collapsed .sidebar-user {
+            display: none;
+        }
+        
+        .sidebar-collapse-btn {
+            position: absolute;
+            top: 10px;
+            right: -15px;
+            background: white;
+            border: 2px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1001;
+            transition: all 0.3s ease;
+        }
+        
+        .sidebar-collapse-btn:hover {
+            background: #667eea;
+            color: white;
         }
         
         .card {
             border: none;
             border-radius: 15px;
             box-shadow: 0 5px 15px rgba(0,0,0,0.08);
+            margin-bottom: 1rem;
         }
         
         .navbar {
             background: white !important;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 1rem;
         }
         
-        /* Responsive table */
+        /* Responsive table improvements */
         .table-responsive {
             border-radius: 10px;
+            max-width: 100%;
+            overflow-x: auto;
         }
         
-        /* Card adjustments for mobile */
-        @media (max-width: 576px) {
+        /* Responsive cards */
+        @media (max-width: 575px) {
             .card-body {
-                padding: 1rem;
+                padding: 0.75rem;
             }
+            
             .btn {
                 font-size: 0.875rem;
+                padding: 0.375rem 0.75rem;
+            }
+            
+            .btn-group .btn {
+                padding: 0.25rem 0.5rem;
+            }
+            
+            .input-group {
+                flex-wrap: wrap;
+            }
+            
+            .navbar {
+                padding: 0.5rem 1rem;
+            }
+            
+            .navbar h1 {
+                font-size: 1.25rem;
             }
         }
         
-        /* Overlay for mobile sidebar */
+        /* Container fluid improvements */
+        .container-fluid {
+            padding: 0;
+        }
+        
+        .main-content .container-fluid {
+            padding-left: 15px;
+            padding-right: 15px;
+            max-width: 100%;
+        }
+        
+        /* Sidebar overlay for mobile */
         .sidebar-overlay {
             display: none;
             position: fixed;
@@ -112,9 +240,61 @@
             z-index: 999;
         }
         
-        @media (max-width: 768px) {
+        @media (max-width: 767px) {
             .sidebar-overlay.show {
                 display: block;
+            }
+        }
+        
+        /* Statistics cards responsive grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        @media (max-width: 575px) {
+            .stats-grid {
+                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+                gap: 0.75rem;
+                margin-bottom: 1.5rem;
+            }
+        }
+        
+        /* Button group responsive */
+        @media (max-width: 575px) {
+            .btn-group {
+                flex-wrap: wrap;
+            }
+            
+            .btn-group .btn {
+                margin-bottom: 0.25rem;
+            }
+        }
+        
+        /* Modal responsive */
+        @media (max-width: 575px) {
+            .modal-dialog {
+                margin: 1rem 0.5rem;
+            }
+        }
+        
+        /* Ensure content doesn't overflow */
+        .row {
+            margin-left: 0;
+            margin-right: 0;
+        }
+        
+        .col, [class*="col-"] {
+            padding-left: 0.75rem;
+            padding-right: 0.75rem;
+        }
+        
+        @media (max-width: 575px) {
+            .col, [class*="col-"] {
+                padding-left: 0.5rem;
+                padding-right: 0.5rem;
             }
         }
     </style>
@@ -123,140 +303,144 @@
     <!-- Sidebar overlay for mobile -->
     <div class="sidebar-overlay" id="sidebarOverlay"></div>
     
-    <div class="container-fluid p-0">
-        <div class="row g-0">
-            <!-- Sidebar -->
-            <nav class="sidebar" id="sidebar">
-                <div class="p-3">
-                    <div class="text-center mb-4">
-                        <h4 class="text-white">License Manager</h4>
-                        <small class="text-white-50">v1.0</small>
-                    </div>
-                    
-                    <ul class="nav flex-column">
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
-                                <i class="fas fa-tachometer-alt me-2"></i>
-                                Dashboard
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'cadence' %}active{% endif %}" href="{{ url_for('cadence') }}">
-                                <i class="fas fa-microchip me-2"></i>
-                                Cadence
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'mentor' %}active{% endif %}" href="{{ url_for('mentor') }}">
-                                <i class="fas fa-cogs me-2"></i>
-                                Mentor
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'altium' %}active{% endif %}" href="{{ url_for('altium') }}">
-                                <i class="fas fa-circuit-board me-2"></i>
-                                Altium
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'myapps' %}active{% endif %}" href="{{ url_for('myapps') }}">
-                                <i class="fas fa-mobile-alt me-2"></i>
-                                MyApps
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'footprint_database' %}active{% endif %}" href="{{ url_for('footprint_database') }}">
-                                <i class="fas fa-database me-2"></i>
-                                Footprint DB
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'daily_usage_report' %}active{% endif %}" href="{{ url_for('daily_usage_report') }}">
-                                <i class="fas fa-chart-line me-2"></i>
-                                Usage Reports
-                            </a>
-                        </li>
-                        {% if current_user.is_admin %}
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
-                                <i class="fas fa-cog me-2"></i>
-                                Settings
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link {% if request.endpoint == 'admin' %}active{% endif %}" href="{{ url_for('admin') }}">
-                                <i class="fas fa-user-shield me-2"></i>
-                                Admin
-                            </a>
-                        </li>
-                        {% endif %}
-                    </ul>
-                    
-                    <div class="position-absolute bottom-0 start-0 end-0 p-3">
-                        <div class="text-center">
-                            <div class="text-white-50 small">Logged in as:</div>
-                            <div class="text-white small">{{ current_user.username }}</div>
-                            <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm mt-2">
-                                <i class="fas fa-sign-out-alt me-1"></i>
-                                Logout
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            </nav>
-
-            <!-- Main content -->
-            <main class="main-content">
-                <nav class="navbar navbar-expand-lg navbar-light bg-light mb-4">
-                    <div class="container-fluid">
-                        <!-- Mobile menu toggle -->
-                        <button class="btn btn-outline-secondary mobile-toggle me-3" type="button" id="sidebarToggle">
-                            <i class="fas fa-bars"></i>
-                        </button>
-                        
-                        <h1 class="h2 mb-0">{% block page_title %}{% endblock %}</h1>
-                        
-                        <div class="navbar-nav ms-auto">
-                            <span class="navbar-text">
-                                <i class="fas fa-user me-1"></i>
-                                <span class="d-none d-sm-inline">{{ current_user.username }}</span>
-                                {% if current_user.is_admin %}
-                                    <span class="badge bg-primary ms-1">Admin</span>
-                                {% endif %}
-                            </span>
-                        </div>
-                    </div>
-                </nav>
-
-                <div class="container-fluid px-3">
-                    <!-- Flash messages -->
-                    {% with messages = get_flashed_messages(with_categories=true) %}
-                        {% if messages %}
-                            {% for category, message in messages %}
-                                <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
-                                    {{ message }}
-                                    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-                                </div>
-                            {% endfor %}
-                        {% endif %}
-                    {% endwith %}
-
-                    {% block content %}{% endblock %}
-                </div>
-            </main>
+    <!-- Sidebar -->
+    <nav class="sidebar" id="sidebar">
+        <!-- Collapse button for desktop -->
+        <div class="sidebar-collapse-btn d-none d-lg-flex" id="sidebarCollapseBtn">
+            <i class="fas fa-chevron-left" id="collapseIcon"></i>
         </div>
-    </div>
+        
+        <div class="p-3">
+            <div class="text-center mb-4 sidebar-brand">
+                <h4 class="text-white">License Manager</h4>
+                <small class="text-white-50">v1.0</small>
+            </div>
+            
+            <ul class="nav flex-column">
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}" href="{{ url_for('dashboard') }}">
+                        <i class="fas fa-tachometer-alt me-2"></i>
+                        <span>Dashboard</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'cadence' %}active{% endif %}" href="{{ url_for('cadence') }}">
+                        <i class="fas fa-microchip me-2"></i>
+                        <span>Cadence</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'mentor' %}active{% endif %}" href="{{ url_for('mentor') }}">
+                        <i class="fas fa-cogs me-2"></i>
+                        <span>Mentor</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'altium' %}active{% endif %}" href="{{ url_for('altium') }}">
+                        <i class="fas fa-circuit-board me-2"></i>
+                        <span>Altium</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'myapps' %}active{% endif %}" href="{{ url_for('myapps') }}">
+                        <i class="fas fa-mobile-alt me-2"></i>
+                        <span>MyApps</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'footprint_database' %}active{% endif %}" href="{{ url_for('footprint_database') }}">
+                        <i class="fas fa-database me-2"></i>
+                        <span>Footprint DB</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'daily_usage_report' %}active{% endif %}" href="{{ url_for('daily_usage_report') }}">
+                        <i class="fas fa-chart-line me-2"></i>
+                        <span>Usage Reports</span>
+                    </a>
+                </li>
+                {% if current_user.is_admin %}
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="{{ url_for('settings') }}">
+                        <i class="fas fa-cog me-2"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {% if request.endpoint == 'admin' %}active{% endif %}" href="{{ url_for('admin') }}">
+                        <i class="fas fa-user-shield me-2"></i>
+                        <span>Admin</span>
+                    </a>
+                </li>
+                {% endif %}
+            </ul>
+            
+            <div class="position-absolute bottom-0 start-0 end-0 p-3 sidebar-user">
+                <div class="text-center">
+                    <div class="text-white-50 small">Logged in as:</div>
+                    <div class="text-white small">{{ current_user.username }}</div>
+                    <a href="{{ url_for('logout') }}" class="btn btn-outline-light btn-sm mt-2">
+                        <i class="fas fa-sign-out-alt me-1"></i>
+                        <span>Logout</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main content -->
+    <main class="main-content" id="mainContent">
+        <nav class="navbar navbar-expand-lg navbar-light bg-light mb-3">
+            <div class="container-fluid">
+                <!-- Mobile menu toggle -->
+                <button class="btn btn-outline-secondary mobile-toggle me-3" type="button" id="sidebarToggle">
+                    <i class="fas fa-bars"></i>
+                </button>
+                
+                <h1 class="h2 mb-0 flex-grow-1">{% block page_title %}{% endblock %}</h1>
+                
+                <div class="navbar-nav">
+                    <span class="navbar-text">
+                        <i class="fas fa-user me-1"></i>
+                        <span class="d-none d-sm-inline">{{ current_user.username }}</span>
+                        {% if current_user.is_admin %}
+                            <span class="badge bg-primary ms-1">Admin</span>
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </nav>
+
+        <div class="container-fluid">
+            <!-- Flash messages -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ 'danger' if category == 'error' else category }} alert-dismissible fade show" role="alert">
+                            {{ message }}
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </div>
+    </main>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     
     <script>
-        // Mobile sidebar toggle
         document.addEventListener('DOMContentLoaded', function() {
             const sidebarToggle = document.getElementById('sidebarToggle');
+            const sidebarCollapseBtn = document.getElementById('sidebarCollapseBtn');
             const sidebar = document.getElementById('sidebar');
+            const mainContent = document.getElementById('mainContent');
             const overlay = document.getElementById('sidebarOverlay');
+            const collapseIcon = document.getElementById('collapseIcon');
             
+            // Mobile sidebar toggle
             if (sidebarToggle) {
                 sidebarToggle.addEventListener('click', function() {
                     sidebar.classList.toggle('show');
@@ -264,21 +448,48 @@
                 });
             }
             
+            // Desktop sidebar collapse
+            if (sidebarCollapseBtn) {
+                sidebarCollapseBtn.addEventListener('click', function() {
+                    sidebar.classList.toggle('collapsed');
+                    mainContent.classList.toggle('expanded');
+                    
+                    // Rotate the collapse icon
+                    if (sidebar.classList.contains('collapsed')) {
+                        collapseIcon.classList.remove('fa-chevron-left');
+                        collapseIcon.classList.add('fa-chevron-right');
+                    } else {
+                        collapseIcon.classList.remove('fa-chevron-right');
+                        collapseIcon.classList.add('fa-chevron-left');
+                    }
+                });
+            }
+            
             // Close sidebar when clicking overlay
-            overlay.addEventListener('click', function() {
-                sidebar.classList.remove('show');
-                overlay.classList.remove('show');
-            });
+            if (overlay) {
+                overlay.addEventListener('click', function() {
+                    sidebar.classList.remove('show');
+                    overlay.classList.remove('show');
+                });
+            }
             
             // Close sidebar when clicking nav links on mobile
             const navLinks = sidebar.querySelectorAll('.nav-link');
             navLinks.forEach(link => {
                 link.addEventListener('click', function() {
-                    if (window.innerWidth <= 768) {
+                    if (window.innerWidth <= 767) {
                         sidebar.classList.remove('show');
                         overlay.classList.remove('show');
                     }
                 });
+            });
+            
+            // Handle window resize
+            window.addEventListener('resize', function() {
+                if (window.innerWidth > 767) {
+                    sidebar.classList.remove('show');
+                    overlay.classList.remove('show');
+                }
             });
         });
     </script>
