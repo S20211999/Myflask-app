@@ -1,4 +1,3 @@
-
 # --- CRITICAL FIX: SET QT_API ---
 import os
 os.environ['QT_API'] = 'pyside6'
@@ -20,35 +19,38 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPixmap, QIcon, QMouseEvent, QClipboard, QFontDatabase
 from PySide6.QtSvgWidgets import QSvgWidget
 
+
+SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".my_app_settings.json")
 # --- Constants ---
-FLASK_BASE_URL = "http://localhost:5000"
+FLASK_BASE_URL = "http://localhost:5000"  # Configure your Flask server URL
 
 # --- License Verification Dialog ---
 class LicenseVerificationDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("License Verification")
-        self.setFixedSize(350, 250)
+        self.setFixedSize(450, 350)
         self.setModal(True)
         
         layout = QVBoxLayout(self)
         
+        # Username
         layout.addWidget(QLabel("Username:"))
         self.username_edit = QLineEdit()
         layout.addWidget(self.username_edit)
         
+        # Email
         layout.addWidget(QLabel("Email:"))
         self.email_edit = QLineEdit()
         layout.addWidget(self.email_edit)
         
-        layout.addWidget(QLabel("License Number:"))
-        self.license_edit = QLineEdit()
-        layout.addWidget(self.license_edit)
-        
+        # License Number
+        # Server URL
         layout.addWidget(QLabel("Server URL:"))
         self.server_edit = QLineEdit(FLASK_BASE_URL)
         layout.addWidget(self.server_edit)
         
+        # Buttons
         button_layout = QHBoxLayout()
         self.verify_button = QPushButton("Verify License")
         self.cancel_button = QPushButton("Cancel")
@@ -65,7 +67,7 @@ class LicenseVerificationDialog(QDialog):
     def attempt_verification(self):
         username = self.username_edit.text()
         email = self.email_edit.text()
-        license_number = self.license_edit.text()
+        license_number = "BISA123636"
         server_url = self.server_edit.text()
         
         if not username or not email or not license_number:
@@ -74,27 +76,16 @@ class LicenseVerificationDialog(QDialog):
         
         try:
             # Attempt license verification
-            verification_payload = {
-                "username": username, 
-                "email": email,
-                "license_number": license_number
-            }
-            
-            print(f"[DEBUG] Sending verification request: {verification_payload}")
-            
-            response = requests.post(
-                f"{server_url}/api/verify_license", 
-                json=verification_payload,
-                headers={'Content-Type': 'application/json'},
-                timeout=10
-            )
-            
-            print(f"[DEBUG] Verification response status: {response.status_code}")
+            response = requests.post(f"{server_url}/api/verify_license", 
+                                   json={
+                                       "username": username, 
+                                       "email": email,
+                                       "license_number": license_number
+                                   },
+                                   timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
-                print(f"[DEBUG] Verification response data: {data}")
-                
                 if data.get('status') == 'approved':
                     self.verification_data = {
                         'username': username,
@@ -109,15 +100,13 @@ class LicenseVerificationDialog(QDialog):
                 else:
                     QMessageBox.warning(self, "Verification Failed", data.get('message', 'License verification failed'))
             else:
-                try:
-                    error_data = response.json()
-                    QMessageBox.warning(self, "Verification Failed", error_data.get('message', f'Server error: {response.status_code}'))
-                except:
-                    QMessageBox.warning(self, "Verification Failed", f'Server error: {response.status_code}')
+                data = response.json() if response.headers.get('content-type') == 'application/json' else {}
+                QMessageBox.warning(self, "Verification Failed", data.get('message', 'License verification failed'))
                 
         except requests.exceptions.RequestException as e:
             QMessageBox.critical(self, "Connection Error", f"Could not connect to server:\n{str(e)}")
 
+# --- Custom Widgets ---
 class ToggleSwitch(QCheckBox):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -137,7 +126,7 @@ class ClickableLabel(QLabel):
         self._mouse_press_pos = event.pos()
 
     def mouseReleaseEvent(self, event: QMouseEvent):
-        if hasattr(self, '_mouse_press_pos') and self._mouse_press_pos == event.pos() and event.button() == Qt.LeftButton:
+        if self._mouse_press_pos == event.pos() and event.button() == Qt.LeftButton:
             self.singleClicked.emit()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent):
@@ -153,6 +142,7 @@ class BaseGeneratorPage(QWidget):
         self.table_name = table_name
         self.parent_window = parent
 
+        # Initialize paths for all 4 script types
         self.script_paths = {
             'altium': os.path.join(os.path.expanduser("~"), "altium_scripts"),
             'allegro': os.path.join(os.path.expanduser("~"), "allegro_scripts"),
@@ -199,6 +189,7 @@ class BaseGeneratorPage(QWidget):
             QMessageBox.warning(self, "Input Error", "Part Number and Footprint Name are required.")
             return
         
+        # Check license verification
         main_window = self.get_main_window()
         if not main_window or not main_window.verification_data:
             QMessageBox.warning(self, "License Error", "Please verify your license first from Settings > Account")
@@ -226,9 +217,9 @@ class BaseGeneratorPage(QWidget):
                 if errors:
                     success_msg += f"\n\nErrors encountered:\n" + "\n".join(errors)
                 if success:
-                    success_msg += "\n\n✅ Data successfully saved to server."
+                    success_msg += "\n\nData successfully saved to server."
                 else:
-                    success_msg += "\n\n⚠️ Warning: Could not save data to server."
+                    success_msg += "\n\nWarning: Could not save data to server."
                 QMessageBox.information(self, "Scripts Generated", success_msg)
                 
                 self.generationFinalized.emit({"data": data, "table_name": self.table_name})
@@ -243,54 +234,36 @@ class BaseGeneratorPage(QWidget):
         try:
             main_window = self.get_main_window()
             if not main_window or not main_window.verification_data:
-                print("[ERROR] No verification data available")
                 return False
                 
-            # Prepare data for submission - FIXED JSON structure
+            # Prepare data for submission
             submission_data = {
                 "package_type": self.table_name,
                 "part_number": data.get('part_number', ''),
                 "footprint_name": data.get('footprint_name', ''),
-                "specifications": data,  # This should be a dict, not JSON string
+                "specifications": data,
                 "user_created": main_window.verification_data.get('username', 'Unknown'),
-                "license_verification": {
-                    "username": main_window.verification_data.get('username'),
-                    "email": main_window.verification_data.get('email'),
-                    "license_number": main_window.verification_data.get('license_number')
-                }
+                "license_verification": main_window.verification_data
             }
-            
-            headers = {
-                'Content-Type': 'application/json'
-            }
-            
-            print(f"[DEBUG] Submitting footprint data:")
-            print(f"[DEBUG] URL: {FLASK_BASE_URL}/api/footprint/add")
-            print(f"[DEBUG] Data: {json.dumps(submission_data, indent=2)}")
             
             response = requests.post(
                 f"{FLASK_BASE_URL}/api/footprint/add",
-                json=submission_data,  # Use json parameter, not data
-                headers=headers,
+                json=submission_data,
                 timeout=10
             )
             
-            print(f"[DEBUG] Response status: {response.status_code}")
-            print(f"[DEBUG] Response text: {response.text}")
-            
             if response.status_code == 200:
                 result = response.json()
-                print(f"[SUCCESS] Server response: {result}")
                 return result.get('status') == 'success'
             else:
-                print(f"[ERROR] Server error {response.status_code}: {response.text}")
+                print(f"Server error: {response.status_code}")
                 return False
                 
         except requests.exceptions.RequestException as e:
-            print(f"[ERROR] Network error: {e}")
+            print(f"Network error: {e}")
             return False
         except Exception as e:
-            print(f"[ERROR] Submission error: {e}")
+            print(f"Submission error: {e}")
             return False
 
     def get_main_window(self):
@@ -326,16 +299,9 @@ class BaseGeneratorPage(QWidget):
         self.script_paths['altium'] = path
 
     def collect_data(self):
-        """Collect form data and return as dictionary"""
-        data = {}
-        for label, field in self.input_fields.items():
-            # Clean up the field name
-            clean_key = label.replace(" ", "_").lower().replace("(mm)", "").strip()
-            value = field.text().strip()
-            data[clean_key] = value
-        return data
+        return {k.replace(" ", "_").lower().replace("(mm)", "").strip(): v.text() for k, v in self.input_fields.items()}
 
-# --- Specific Generator Implementation ---
+# --- Specific Generator Page Implementation ---
 class DiscreteN(BaseGeneratorPage):
     """Generator page for discrete normal packages"""
     
@@ -355,6 +321,11 @@ class DiscreteN(BaseGeneratorPage):
         }
         for label, field in self.input_fields.items():
             self.form_layout.addRow(label, field)
+        
+        try:
+            self.image_label.load("generator_resistor_chip.svg")
+        except:
+            pass
 
     def generate_script_for_tool(self, data, tool_type):
         """Generate script for specific tool type"""
@@ -374,72 +345,113 @@ class DiscreteN(BaseGeneratorPage):
         try:
             part_number = data.get('part_number', '')
             footprint_name = data.get('footprint_name', '')
-            body_l = float(data.get('body_length', 0) or 0)
-            body_w = float(data.get('body_width', 0) or 0)
-            pad_l = float(data.get('pad_length', 0) or 0)
-            pad_w = float(data.get('pad_width', 0) or 0)
+            body_l = float(data.get('body_length', 0))
+            body_w = float(data.get('body_width', 0))
+            pad_l = float(data.get('pad_length', 0))
+            pad_w = float(data.get('pad_width', 0))
         except (ValueError, TypeError):
             raise ValueError("All dimensions must be valid numbers.")
+
+        def mm_to_ul(val):
+            return round(val / 0.000254)
+
+        pad_offset = (body_l - pad_l) / 2
+        pad_x = mm_to_ul(pad_offset)
+        pad_w_ul = mm_to_ul(pad_w)
+        pad_l_ul = mm_to_ul(pad_l)
 
         script = f"""# Created by Footprint Generator - Altium Designer
 # Part Number: {part_number}
 # Footprint: {footprint_name}
 StartFootprints
 Footprint (Name "{footprint_name}")
-Pad (Name "1") (Location -2000, 0) (Surface True) (Rotation 0)
-PadShape (Size 1000, 1500) (Shape Rectangular) (Layer Top)
+Pad (Name "1") (Location -{pad_x}, 0) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
+PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
 EndPad
-Pad (Name "2") (Location 2000, 0) (Surface True) (Rotation 0)
-PadShape (Size 1000, 1500) (Shape Rectangular) (Layer Top)
+Pad (Name "2") (Location {pad_x}, 0) (Surface True) (Rotation 0) (ExpandMask 0) (ExpandPaste 0)
+PadShape (Size {pad_w_ul}, {pad_l_ul}) (Shape Rectangular) (Layer Top)
 EndPad
 Text (Location -75, -25) (Height 50) (Width 3) (Rotation 0) (Layer TopOverlay) (Value "RefDes")
+Step (Name {footprint_name}.step)
 EndFootprint
 EndFootprints
 """
         return script, f"{part_number}_altium.txt"
 
     def _generate_allegro_script(self, data):
+        """Generate Cadence Allegro script"""
         part_number = data.get('part_number', '')
         footprint_name = data.get('footprint_name', '')
         
         script = f"""# Allegro PCB Editor Script
 # Part Number: {part_number}
 # Footprint: {footprint_name}
+
 create footprint {footprint_name}
+shape add rect {data.get('pad_length', '0')} {data.get('pad_width', '0')}
+pad add {data.get('body_length', '0')}/2 0 1 rect
+pad add -{data.get('body_length', '0')}/2 0 2 rect
+line add assembly {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+line add assembly -{data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+text add refdes 0 {data.get('body_width', '0')}/2+0.5 \\$REFDES
 done
 """
         return script, f"{part_number}_allegro.scr"
 
     def _generate_pads_script(self, data):
+        """Generate Mentor Graphics PADS script"""
         part_number = data.get('part_number', '')
         footprint_name = data.get('footprint_name', '')
         
         script = f"""! PADS PowerPCB Script
 ! Part Number: {part_number}
 ! Footprint: {footprint_name}
+
 *PART*
 {footprint_name}
+
+*PAD*
+P1 {data.get('pad_length', '0')} {data.get('pad_width', '0')} R 0 0 {data.get('body_length', '0')}/2 0
+P2 {data.get('pad_length', '0')} {data.get('pad_width', '0')} R 0 0 -{data.get('body_length', '0')}/2 0
+
+*LINE*
+15 0 {data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+15 0 -{data.get('body_length', '0')}/2 {data.get('body_width', '0')}/2
+
+*TEXT*
+0 0 {data.get('body_width', '0')}/2+1 0 \\$REFDES
+
 *END*
 """
         return script, f"{part_number}_pads.asc"
 
     def _generate_xpedition_script(self, data):
+        """Generate Mentor Graphics Xpedition script"""
         part_number = data.get('part_number', '')
         footprint_name = data.get('footprint_name', '')
         
         script = f"""# Xpedition PCB Script
 # Part Number: {part_number}
 # Footprint: {footprint_name}
+
 cell new {footprint_name}
+padstack new rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+layer TOP copper rectangle {data.get('pad_length', '0')} {data.get('pad_width', '0')}
+padstack end
+pin new 1 {data.get('body_length', '0')}/2 0 rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+pin new 2 -{data.get('body_length', '0')}/2 0 rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+text new SILKSCREEN_TOP 0 {data.get('body_width', '0')}/2+0.5 \\$REFDES
 cell save
 cell end
 """
         return script, f"{part_number}_xpedition.scr"
 
-# Add placeholder classes for other generators
+# Placeholder classes for other generator pages (implement as needed)
 class DiscreteF(BaseGeneratorPage):
     def __init__(self, parent=None):
         super().__init__("DiscreteF", parent)
+
+# ... Add other generator classes as needed
 
 # --- Main Application Window ---
 class MainWindow(QMainWindow):
@@ -467,20 +479,22 @@ class MainWindow(QMainWindow):
         self.stroke_fonts = ["Default", "Sans Serif", "Serif"]
         
         # License verification data
-        self.verification_data = None
-        
-        # Initialize script paths
         self.script_paths = {
-            'altium': os.path.join(os.path.expanduser("~"), "altium_scripts"),
-            'allegro': os.path.join(os.path.expanduser("~"), "allegro_scripts"),
-            'pads': os.path.join(os.path.expanduser("~"), "pads_scripts"),
-            'xpedition': os.path.join(os.path.expanduser("~"), "xpedition_scripts")
+            'altium': '',
+            'allegro': '',
+            'pads': '',
+            'xpedition': ''
         }
+
+        self.verification_data = None
+
+        self.load_settings()
+
         
-        for path in self.script_paths.values():
-            os.makedirs(path, exist_ok=True)
+        # Create directories if they don't exist
+
         
-        self.current_script_path = self.script_paths['altium']
+        self.current_script_path = ''
         
         central_container = QWidget()
         self.main_layout = QHBoxLayout(central_container)
@@ -549,6 +563,7 @@ class MainWindow(QMainWindow):
         page_map = {
             ("Discrete", "Discrete Narmal"): DiscreteN,
             ("Discrete", "Discrete Fillet-Shape"): DiscreteF,
+            # Add more mappings as needed
         }
 
         for (comp_type, opt_name), PageClass in page_map.items():
@@ -559,6 +574,7 @@ class MainWindow(QMainWindow):
             self.generator_pages[(comp_type, opt_name)] = page_instance
 
     def on_generation_finalized(self, payload):
+        """Handle generation completion"""
         print(f"Generated footprint: {payload['data']['footprint_name']} for {payload['table_name']}")
 
     def get_sidebar_options(self):
@@ -599,6 +615,7 @@ class MainWindow(QMainWindow):
         
         layout.addLayout(top_bar_layout, 0, 0, 1, 4)
         
+        # License status card
         license_status = "Verified" if self.verification_data else "Not Verified"
         license_icon = "fa5s.check-circle" if self.verification_data else "fa5s.times-circle"
         card1 = self.create_dashboard_card("License Status", license_status, license_icon)
@@ -671,6 +688,7 @@ class MainWindow(QMainWindow):
         options = {
             "Discrete": ["Discrete Narmal", "Discrete Fillet-Shape"],
             "Sot-23": ["Narmal", "Narmal with MP Expantion", "Fillet-Shape", "Fillet with MP Expantion"],
+            # Add more options as needed
         }
 
         component_options = options.get(component_type, ["Option A", "Option B"])
@@ -685,6 +703,51 @@ class MainWindow(QMainWindow):
         options_layout.addStretch()
         layout.addLayout(options_layout, 1, 0)
         return page
+    
+    def save_settings(self):
+        settings_data = {
+            "script_paths": self.script_paths,
+            "verification_data": self.verification_data,
+            "server_url": self.server_url_edit.text(),
+        }
+
+        try:
+            with open(SETTINGS_FILE, "w") as f:
+                json.dump(settings_data, f, indent=4)
+            print("Settings saved.")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save settings:\n{str(e)}")
+
+    def load_settings(self):
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, "r") as f:
+                    settings_data = json.load(f)
+
+                # Load script paths
+                if "script_paths" in settings_data and isinstance(settings_data["script_paths"], dict):
+                    self.script_paths.update(settings_data["script_paths"])
+                else:
+                    print("No valid 'script_paths' found in settings. Using defaults.")
+
+                # Load verification data
+                self.verification_data = settings_data.get("verification_data", None)
+
+                # Load server URL if applicable
+                if hasattr(self, 'server_url_edit'):
+                    self.server_url_edit.setText(settings_data.get("server_url", FLASK_BASE_URL))
+
+                print("Settings loaded.")
+            except Exception as e:
+                QMessageBox.warning(self, "Load Error", f"Failed to load settings:\n{str(e)}")
+        else:
+            print("Settings file not found. Using default settings.")
+
+
+    def closeEvent(self, event):
+        self.save_settings()
+        event.accept()
+
 
     def create_settings_page(self):
         page_widget = QWidget()
@@ -712,6 +775,7 @@ class MainWindow(QMainWindow):
         tab_widget.addTab(self._create_account_tab(), "Account")
 
         container_layout.addWidget(tab_widget)
+
         return page_widget
 
     def _create_default_settings_tab(self):
@@ -720,9 +784,11 @@ class MainWindow(QMainWindow):
         main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         main_layout.setSpacing(15)
 
+        # Script Output Paths Group
         paths_group = QGroupBox("Script Output Paths")
         paths_layout = QGridLayout(paths_group)
         
+        # Add path settings for each tool
         tool_names = ['Altium', 'Allegro', 'PADS', 'Xpedition']
         self.path_edits = {}
         
@@ -743,14 +809,17 @@ class MainWindow(QMainWindow):
         return tab_widget
 
     def _create_account_tab(self):
+        """Create account/license verification tab"""
         tab_widget = QWidget()
         main_layout = QVBoxLayout(tab_widget)
         main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         main_layout.setSpacing(15)
 
+        # License Verification Group
         license_group = QGroupBox("License Verification")
         license_layout = QGridLayout(license_group)
         
+        # Status
         license_layout.addWidget(QLabel("Status:"), 0, 0)
         self.license_status_label = QLabel("Not Verified")
         if self.verification_data:
@@ -760,6 +829,7 @@ class MainWindow(QMainWindow):
             self.license_status_label.setStyleSheet("color: red; font-weight: bold;")
         license_layout.addWidget(self.license_status_label, 0, 1)
         
+        # User info
         if self.verification_data:
             license_layout.addWidget(QLabel("Username:"), 1, 0)
             license_layout.addWidget(QLabel(self.verification_data.get('username', 'Unknown')), 1, 1)
@@ -770,6 +840,7 @@ class MainWindow(QMainWindow):
             license_layout.addWidget(QLabel("License:"), 3, 0)
             license_layout.addWidget(QLabel(self.verification_data.get('license_number', 'Unknown')), 3, 1)
         
+        # Verify/Clear buttons
         button_layout = QHBoxLayout()
         
         self.verify_button = QPushButton("Verify License")
@@ -786,6 +857,7 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(license_group)
         
+        # Server Settings Group
         server_group = QGroupBox("Server Settings")
         server_layout = QFormLayout(server_group)
         
@@ -801,17 +873,20 @@ class MainWindow(QMainWindow):
         return tab_widget
 
     def show_license_verification_dialog(self):
+        """Show license verification dialog"""
         dialog = LicenseVerificationDialog(self)
         if dialog.exec() == QDialog.Accepted:
             self.verification_data = dialog.verification_data
             self.update_license_ui()
 
     def clear_license(self):
+        """Clear license verification"""
         self.verification_data = None
         self.update_license_ui()
         QMessageBox.information(self, "License Cleared", "License verification cleared")
 
     def update_license_ui(self):
+        """Update license UI elements"""
         if hasattr(self, 'license_status_label'):
             if self.verification_data:
                 self.license_status_label.setText("Verified")
@@ -825,6 +900,7 @@ class MainWindow(QMainWindow):
                 self.clear_button.setEnabled(False)
 
     def test_server_connection(self):
+        """Test connection to Flask server"""
         server_url = self.server_url_edit.text()
         try:
             response = requests.get(f"{server_url}/api/health", timeout=5)
@@ -849,6 +925,7 @@ class MainWindow(QMainWindow):
             button.setChecked(False)
 
     def browse_for_script_path(self, script_type):
+        """Browse for script output path for specific tool type"""
         current_path = self.script_paths.get(script_type, os.path.expanduser("~"))
         directory = QFileDialog.getExistingDirectory(
             self, f"Select {script_type.title()} Script Output Folder", current_path
@@ -868,6 +945,7 @@ class MainWindow(QMainWindow):
                 f"{script_type.title()} script output path has been set to:\n{directory}"
             )
 
+# --- Application Entry Point ---
 if __name__ == "__main__":
     if not os.path.exists("images"):
         os.makedirs("images")
