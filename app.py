@@ -473,6 +473,19 @@ def start_background_monitoring():
     monitor_thread.daemon = True
     monitor_thread.start()
 
+def is_expired(expiry_date):
+    """Safely check if a datetime has expired, handling timezone awareness"""
+    if not expiry_date:
+        return False
+    
+    now = datetime.now(timezone.utc)
+    
+    # If expiry_date is offset-naive, assume it's in UTC
+    if expiry_date.tzinfo is None:
+        expiry_date = expiry_date.replace(tzinfo=timezone.utc)
+    
+    return expiry_date < now
+
 # API Routes for PySide6 Integration
 @app.route('/api/health')
 def health_check():
@@ -515,7 +528,7 @@ def add_footprint_api():
                 return jsonify({'status': 'error', 'message': 'License verification failed'}), 401
             
             # Check expiry date
-            if user.expiry_date and user.expiry_date < datetime.now(timezone.utc):
+            if is_expired(user.expiry_date):
                 return jsonify({'status': 'error', 'message': 'License expired'}), 401
             
             # Now save footprint data
@@ -592,6 +605,69 @@ def add_footprint_api():
             'message': f'Failed to save footprint data: {str(e)}'
         }), 500
     
+@app.route('/api/footprint/<int:footprint_id>')
+@login_required
+def get_footprint_details(footprint_id):
+    footprint = FootprintDatabase.query.get_or_404(footprint_id)
+    specifications = json.loads(footprint.specifications) if footprint.specifications else {}
+    
+    return jsonify({
+        'id': footprint.id,
+        'part_number': footprint.part_number,
+        'footprint_name': footprint.footprint_name,
+        'package_type': footprint.package_type,
+        'specifications': specifications,
+        'user_created': footprint.user_created,
+        'created_at': footprint.created_at.isoformat()
+    })
+
+@app.route('/footprint/delete/<int:footprint_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_footprint(footprint_id):
+    footprint = FootprintDatabase.query.get_or_404(footprint_id)
+    
+    # Also delete from package-specific table if exists
+    if footprint.package_type in PACKAGE_TABLE_MAP:
+        PackageTable = PACKAGE_TABLE_MAP[footprint.package_type]
+        package_record = PackageTable.query.filter_by(
+            part_number=footprint.part_number,
+            footprint_name=footprint.footprint_name
+        ).first()
+        if package_record:
+            db.session.delete(package_record)
+    
+    db.session.delete(footprint)
+    db.session.commit()
+    
+    log_activity(f"Deleted footprint: {footprint.footprint_name}")
+    flash('Footprint deleted successfully!', 'success')
+    return redirect(url_for('footprint_database'))
+
+@app.route('/footprint/delete/<int:footprint_id>', methods=['POST'])
+@login_required
+@admin_required
+def delete_footprint_api(footprint_id):
+    try:
+        footprint = FootprintDatabase.query.get_or_404(footprint_id)
+        
+        # Delete from package-specific table if exists
+        if footprint.package_type in PACKAGE_TABLE_MAP:
+            PackageTable = PACKAGE_TABLE_MAP[footprint.package_type]
+            package_record = PackageTable.query.filter_by(
+                part_number=footprint.part_number,
+                footprint_name=footprint.footprint_name
+            ).first()
+            if package_record:
+                db.session.delete(package_record)
+        
+        db.session.delete(footprint)
+        db.session.commit()
+        
+        return jsonify({'status': 'success', 'message': 'Footprint deleted successfully'})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 @app.route('/api/footprint/list')
 def list_footprints_api():
     try:
@@ -1253,4 +1329,4 @@ if __name__ == '__main__':
     print("=" * 50)
     
     # Run the app on local network
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(ssl_context='adhoc',host='0.0.0.0', port=5000, debug=True)
