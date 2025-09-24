@@ -18,11 +18,72 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QPixmap, QIcon, QMouseEvent, QClipboard, QFontDatabase
 from PySide6.QtSvgWidgets import QSvgWidget
+from decimal import Decimal, InvalidOperation
+from decimal import Decimal, getcontext, ROUND_HALF_UP
+getcontext().prec = 5
+getcontext().rounding = ROUND_HALF_UP
 
+
+def to_decimal(value, default=0):
+    """Convert various input types to Decimal safely"""
+    if value is None or value == "":
+        return Decimal(str(default))
+    try:
+        if isinstance(value, str):
+            if value.strip() == "":
+                return Decimal(str(default))
+            return Decimal(value)
+        elif isinstance(value, (int, float)):
+            return Decimal(str(value))
+        elif isinstance(value, Decimal):
+            return value
+        else:
+            return Decimal(str(default))
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        return Decimal(str(default))
 
 SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".my_app_settings.json")
 # --- Constants ---
 FLASK_BASE_URL = "http://localhost:5000"  # Configure your Flask server URL
+
+def get_ipc_column_letter(index: int) -> str:
+    """Convert column index to IPC-compliant letter sequence (excluding I,O,Q,S,Z,X)."""
+    skip_letters = {'I', 'O', 'Q', 'S', 'Z', 'X'}
+    valid_letters = [chr(x) for x in range(65, 91) if chr(x) not in skip_letters]  # A-Y, skipping
+    if index < len(valid_letters):
+        return valid_letters[index]
+    # For indices beyond single letters (AA, AB, etc.)
+    first_index = (index - len(valid_letters)) // len(valid_letters)
+    second_index = (index - len(valid_letters)) % len(valid_letters)
+    return f"{valid_letters[first_index]}{valid_letters[second_index]}"
+
+def generate_ipc_pad_locations(no_of_pads_in_a_row, no_of_pads_in_a_column, x_pitch, y_pitch, origin_x=0, origin_y=0):
+    """
+    Generate IPC-compliant pad names and (x, y) locations for a matrix footprint.
+    - matrix_x: number of columns (left to right, numbers)
+    - matrix_y: number of rows (top to bottom, letters)
+    - pitch_x: horizontal pitch (mm)
+    - pitch_y: vertical pitch (mm)
+    - origin_x, origin_y: center of array (default 0,0)
+    Returns: list of (pad_name, x, y)
+    """
+    pads = []
+    start_x = origin_x - (no_of_pads_in_a_row - 1) * x_pitch / 2
+    start_y = origin_y + (no_of_pads_in_a_column - 1) * y_pitch / 2  # positive Y is up
+
+    for row in range(no_of_pads_in_a_column):  # rows: top to bottom (A, B, ...)
+        letter = get_ipc_column_letter(row)
+        for col in range(no_of_pads_in_a_row):  # columns: left to right (1, 2, ...)
+            number = col + 1
+            pad_name = f"{letter}{number}"
+            x = start_x + col * x_pitch
+            y = start_y - row * y_pitch  # subtract to go down
+            pads.append((pad_name, x, y))
+    return pads
+
+
+
+
 
 # --- License Verification Dialog ---
 class LicenseVerificationDialog(QDialog):
@@ -39,10 +100,10 @@ class LicenseVerificationDialog(QDialog):
         self.username_edit = QLineEdit()
         layout.addWidget(self.username_edit)
         
-        # Email
-        layout.addWidget(QLabel("Email:"))
-        self.email_edit = QLineEdit()
-        layout.addWidget(self.email_edit)
+        # password
+        layout.addWidget(QLabel("Password:"))
+        self.password_edit = QLineEdit()
+        layout.addWidget(self.password_edit)
         
         # License Number
         # Server URL
@@ -52,7 +113,7 @@ class LicenseVerificationDialog(QDialog):
         
         # Buttons
         button_layout = QHBoxLayout()
-        self.verify_button = QPushButton("Verify License")
+        self.verify_button = QPushButton("Login")
         self.cancel_button = QPushButton("Cancel")
         
         self.verify_button.clicked.connect(self.attempt_verification)
@@ -66,11 +127,11 @@ class LicenseVerificationDialog(QDialog):
 
     def attempt_verification(self):
         username = self.username_edit.text()
-        email = self.email_edit.text()
+        password = self.password_edit.text()
         license_number = "BISA123636"
         server_url = self.server_edit.text()
         
-        if not username or not email or not license_number:
+        if not username or not password or not license_number:
             QMessageBox.warning(self, "Error", "Please enter all required fields")
             return
         
@@ -79,7 +140,7 @@ class LicenseVerificationDialog(QDialog):
             response = requests.post(f"{server_url}/api/verify_license", 
                                    json={
                                        "username": username, 
-                                       "email": email,
+                                       "password": password,
                                        "license_number": license_number
                                    },
                                    timeout=10)
@@ -89,7 +150,7 @@ class LicenseVerificationDialog(QDialog):
                 if data.get('status') == 'approved':
                     self.verification_data = {
                         'username': username,
-                        'email': email,
+                        'password': password,
                         'license_number': license_number,
                         'server_url': server_url
                     }
@@ -141,7 +202,7 @@ class BaseGeneratorPage(QWidget):
         super().__init__(parent)
         self.table_name = table_name
         self.parent_window = parent
-
+        self.clear_inputs
         # Initialize paths for all 4 script types
         self.script_paths = {
             'altium': os.path.join(os.path.expanduser("~"), "altium_scripts"),
@@ -181,6 +242,11 @@ class BaseGeneratorPage(QWidget):
         button_layout.addWidget(self.generate_button)
         button_layout.addStretch()
         layout.addLayout(button_layout, 2, 0, 1, 2)
+
+    def keyPressEvent(self, event):
+        if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+            self.generate_button.click()
+
 
     def _on_generate_clicked(self):
         """Generate scripts and submit data to Flask server"""
@@ -300,13 +366,272 @@ class BaseGeneratorPage(QWidget):
 
     def collect_data(self):
         return {k.replace(" ", "_").lower().replace("(mm)", "").strip(): v.text() for k, v in self.input_fields.items()}
+    
+    def clear_inputs(self):
+        """Clears all input fields in the form."""
+        if not hasattr(self, 'input_fields'):
+            return
+        for field in self.input_fields.values():
+            if isinstance(field, QLineEdit):
+                field.clear()
 
-# --- Specific Generator Page Implementation ---
+
+
+# --- DiscreteN Generator Page Implementation ---
 class DiscreteN(BaseGeneratorPage):
     """Generator page for discrete normal packages"""
     
     def __init__(self, parent=None):
         super().__init__("DiscreteN", parent)
+
+        self.input_fields = {
+            "Part Number": QLineEdit(),
+            "Footprint Name": QLineEdit(),
+            "refdesignator": QLineEdit(),
+            "Body Length (mm)": QLineEdit(),
+            "Body Width (mm)": QLineEdit(),
+            "Body Height (mm)": QLineEdit(),
+            "Pad Length (mm)": QLineEdit(),
+            "Pad Width (mm)": QLineEdit(),
+            "Mask Expansion (mm)": QLineEdit(),
+            "Paste Expansion (mm)": QLineEdit(),
+            "Airgap (mm)": QLineEdit(),
+        }
+        for label, field in self.input_fields.items():
+            self.form_layout.addRow(label, field)
+        
+        try:
+            self.image_label.load("generator_resistor_chip.svg")
+        except:
+            pass
+
+    def generate_script_for_tool(self, data, tool_type):
+        """Generate script for specific tool type"""
+        if tool_type == 'altium':
+            return self._generate_altium_script(data)
+        elif tool_type == 'allegro':
+            return self._generate_allegro_script(data)
+        elif tool_type == 'pads':
+            return self._generate_pads_script(data)
+        elif tool_type == 'xpedition':
+            return self._generate_xpedition_script(data)
+        else:
+            raise ValueError(f"Unsupported tool type: {tool_type}")
+
+    def _generate_altium_script(self, data):
+        """Generate Altium Designer script"""
+        try:
+            part_number = data.get('part_number', '').strip()
+            footprint_name = data.get('footprint_name', '').strip()
+            refdes = data.get('refdesignator', '').strip()
+
+            body_length_max = to_decimal(data.get('body_length'))
+            body_width_max = to_decimal(data.get('body_width'))
+            body_height_max = to_decimal(data.get('body_height'))
+            pad_length = to_decimal(data.get('pad_length'))
+            pad_width = to_decimal(data.get('pad_width'))
+            mask_expansion = to_decimal(data.get('mask_expansion'))
+            paste_expansion = to_decimal(data.get('paste_expansion'))
+            air_gap = to_decimal(data.get('airgap'))
+
+        except Exception as e:
+            raise ValueError(f"Invalid input: {e}")
+        mm_to_mil = Decimal("39.37")  # 1 mm = mm_to_mil mils
+        d0_25 = Decimal("0.25")  # 0.25 mm keepout
+        d0_025 = Decimal("0.025")
+        d0_275 = Decimal("0.275")  # d0_275 mm 
+        d0_3 = Decimal("0.3")  # d0_3 mm
+        d0_225 = Decimal("0.22")  # d0_225 mm
+        two = Decimal("2")
+
+
+
+
+        script = f"""# Created by Footprint Generator - Altium Designer
+    Footprint (Name "{footprint_name}") (Height {body_height_max * mm_to_mil})
+    Line (Width 1.9685) (Start -{(body_length_max/two) * mm_to_mil}, -{(body_width_max/two) * mm_to_mil}) (End {(body_length_max/two) * mm_to_mil}, -{(body_width_max/two) * mm_to_mil}) (Layer Mechanical13)
+    Line (Width 1.9685) (Start {(body_length_max/two) * mm_to_mil}, -{(body_width_max/two) * mm_to_mil}) (End {(body_length_max/two) * mm_to_mil}, {(body_width_max/two) * mm_to_mil}) (Layer Mechanical13)
+    Line (Width 1.9685) (Start {(body_length_max/two) * mm_to_mil}, {(body_width_max/two) * mm_to_mil}) (End -{(body_length_max/two) * mm_to_mil}, {(body_width_max/two) * mm_to_mil}) (Layer Mechanical13)
+    Line (Width 1.9685) (Start -{(body_length_max/two) * mm_to_mil}, {(body_width_max/two) * mm_to_mil}) (End -{(body_length_max/two) * mm_to_mil}, -{(body_width_max/two) * mm_to_mil}) (Layer Mechanical13)
+    Line (Width 1.9685) (Start -{max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, -{max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (End {max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, -{max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (Layer Mechanical15)
+    Line (Width 1.9685) (Start {max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, -{max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (End {max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, {max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (Layer Mechanical15)
+    Line (Width 1.9685) (Start {max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, {max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (End -{max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, {max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (Layer Mechanical15)
+    Line (Width 1.9685) (Start -{max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, {max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (End -{max(((body_length_max/two) + d0_3) * mm_to_mil,(((two*pad_length+air_gap)/two+d0_275)* mm_to_mil))}, -{max(((body_width_max/two) + d0_3) * mm_to_mil,((pad_width/two)+d0_275) * mm_to_mil)}) (Layer Mechanical15)
+    Line (Width 5.9055) (Start -{(body_length_max/two) * mm_to_mil}, -{max(((body_width_max/two) * mm_to_mil),((pad_width/two)+d0_225)*mm_to_mil)}) (End {(body_length_max/two) * mm_to_mil}, -{max(((body_width_max/two) * mm_to_mil),((pad_width/two)+d0_225)*mm_to_mil)}) (Layer TopOverlay)
+    Line (Width 5.9055) (Start {(body_length_max/two) * mm_to_mil}, {max(((body_width_max/two) * mm_to_mil),((pad_width/two)+d0_225)*mm_to_mil)}) (End -{(body_length_max/two) * mm_to_mil}, {max(((body_width_max/two) * mm_to_mil),((pad_width/two)+d0_225)*mm_to_mil)}) (Layer TopOverlay)
+    Polygon (PointCount 4) (Type KeepOut) (Layer TopLayer) 
+    Point (-{(air_gap-d0_25)/two * mm_to_mil}, {(body_width_max/two - d0_025) *mm_to_mil})
+    Point ({(air_gap-d0_25)/two * mm_to_mil}, {(body_width_max/two -d0_025) *mm_to_mil})
+    Point ({(air_gap-d0_25)/two * mm_to_mil}, -{(body_width_max/two -d0_025) *mm_to_mil})
+    Point (-{(air_gap-d0_25)/two * mm_to_mil}, -{(body_width_max/two -d0_025) *mm_to_mil})
+    EndPolygon
+    Text (Location -126, -11.063) (Layer Mechanical13) (Height 25) (Width 1.968) (Mirrored False) (Rotation 0) (Value ".Designator")
+    Pad (Name "1") (Location -{((pad_length+air_gap)/two) * mm_to_mil}, 0) (Surface True) (Plated True) (Plated True) (Rotation 0) (ExpandMask {mask_expansion * mm_to_mil}) (ExpandPaste -{paste_expansion * mm_to_mil})
+    PadShape (Size {pad_length * mm_to_mil}, {pad_width * mm_to_mil}) (Shape Rectangular) (Layer Top)
+    EndPad
+    Pad (Name "2") (Location {((pad_length+air_gap)/two) * mm_to_mil}, 0) (Surface True) (Plated True) (Plated True) (Rotation 0) (ExpandMask {mask_expansion * mm_to_mil}) (ExpandPaste -{paste_expansion * mm_to_mil})
+    PadShape (Size {pad_length * mm_to_mil}, {pad_width * mm_to_mil}) (Shape Rectangular) (Layer Top)
+    EndPad
+    EndFootprint
+    EndFootprints
+"""
+        return script, f"{part_number}.txt"
+
+    def _generate_allegro_script(self, data):
+        """Generate Cadence Allegro script"""
+
+        try:
+            part_number = data.get('part_number', '').strip()
+            footprint_name = data.get('footprint_name', '').strip()
+            refdes = data.get('refdesignator', '').strip()
+
+            body_length_max = to_decimal(data.get('body_length'))
+            body_width_max = to_decimal(data.get('body_width'))
+            body_height_max = to_decimal(data.get('body_height'))
+            pad_length = to_decimal(data.get('pad_length'))
+            pad_width = to_decimal(data.get('pad_width'))
+            mask_expansion = to_decimal(data.get('mask_expansion'))
+            paste_expansion = to_decimal(data.get('paste_expansion'))
+            air_gap = to_decimal(data.get('airgap'))
+
+        except Exception as e:
+            raise ValueError(f"Invalid input: {e}")
+
+        output_path = self.script_paths.get("allegro")
+        # Validation and calculations
+        two = Decimal("2")
+        mm_to_mil = Decimal("39.37")  # 1 mm = mm_to_mil mils
+        d0_25 = Decimal("0.25")  # 0.25 mm keepout
+        d0_025 = Decimal("0.025")
+        d0_275 = Decimal("0.275")  # d0_275 mm 
+        d0_3 = Decimal("0.3")  # d0_3 mm
+        d0_225 = Decimal("0.22")  # d0_225 mm
+
+        xpitch = pad_length + air_gap
+        hpitchl = xpitch / two
+        hbl = body_length_max / two
+        hbw = body_width_max / two
+        hpw = pad_width / two
+        mno = hpw + d0_225
+        dbpxxx = air_gap - d0_25
+        pwxyz = body_width_max - Decimal("0.05")
+        abc = pad_width+Decimal("0.5")
+        bca = body_width_max+Decimal("0.55")
+        xyz = pad_width+Decimal("1.02")
+        zyx = body_width_max+Decimal("1.07")
+        pwxxx = max(abc,bca)
+        pwzyx = max(xyz,zyx)
+        hpwid = max(mno,hbw)
+        psm = ((2*pad_length)+air_gap)+Decimal("0.5")
+        msm = (body_length_max+Decimal("0.55"))
+        msp = max(msm,psm)
+        prq = ((2*pad_length)+air_gap)+Decimal("1.02")
+        qrp = (body_length_max+Decimal("1.07"))
+        pqr = max(prq,qrp)    
+
+        qqq = round(pad_length*Decimal("100"))
+        ppp = round(pad_width*Decimal("100"))
+        rrr = round(2*mask_expansion*Decimal("100"))+qqq
+        sss = round(2*paste_expansion*Decimal("100"))+qqq
+        ttt = round(2*mask_expansion*Decimal("100"))+ppp
+        uuu = round(2*paste_expansion*Decimal("100"))+ppp
+
+        if pad_length == pad_width:
+            outline = "SQUARE"
+            if paste_expansion == Decimal("0") and mask_expansion==Decimal("0"):
+                padn = f"S{qqq}"
+            elif paste_expansion==Decimal("0"):
+                padn = f"S{qqq}M{rrr}"
+            elif mask_expansion==Decimal("0"):
+                padn = f"S{qqq}p{sss}"
+            else:    
+                padn = f"S{qqq}M{rrr}P{sss}"
+        else:
+            outline = "RECTANGLE"
+            if paste_expansion == Decimal("0") and mask_expansion==Decimal("0"):
+                padn = f"S{qqq}_{ppp}"
+            elif paste_expansion == Decimal("0"):
+                padn = f"R{qqq}_{ppp}M{rrr}_{ttt}"
+            elif mask_expansion == Decimal("0"):
+                padn = f"S{qqq}_{ppp}P{sss}_{uuu}"
+            else:
+                padn = f"R{qqq}_{ppp}M{rrr}_{ttt}P{sss}_{uuu}"
+        
+        script = f"""
+    setwindow pcb
+    trapsize 3140
+    generaledit
+    open 
+    fillin "{output_path}/Temp_IPC.dra"
+    trapsize 3140
+    generaledit 
+
+    # Saving the file with Footprint name
+
+    setwindow pcb
+    save_as
+    fillin "{footprint_name}.dra"
+
+    # Giving Lengths to PADS and saving with pad name
+    setwindow pcb
+    trapsize 3140
+    shapeedit
+    padeditdb
+    setwindow form.mini
+    FORM mini padlist R50_170M40_160
+    FORM mini pad_stack_edit  
+    setwindow form.padedit
+    FORM padedit layers  
+    FORM padedit grid row top
+    FORM padedit geometry {outline}
+    FORM padedit width {pad_length:.5f}
+    FORM padedit height {pad_width:.5f}
+    FORM padedit grid row soldermask_top
+    FORM padedit geometry {outline}
+    FORM padedit width {pad_length + two*(mask_expansion):.5f}
+    FORM padedit height {pad_width + two*(mask_expansion):.5f}
+    FORM padedit grid row pastemask_top 
+    FORM padedit geometry {outline}
+    FORM padedit width {pad_length + two*(paste_expansion):.5f}
+    FORM padedit height {pad_width + two*(paste_expansion):.5f}
+    pse_save_as
+    fillin "{padn}.pad"
+    SaveItemToLibraryDlg.NameOfItem = "{footprint_name}"
+    SaveItemToLibraryDlg.Ok.Click()
+    DlgPrompt.Question("Would you like to create new Part Type ?").Answer(mbYes)
+    DlgLibraryBaseSheet.Ok.Click()
+    SaveItemToLibraryDlg.NameOfItem = "{footprint_name}"
+    SaveItemToLibraryDlg.Ok.Click()
+"""
+
+        return script, f"{part_number}_pads.asc"
+
+    def _generate_xpedition_script(self, data):
+        """Generate Mentor Graphics Xpedition script"""
+        part_number = data.get('part_number', '')
+        footprint_name = data.get('footprint_name', '')
+        
+        script = f"""# Xpedition PCB Script
+# Part Number: {part_number}
+# Footprint: {footprint_name}
+
+cell new {footprint_name}
+padstack new rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+layer TOP copper rectangle {data.get('pad_length', '0')} {data.get('pad_width', '0')}
+padstack end
+pin new 1 {data.get('body_length', '0')}/2 0 rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+pin new 2 -{data.get('body_length', '0')}/2 0 rect_{data.get('pad_length', '0')}x{data.get('pad_width', '0')}
+text new SILKSCREEN_TOP 0 {data.get('body_width', '0')}/2+0.5 \\$REFDES
+cell save
+cell end
+"""
+        return script, f"{part_number}_xpedition.hkp"
+
+# Placeholder classes for other generator pages (implement as needed)
+class DiscreteF(BaseGeneratorPage):
+    def __init__(self, parent=None):
+        super().__init__("DiscreteF", parent)
+
         self.input_fields = {
             "Part Number": QLineEdit(),
             "Footprint Name": QLineEdit(),
@@ -315,6 +640,7 @@ class DiscreteN(BaseGeneratorPage):
             "Body Height (mm)": QLineEdit(),
             "Pad Length (mm)": QLineEdit(),
             "Pad Width (mm)": QLineEdit(),
+            "fillet radius (mm)": QLineEdit(),
             "Mask Expansion (mm)": QLineEdit(),
             "Paste Expansion (mm)": QLineEdit(),
             "Airgap (mm)": QLineEdit(),
@@ -446,12 +772,6 @@ cell end
 """
         return script, f"{part_number}_xpedition.scr"
 
-# Placeholder classes for other generator pages (implement as needed)
-class DiscreteF(BaseGeneratorPage):
-    def __init__(self, parent=None):
-        super().__init__("DiscreteF", parent)
-
-# ... Add other generator classes as needed
 
 # --- Main Application Window ---
 class MainWindow(QMainWindow):
@@ -491,8 +811,7 @@ class MainWindow(QMainWindow):
         self.load_settings()
 
         
-        # Create directories if they don't exist
-
+        self.current_generator_page = None
         
         self.current_script_path = ''
         
@@ -542,11 +861,23 @@ class MainWindow(QMainWindow):
         scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.main_layout.addWidget(scroll_area)
 
+
     def handle_sidebar_click(self):
         clicked_button = self.sender()
+
         for button in self.button_group:
             button.setChecked(button == clicked_button)
-        self.stacked_widget.setCurrentIndex(self.button_group.index(clicked_button))
+
+        index = self.button_group.index(clicked_button)
+        self.stacked_widget.setCurrentIndex(index)
+
+        button_text = clicked_button.text().strip()
+        if button_text:
+            for page_instance in self.generator_pages.values():
+                if hasattr(page_instance, "clear_inputs"):
+                    page_instance.clear_inputs()
+
+
 
     def create_main_content(self):
         self.stacked_widget = QStackedWidget()
@@ -806,7 +1137,43 @@ class MainWindow(QMainWindow):
             paths_layout.addWidget(browse_btn, i, 2)
         
         main_layout.addWidget(paths_group)
+        main_layout.addWidget(self._create_clearance_settings_group())
+        main_layout.addWidget(self._create_layer_settings_group())
         return tab_widget
+    
+    def _create_clearance_settings_group(self):
+        group = QGroupBox("Default Clearance Settings")
+        layout = QGridLayout(group)
+        
+        headers = ["Description", "Expansion (mm)", "Line Width(mm)"]
+        for i, h in enumerate(headers):
+            layout.addWidget(QLabel(h), 0, i, Qt.AlignmentFlag.AlignLeft if i==0 else Qt.AlignmentFlag.AlignCenter)
+
+        rows_data = {
+            "Courtyard": ["0.5", "0.05"],
+            "BGA,PTH Courtyard": ["1.27", "0.05"],
+            "NoProbeTop": ["0.51", "0.05"],
+            "Silkscreen airgap": ["0.15", "0.15"],
+        }
+        for row_idx, (label, values) in enumerate(rows_data.items(), 1):
+            layout.addWidget(QLabel(label + ":"), row_idx, 0)
+            layout.addWidget(QLineEdit(values[0]), row_idx, 1)
+            layout.addWidget(QLineEdit(values[1]), row_idx, 2)
+        return group
+
+
+
+    def _create_layer_settings_group(self):
+        group = QGroupBox("Default Layer Settings")
+        layout = QFormLayout(group)
+
+        # Assembly Row
+        assembly_layout = QHBoxLayout()
+        assembly_layout.addWidget(QLabel("Line Width:"))
+        assembly_layout.addWidget(QLineEdit("0.1"))
+        layout.addRow("Assembly:", assembly_layout)
+
+        return group
 
     def _create_account_tab(self):
         """Create account/license verification tab"""
@@ -818,59 +1185,52 @@ class MainWindow(QMainWindow):
         # License Verification Group
         license_group = QGroupBox("License Verification")
         license_layout = QGridLayout(license_group)
-        
-        # Status
+
+        # Status row
         license_layout.addWidget(QLabel("Status:"), 0, 0)
-        self.license_status_label = QLabel("Not Verified")
-        if self.verification_data:
-            self.license_status_label.setText("Verified")
-            self.license_status_label.setStyleSheet("color: green; font-weight: bold;")
-        else:
-            self.license_status_label.setStyleSheet("color: red; font-weight: bold;")
+        self.license_status_label = QLabel()
         license_layout.addWidget(self.license_status_label, 0, 1)
-        
-        # User info
-        if self.verification_data:
-            license_layout.addWidget(QLabel("Username:"), 1, 0)
-            license_layout.addWidget(QLabel(self.verification_data.get('username', 'Unknown')), 1, 1)
-            
-            license_layout.addWidget(QLabel("Email:"), 2, 0)
-            license_layout.addWidget(QLabel(self.verification_data.get('email', 'Unknown')), 2, 1)
-            
-            license_layout.addWidget(QLabel("License:"), 3, 0)
-            license_layout.addWidget(QLabel(self.verification_data.get('license_number', 'Unknown')), 3, 1)
-        
-        # Verify/Clear buttons
+
+        # Username row (always added, even if empty for now)
+        license_layout.addWidget(QLabel("Username:"), 1, 0)
+        self.username_label = QLabel()
+        self.username_label 
+        license_layout.addWidget(self.username_label, 1, 1)
+
+        # Buttons row
         button_layout = QHBoxLayout()
-        
         self.verify_button = QPushButton("Verify License")
         self.verify_button.clicked.connect(self.show_license_verification_dialog)
         button_layout.addWidget(self.verify_button)
-        
+
         self.clear_button = QPushButton("Clear License")
         self.clear_button.clicked.connect(self.clear_license)
-        self.clear_button.setEnabled(bool(self.verification_data))
         button_layout.addWidget(self.clear_button)
-        
+
         button_layout.addStretch()
-        license_layout.addLayout(button_layout, 4, 0, 1, 2)
-        
+        license_layout.addLayout(button_layout, 3, 0, 1, 2)
+
+        # Add group to main layout
         main_layout.addWidget(license_group)
-        
+
         # Server Settings Group
         server_group = QGroupBox("Server Settings")
         server_layout = QFormLayout(server_group)
-        
+
         self.server_url_edit = QLineEdit(FLASK_BASE_URL)
         server_layout.addRow("Flask Server URL:", self.server_url_edit)
-        
+
         test_button = QPushButton("Test Connection")
         test_button.clicked.connect(self.test_server_connection)
         server_layout.addRow("", test_button)
-        
+
         main_layout.addWidget(server_group)
-        
+
+        # Initial update of license UI
+        self.update_license_ui()
+
         return tab_widget
+
 
     def show_license_verification_dialog(self):
         """Show license verification dialog"""
@@ -887,17 +1247,19 @@ class MainWindow(QMainWindow):
 
     def update_license_ui(self):
         """Update license UI elements"""
-        if hasattr(self, 'license_status_label'):
-            if self.verification_data:
-                self.license_status_label.setText("Verified")
-                self.license_status_label.setStyleSheet("color: green; font-weight: bold;")
-                self.verify_button.setText("Re-verify License")
-                self.clear_button.setEnabled(True)
-            else:
-                self.license_status_label.setText("Not Verified")
-                self.license_status_label.setStyleSheet("color: red; font-weight: bold;")
-                self.verify_button.setText("Verify License")
-                self.clear_button.setEnabled(False)
+        if self.verification_data:
+            self.license_status_label.setText("Verified")
+            self.license_status_label.setStyleSheet("color: green; font-weight: bold;")
+            self.username_label.setText(self.verification_data.get('username', 'Unknown'))
+            self.verify_button.setText("Re-verify License")
+            self.clear_button.setEnabled(True)
+        else:
+            self.license_status_label.setText("Not Verified")
+            self.license_status_label.setStyleSheet("color: red; font-weight: bold;")
+            self.username_label.setText("N/A")
+            self.verify_button.setText("Verify License")
+            self.clear_button.setEnabled(False)
+
 
     def test_server_connection(self):
         """Test connection to Flask server"""
