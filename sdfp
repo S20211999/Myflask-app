@@ -1,1 +1,1332 @@
 
+
+# --- CRITICAL FIX: SET QT_API ---
+import os
+os.environ['QT_API'] = 'pyside6'
+
+import sys
+import qtawesome
+import json
+import requests
+import struct
+from decimal import Decimal, getcontext
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
+
+from PySide6.QtCore import (Qt, QSize, Signal, QPoint, QTimer, QThread, QObject, 
+                            pyqtSignal, QMutex, QRunnable, QThreadPool)
+from PySide6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QGroupBox, QCheckBox,
+    QPushButton, QStackedWidget, QLabel, QLineEdit, QGridLayout, QTabWidget,
+    QFrame, QScrollArea, QSizePolicy, QFileDialog, QMessageBox, QFormLayout,
+    QTextEdit, QButtonGroup, QDialog, QSpinBox, QDoubleSpinBox, QProgressBar
+)
+from PySide6.QtGui import QPixmap, QIcon, QMouseEvent, QClipboard, QFontDatabase, QIntValidator, QFont, QMovie
+from PySide6.QtSvgWidgets import QSvgWidget
+
+
+SETTINGS_FILE = os.path.join(os.path.expanduser("~"), ".my_altium_settings.json")
+# --- Constants ---
+FLASK_BASE_URL = "http://localhost:5000"  # Configure your Flask server URL
+
+# Default settings
+DEFAULT_SETTINGS = {
+    "decimal_precision": 4
+}
+
+# Standard profiles for each CAD tool
+STANDARD_PROFILES = {
+    "altium": {
+        "IPC-7351B": {
+            "assmbly_layout_line_width": 0.1,
+            "courtyard_expansion": 0.25,
+            "BGA_TH_courtyard_expansion": 1.27,
+            "courtyard_line_width": 0.05,
+            "silkscreen_expansion": 0.15,
+            "silkscreen_line_width": 0.15
+        },
+        "IPC-7351C": {
+            "assmbly_layout_line_width": 0.127,
+            "courtyard_expansion": 0.254,
+            "BGA_TH_courtyard_expansion": 1.27,
+            "courtyard_line_width": 0.0508,
+            "silkscreen_expansion": 0.152,
+            "silkscreen_line_width": 0.152
+        },
+        "Company Standard": {
+            "assmbly_layout_line_width": 0.08,
+            "courtyard_expansion": 0.20,
+            "BGA_TH_courtyard_expansion": 1.0,
+            "courtyard_line_width": 0.04,
+            "silkscreen_expansion": 0.12,
+            "silkscreen_line_width": 0.12
+        }
+    },
+    "allegro": {
+        "Cadence Default": {
+            "assembly_layout_line_width": 0.1,
+            "courtyard_expansion": 0.25,
+            "BGA_TH_courtyard_expansion": 1.27,
+            "courtyard_line_width": 0.05,
+            "silkscreen_expansion": 0.15,
+            "silkscreen_line_width": 0.15
+        },
+        "IPC Standard": {
+            "assembly_layout_line_width": 0.127,
+            "courtyard_expansion": 0.254,
+            "BGA_TH_courtyard_expansion": 1.27,
+            "courtyard_line_width": 0.0508,
+            "silkscreen_expansion": 0.152,
+            "silkscreen_line_width": 0.152
+        }
+    },
+    "pads": {
+        "Mentor Default": {
+            "assembly_layout_line_width": 0.1,
+            "courtyard_expansion": 0.25,
+            "BGA_TH_courtyard_expansion": 1.27,
+            "courtyard_line_width": 0.05,
+            "silkscreen_expansion": 0.15,
+            "silkscreen_line_width": 0.15
+        }
+    },
+    "xpedition": {
+        "Xpedition Default": {
+            "assembly_layout_line_width": 0.1,
+            "courtyard_expansion": 0.25,
+            "BGA_TH_courtyard_expansion": 1.27,
+            "courtyard_line_width": 0.05,
+            "silkscreen_expansion": 0.15,
+            "silkscreen_line_width": 0.15
+        }
+    }
+}
+
+# Current settings (will be updated from standards)
+ALTIUM_SETTINGS = STANDARD_PROFILES["altium"]["IPC-7351B"].copy()
+ALLEGRO_SETTINGS = STANDARD_PROFILES["allegro"]["Cadence Default"].copy()
+PADS_SETTINGS = STANDARD_PROFILES["pads"]["Mentor Default"].copy()
+XPEDITION_SETTINGS = STANDARD_PROFILES["xpedition"]["Xpedition Default"].copy()
+
+
+class WorkerSignals(QObject):
+    '''Worker thread signals'''
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    result = pyqtSignal(object)
+    progress = pyqtSignal(str, int)
+
+
+class Worker(QRunnable):
+    '''Worker thread for background operations'''
+
+    def __init__(self, fn, *args, **kwargs):
+        super().__init__()
+        self.fn = fn
+        self.args = args
+        self.kwargs = kwargs
+        self.signals = WorkerSignals()
+
+    def run(self):
+        '''Execute the worker function'''
+        try:
+            result = self.fn(*self.args, **self.kwargs, signals=self.signals)
+            self.signals.result.emit(result)
+        except Exception as e:
+            self.signals.error.emit(str(e))
+        finally:
+            self.signals.finished.emit()
+
+
+class ScaledMovieLabel(QLabel):
+    def __init__(self, gif_path, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        if os.path.exists(gif_path):
+            self.movie = QMovie(gif_path)
+            self.setMovie(self.movie)
+            self.movie.start()
+
+    def resizeEvent(self, event):
+        if hasattr(self, 'movie'):
+            frame_size = event.size()
+            movie_size = self.movie.currentPixmap().size()
+            if movie_size.isEmpty():
+                return
+
+            # Calculate aspect-ratio-constrained size
+            ratio = min(
+                frame_size.width() / movie_size.width(),
+                frame_size.height() / movie_size.height()
+            )
+            scaled_size = movie_size * ratio  # This is already a QSizeF
+            self.movie.setScaledSize(scaled_size)  # Remove .toSize()
+        super().resizeEvent(event)
+
+
+class StandardDialog(QDialog):
+    '''Dialog for adding new standard profiles'''
+
+    def __init__(self, tool_type, parent=None):
+        super().__init__(parent)
+        self.tool_type = tool_type
+        self.setWindowTitle(f"Add {tool_type.title()} Standard")
+        self.setFixedSize(600, 500)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+
+        # Header
+        header = QLabel(f"Add New {tool_type.title()} Standard Profile")
+        header.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        layout.addWidget(header)
+
+        # Standard name
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel("Standard Name:"))
+        self.name_edit = QLineEdit()
+        name_layout.addWidget(self.name_edit)
+        layout.addLayout(name_layout)
+
+        # Settings group
+        settings_group = QGroupBox("Standard Settings")
+        form_layout = QFormLayout(settings_group)
+
+        self.setting_fields = {}
+        setting_labels = {
+            'assembly_layout_line_width': 'Assembly Line Width (mm):',
+            'courtyard_expansion': 'Courtyard Expansion (mm):',
+            'BGA_TH_courtyard_expansion': 'BGA/TH Courtyard Expansion (mm):',
+            'courtyard_line_width': 'Courtyard Line Width (mm):',
+            'silkscreen_expansion': 'Silkscreen Expansion (mm):',
+            'silkscreen_line_width': 'Silkscreen Line Width (mm):'
+        }
+
+        for key, label in setting_labels.items():
+            field = QLineEdit()
+            field.setText("0.1")  # Default value
+            self.setting_fields[key] = field
+            form_layout.addRow(label, field)
+
+        layout.addWidget(settings_group)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        cancel_button = QPushButton("Cancel")
+        save_button = QPushButton("Save")
+
+        cancel_button.clicked.connect(self.reject)
+        save_button.clicked.connect(self.accept)
+
+        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(save_button)
+        layout.addLayout(button_layout)
+
+    def get_standard_data(self):
+        '''Get the standard data from dialog'''
+        name = self.name_edit.text().strip()
+        if not name:
+            return None, None
+
+        settings = {}
+        for key, field in self.setting_fields.items():
+            try:
+                settings[key] = float(field.text())
+            except ValueError:
+                settings[key] = 0.1
+
+        return name, settings
+
+
+class LicenseVerificationDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("License Verification")
+        self.setFixedSize(450, 350)
+        self.setModal(True)
+
+        layout = QVBoxLayout(self)
+
+        # Username
+        layout.addWidget(QLabel("Username:"))
+        self.username_edit = QLineEdit()
+        layout.addWidget(self.username_edit)
+
+        # password
+        layout.addWidget(QLabel("Password:"))
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.password_edit)
+
+        # Server URL
+        layout.addWidget(QLabel("Server URL:"))
+        self.server_edit = QLineEdit(FLASK_BASE_URL)
+        layout.addWidget(self.server_edit)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        self.verify_button = QPushButton("Login")
+        self.cancel_button = QPushButton("Cancel")
+
+        self.verify_button.clicked.connect(self.attempt_verification)
+        self.cancel_button.clicked.connect(self.reject)
+
+        button_layout.addWidget(self.verify_button)
+        button_layout.addWidget(self.cancel_button)
+        layout.addLayout(button_layout)
+
+        self.verification_data = None
+        self.thread_pool = QThreadPool()
+
+    def attempt_verification(self):
+        username = self.username_edit.text()
+        password = self.password_edit.text()
+        license_number = "BISA123636"
+        server_url = self.server_edit.text()
+
+        if not username or not password or not license_number:
+            QMessageBox.warning(self, "Error", "Please enter all required fields")
+            return
+
+        # Show progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.verify_button.setEnabled(False)
+
+        # Create worker for verification
+        worker = Worker(self.verify_license, username, password, license_number, server_url)
+        worker.signals.result.emit = self.on_verification_result
+        worker.signals.error.emit = self.on_verification_error
+        worker.signals.finished.emit = self.on_verification_finished
+
+        self.thread_pool.start(worker)
+
+    def verify_license(self, username, password, license_number, server_url, signals=None):
+        '''Background license verification'''
+        response = requests.post(f"{server_url}/api/verify_license", 
+                               json={
+                                   "username": username, 
+                                   "password": password,
+                                   "license_number": license_number
+                               },
+                               timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') == 'approved':
+                return {
+                    'success': True,
+                    'data': {
+                        'username': username,
+                        'password': password,
+                        'license_number': license_number,
+                        'server_url': server_url
+                    }
+                }
+            else:
+                return {'success': False, 'message': data.get('message', 'License verification failed')}
+        else:
+            data = response.json() if response.headers.get('content-type') == 'application/json' else {}
+            return {'success': False, 'message': data.get('message', 'License verification failed')}
+
+    def on_verification_result(self, result):
+        if result['success']:
+            self.verification_data = result['data']
+            global FLASK_BASE_URL
+            FLASK_BASE_URL = result['data']['server_url']
+            QMessageBox.information(self, "Success", "License verified successfully!")
+            self.accept()
+        else:
+            QMessageBox.warning(self, "Verification Failed", result['message'])
+
+    def on_verification_error(self, error_msg):
+        QMessageBox.critical(self, "Connection Error", f"Could not connect to server:\n{error_msg}")
+
+    def on_verification_finished(self):
+        self.progress_bar.setVisible(False)
+        self.verify_button.setEnabled(True)
+
+
+# Enhanced ClickableLabel with better styling
+class ClickableLabel(QLabel):
+    doubleClicked = Signal()
+    singleClicked = Signal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setAlignment(Qt.AlignCenter)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setProperty("class", "ClickableLabel")
+
+    def mousePressEvent(self, event: QMouseEvent):
+        self._mouse_press_pos = event.pos()
+
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if self._mouse_press_pos == event.pos() and event.button() == Qt.LeftButton:
+            self.singleClicked.emit()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent):
+        if event.button() == Qt.LeftButton:
+            self.doubleClicked.emit()
+
+
+# Enhanced BaseGeneratorPage with input header and multithreading
+class BaseGeneratorPage(QWidget):
+    generationFinalized = Signal(dict)
+
+    def __init__(self, table_name, parent=None):
+        super().__init__(parent)
+        self.table_name = table_name
+        self.parent_window = parent
+        self.thread_pool = QThreadPool()
+
+        # Initialize paths for all 4 script types
+        self.script_paths = {
+            'altium': os.path.join(os.path.expanduser("~"), "altium_scripts"),
+            'allegro': os.path.join(os.path.expanduser("~"), "allegro_scripts"),
+            'pads': os.path.join(os.path.expanduser("~"), "pads_scripts"),
+            'xpedition': os.path.join(os.path.expanduser("~"), "xpedition_scripts")
+        }
+
+        self.setObjectName("GeneratorPage")
+        layout = QGridLayout(self)
+        layout.setContentsMargins(25, 25, 25, 25)
+        layout.setSpacing(20)
+
+        # Input Page Header
+        self.create_input_header(layout)
+
+        # Main content area
+        self.create_main_content(layout)
+
+        # Progress bar for background operations
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        layout.addWidget(self.progress_bar, 3, 0, 1, 2)
+
+    def create_input_header(self, layout):
+        '''Create the input page header'''
+        header_frame = QFrame()
+        header_frame.setObjectName("InputHeader")
+        header_frame.setStyleSheet('''
+            #InputHeader {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #3a4a5c, stop:1 #2d3748);
+                border-radius: 8px;
+                border: 1px solid #4a5568;
+                padding: 10px;
+                margin-bottom: 20px;
+            }
+        ''')
+
+        header_layout = QHBoxLayout(header_frame)
+
+        # Title and description
+        title_layout = QVBoxLayout()
+
+        self.header_title = QLabel(f"{self.table_name} Footprint Generator")
+        self.header_title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        self.header_title.setStyleSheet("color: #ffffff; margin: 0; padding: 0;")
+
+        self.header_description = QLabel("Enter component specifications to generate multi-CAD footprint scripts")
+        self.header_description.setStyleSheet("color: #a0aec0; font-size: 12pt; margin: 0; padding: 0;")
+
+        title_layout.addWidget(self.header_title)
+        title_layout.addWidget(self.header_description)
+        header_layout.addLayout(title_layout)
+
+        # Status indicators
+        status_layout = QVBoxLayout()
+
+        # License status
+        self.license_status = QLabel("⚠ License Required")
+        main_window = self.get_main_window()
+        if main_window and main_window.verification_data:
+            self.license_status.setText("✓ License Verified")
+            self.license_status.setStyleSheet("color: #48bb78; font-weight: bold;")
+        else:
+            self.license_status.setStyleSheet("color: #f56565; font-weight: bold;")
+
+        # Output paths status
+        self.paths_status = QLabel("⚠ Configure Output Paths")
+        if any(self.script_paths.values()):
+            self.paths_status.setText("✓ Output Paths Set")
+            self.paths_status.setStyleSheet("color: #48bb78; font-weight: bold;")
+        else:
+            self.paths_status.setStyleSheet("color: #f56565; font-weight: bold;")
+
+        status_layout.addWidget(self.license_status)
+        status_layout.addWidget(self.paths_status)
+        header_layout.addLayout(status_layout)
+
+        layout.addWidget(header_frame, 0, 0, 1, 2)
+
+    def create_main_content(self, layout):
+        '''Create the main input form and preview area'''
+        # Input form
+        input_frame = QFrame()
+        self.form_layout = QFormLayout(input_frame)
+        self.form_layout.setSpacing(12)
+        self.form_layout.setLabelAlignment(Qt.AlignRight)
+        self.input_fields = {}
+        layout.addWidget(input_frame, 1, 0)
+
+        # Preview area
+        right_panel_layout = QVBoxLayout()
+        self.image_label = QSvgWidget()
+        self.image_label.setMinimumSize(250, 300)
+        self.image_label.setStyleSheet("background-color: #232730; border-radius: 8px;")
+        right_panel_layout.addWidget(self.image_label)
+        layout.addLayout(right_panel_layout, 1, 1)
+        layout.setColumnStretch(1, 1)
+
+        # Generation buttons
+        button_layout = QHBoxLayout()
+        self.generate_button = QPushButton("Generate All Scripts")
+        self.generate_button.setObjectName("GenerateButton")
+        self.generate_button.setCursor(Qt.PointingHandCursor)
+        self.generate_button.clicked.connect(self._on_generate_clicked)
+
+        button_layout.addWidget(self.generate_button)
+        button_layout.addStretch()
+        layout.addLayout(button_layout, 2, 0, 1, 2)
+
+    def _on_generate_clicked(self):
+        '''Generate scripts using multithreading'''
+        data = self.collect_data()
+        if not data.get("part_number") or not data.get("footprint_name"):
+            QMessageBox.warning(self, "Input Error", "Part Number and Footprint Name are required.")
+            return
+
+        # Check license verification
+        main_window = self.get_main_window()
+        if not main_window or not main_window.verification_data:
+            QMessageBox.warning(self, "License Error", "Please verify your license first from Settings > Account.\nScript generation is not allowed without valid license.")
+            return
+
+        # Show progress
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 4)
+        self.progress_bar.setValue(0)
+        self.generate_button.setEnabled(False)
+
+        # Create worker for script generation
+        worker = Worker(self.generate_scripts_background, data)
+        worker.signals.result.emit = self.on_generation_result
+        worker.signals.error.emit = self.on_generation_error
+        worker.signals.progress.emit = self.on_generation_progress
+        worker.signals.finished.emit = self.on_generation_finished
+
+        self.thread_pool.start(worker)
+
+    def generate_scripts_background(self, data, signals=None):
+        '''Background script generation'''
+        generated_files = []
+        errors = []
+
+        script_types = ['altium', 'allegro', 'pads', 'xpedition']
+
+        for i, script_type in enumerate(script_types):
+            try:
+                if signals:
+                    signals.progress.emit(f"Generating {script_type.title()} script...", i)
+
+                script_content, filename = self.generate_script_for_tool(data, script_type)
+                self._write_script_to_file(script_type, filename, script_content)
+                generated_files.append(f"{script_type.title()}: {filename}")
+
+            except Exception as e:
+                errors.append(f"{script_type.title()}: {str(e)}")
+
+        # Try to submit data to Flask server
+        server_success = False
+        try:
+            if signals:
+                signals.progress.emit("Submitting to server...", 4)
+            server_success = self._submit_to_flask_server(data)
+        except Exception:
+            pass
+
+        return {
+            'generated_files': generated_files,
+            'errors': errors,
+            'server_success': server_success,
+            'data': data
+        }
+
+    def on_generation_result(self, result):
+        generated_files = result['generated_files']
+        errors = result['errors']
+        server_success = result['server_success']
+        data = result['data']
+
+        if generated_files:
+            success_msg = "Successfully generated scripts:\n\n" + "\n".join(generated_files)
+            if errors:
+                success_msg += f"\n\nErrors encountered:\n" + "\n".join(errors)
+            if server_success:
+                success_msg += "\n\nData successfully saved to server."
+            else:
+                success_msg += "\n\nWarning: Could not save data to server (scripts still generated locally)."
+            QMessageBox.information(self, "Scripts Generated", success_msg)
+
+            self.generationFinalized.emit({"data": data, "table_name": self.table_name})
+        else:
+            QMessageBox.critical(self, "Generation Failed", "Failed to generate any scripts:\n\n" + "\n".join(errors))
+
+    def on_generation_error(self, error_msg):
+        QMessageBox.critical(self, "Error", f"An error occurred during script generation:\n\n{error_msg}")
+
+    def on_generation_progress(self, message, progress):
+        self.progress_bar.setValue(progress)
+
+    def on_generation_finished(self):
+        self.progress_bar.setVisible(False)
+        self.generate_button.setEnabled(True)
+
+    def _submit_to_flask_server(self, data):
+        '''Submit footprint data to Flask server (non-blocking)'''
+        try:
+            main_window = self.get_main_window()
+            if not main_window or not main_window.verification_data:
+                return False
+
+            # Prepare data for submission
+            submission_data = {
+                "package_type": self.table_name,
+                "part_number": data.get('part_number', ''),
+                "footprint_name": data.get('footprint_name', ''),
+                "specifications": data,
+                "user_created": main_window.verification_data.get('username', 'Unknown'),
+                "license_verification": main_window.verification_data
+            }
+
+            response = requests.post(
+                f"{FLASK_BASE_URL}/api/footprint/add",
+                json=submission_data,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                return result.get('status') == 'success'
+            else:
+                print(f"Server error: {response.status_code}")
+                return False
+
+        except requests.exceptions.RequestException as e:
+            print(f"Network error: {e}")
+            return False
+        except Exception as e:
+            print(f"Submission error: {e}")
+            return False
+
+    def get_main_window(self):
+        '''Get the main window instance'''
+        widget = self
+        while widget:
+            if isinstance(widget, MainWindow):
+                return widget
+            widget = widget.parent()
+        return None
+
+    def _write_script_to_file(self, script_type, filename, script_content):
+        '''Write script file to the appropriate output path'''
+        output_path = self.script_paths.get(script_type)
+        if not output_path:
+            raise ValueError(f"Output path for {script_type} has not been set.")
+
+        os.makedirs(output_path, exist_ok=True)
+        output_filepath = os.path.join(output_path, filename)
+        with open(output_filepath, "w") as f:
+            f.write(script_content)
+
+    def generate_script_for_tool(self, data, tool_type):
+        '''Generate script for specific tool - must be implemented by subclasses'''
+        raise NotImplementedError("Each generator page must implement generate_script_for_tool")
+
+    def set_script_paths(self, paths_dict):
+        '''Update all script output paths'''
+        self.script_paths.update(paths_dict)
+
+    def collect_data(self):
+        '''Collect data from input fields'''
+        data = {}
+        for k, v in self.input_fields.items():
+            key = k.replace(" ", "_").lower().replace("(mm)", "").strip()
+            value = v.text().strip()
+            data[key] = value
+        return data
+
+
+# Main Window with enhanced settings and multithreading support
+class MainWindow(QMainWindow):
+    DEFAULT_CATEGORY_IMAGE_MAP = {
+        "Discrete": "images/DISCRETE.svg",
+        "Sot-23": "images/SOT-PACKAGE.svg",
+        "Sot-143": "images/SOT143.svg",
+        "TO Package": "images/TO-PACKAGE.svg",
+        "Dual Side": "images/DUAL-SIDE-PACKAGE.svg",
+        "Dual with thermal": "images/DUAL-SIDE-PACKAGE.svg",
+        "QF Package": "images/PQFP.svg",
+        "QF Package with thermal": "images/QFN.svg",
+        "QFN TWO ROW": "images/QFN2ROW.svg",
+        "Connectors": "images/CONNECTORS.svg",
+        "Crystals": "images/PrecisionWireWound.svg",
+        "BGA Package": "images/BGA.svg",
+    }
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Modern UI Footprint Generator - Multithreaded")
+        self.resize(1200, 800)
+
+        # Initialize thread pool
+        self.thread_pool = QThreadPool()
+        self.thread_pool.setMaxThreadCount(4)
+
+        self.system_fonts = QFontDatabase.families()
+        self.stroke_fonts = ["Default", "Sans Serif", "Serif"]
+
+        # Initialize application settings with defaults
+        self.decimal_precision = DEFAULT_SETTINGS.copy()
+        self.altium_settings = ALTIUM_SETTINGS.copy()
+        self.allegro_settings = ALLEGRO_SETTINGS.copy()
+        self.pads_settings = PADS_SETTINGS.copy()
+        self.xpedition_settings = XPEDITION_SETTINGS.copy()
+
+        # Standard profiles
+        self.standard_profiles = STANDARD_PROFILES.copy()
+
+        # License verification data
+        self.script_paths = {
+            'altium': '',
+            'allegro': '',
+            'pads': '',
+            'xpedition': ''
+        }
+
+        self.verification_data = None
+        self.load_settings()
+
+        self.current_script_path = ''
+
+        central_container = QWidget()
+        self.main_layout = QHBoxLayout(central_container)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(0)
+
+        self.setCentralWidget(central_container)
+
+        self.create_sidebar()
+        self.create_main_content()
+        self.load_stylesheet("style.qss")
+
+    def load_stylesheet(self, filename):
+        try:
+            with open(filename, "r") as f:
+                self.setStyleSheet(f.read())
+        except FileNotFoundError:
+            print(f"Stylesheet '{filename}' not found. Using default styles.")
+            # Set basic styling
+            self.setStyleSheet('''
+                QMainWindow { background-color: #2d3748; }
+                QPushButton { 
+                    background-color: #4a5568; 
+                    color: white; 
+                    border: none; 
+                    padding: 8px 16px; 
+                    border-radius: 4px; 
+                }
+                QPushButton:hover { background-color: #5a6578; }
+                QPushButton:pressed { background-color: #3a4a5c; }
+                QLabel { color: #e2e8f0; }
+                QLineEdit { 
+                    background-color: #4a5568; 
+                    color: white; 
+                    border: 1px solid #6a7c92; 
+                    padding: 6px; 
+                    border-radius: 3px; 
+                }
+                QComboBox {
+                    background-color: #4a5568; 
+                    color: white; 
+                    border: 1px solid #6a7c92; 
+                    padding: 6px; 
+                    border-radius: 3px; 
+                }
+            ''')
+
+    def create_sidebar(self):
+        # Sidebar implementation (keeping original structure)
+        sidebar_container = QWidget()
+        sidebar_container.setObjectName("Sidebar")
+        sidebar_layout = QVBoxLayout(sidebar_container)
+        sidebar_layout.setContentsMargins(0, 10, 0, 10)
+        sidebar_layout.setSpacing(5)
+        sidebar_layout.setAlignment(Qt.AlignTop)
+
+        self.button_group = []
+        for text, icon in self.get_sidebar_options().items():
+            button = QPushButton(f"  {text}")
+            button.setIcon(qtawesome.icon(icon, color='#d0d0d0'))
+            button.setIconSize(QSize(20, 20))
+            button.setCheckable(True)
+            sidebar_layout.addWidget(button)
+            self.button_group.append(button)
+
+        self.button_group[0].setChecked(True)
+        for button in self.button_group:
+            button.clicked.connect(self.handle_sidebar_click)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(sidebar_container)
+        scroll_area.setFixedWidth(250)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.main_layout.addWidget(scroll_area)
+
+    def handle_sidebar_click(self):
+        clicked_button = self.sender()
+        for button in self.button_group:
+            button.setChecked(button == clicked_button)
+        self.stacked_widget.setCurrentIndex(self.button_group.index(clicked_button))
+
+    def create_main_content(self):
+        self.stacked_widget = QStackedWidget()
+        self.main_layout.addWidget(self.stacked_widget)
+        self.stacked_widget.addWidget(self.create_home_page())
+
+        for page_title in list(self.get_sidebar_options().keys())[1:]:
+            self.stacked_widget.addWidget(self.create_component_page(page_title))
+
+        self.settings_page = self.create_settings_page()
+        self.settings_page_index = self.stacked_widget.addWidget(self.settings_page)
+
+        self.generator_pages = {}
+
+    def get_sidebar_options(self):
+        return {
+            "Home": "fa5s.home",
+            "Discrete": "fa5s.sliders-h",
+            "Sot-23": "fa5s.microchip",
+            "Sot-143": "fa5s.satellite",
+            "TO Package": "fa5s.battery-half",
+            "Dual Side": "fa5s.clone",
+            "Dual with thermal": "fa5s.fire",
+            "QF Package": "fa5s.shapes",
+            "QF with thermal": "fa5s.thermometer-half",
+            "QFN TWO ROW": "fa5s.border-style",
+            "Connectors": "fa5s.plug",
+            "Crystals": "fa5s.icicles",
+            "BGA Package": "fa5s.th",
+        }
+
+    def create_home_page(self):
+        page = QWidget()
+        layout = QGridLayout(page)
+        layout.setContentsMargins(25, 25, 25, 25)
+
+        top_bar_layout = QHBoxLayout()
+        title = QLabel("Dashboard - Multithreaded PCB Generator")
+        title.setObjectName("HomePageTitle")
+        title.setFont(QFont("Arial", 24, QFont.Weight.Bold))
+        top_bar_layout.addWidget(title)
+        top_bar_layout.addStretch()
+
+        settings_button = QPushButton()
+        settings_button.setIcon(qtawesome.icon('fa5s.cog', color='#d0d0d0'))
+        settings_button.setIconSize(QSize(24, 24))
+        settings_button.setFixedSize(40, 40)
+        settings_button.setCursor(Qt.PointingHandCursor)
+        settings_button.clicked.connect(self.go_to_settings)
+        top_bar_layout.addWidget(settings_button)
+
+        layout.addLayout(top_bar_layout, 0, 0, 1, 4)
+
+        # License status card
+        license_status = "Verified" if self.verification_data else "Not Verified"
+        license_icon = "fa5s.check-circle" if self.verification_data else "fa5s.times-circle"
+        card1 = self.create_dashboard_card("License Status", license_status, license_icon)
+
+        # Settings status card
+        precision = self.decimal_precision.get('decimal_precision', 4)
+        card2 = self.create_dashboard_card("Decimal Precision", f"{precision} places", "fa5s.calculator")
+
+        # Thread pool status
+        active_threads = self.thread_pool.activeThreadCount()
+        max_threads = self.thread_pool.maxThreadCount()
+        card3 = self.create_dashboard_card("Thread Pool", f"{active_threads}/{max_threads} active", "fa5s.server")
+
+        layout.addWidget(card1, 1, 0)
+        layout.addWidget(card2, 1, 1)
+        layout.addWidget(card3, 1, 2)
+        layout.setRowStretch(2, 1)
+
+        return page
+
+    def create_dashboard_card(self, title_text, value_text, icon_name):
+        card = QFrame()
+        card.setObjectName("DashboardCard")
+        card.setStyleSheet('''
+            #DashboardCard {
+                background-color: #4a5568;
+                border: 1px solid #6a7c92;
+                border-radius: 8px;
+                padding: 16px;
+                margin: 8px;
+            }
+        ''')
+        card_layout = QVBoxLayout(card)
+
+        title_label = QLabel(title_text)
+        title_label.setStyleSheet("font-size: 11pt; color: #a0a0a0;")
+
+        value_layout = QHBoxLayout()
+        icon_label = QLabel()
+        icon_color = '#5d9afc' if 'check' in icon_name else '#ff6b6b' if 'times' in icon_name else '#5d9afc'
+        icon_label.setPixmap(qtawesome.icon(icon_name, color=icon_color).pixmap(QSize(32, 32)))
+
+        value_label = QLabel(value_text)
+        value_label.setStyleSheet("font-size: 20pt; font-weight: bold;")
+
+        value_layout.addWidget(icon_label)
+        value_layout.addWidget(value_label)
+        value_layout.addStretch()
+
+        card_layout.addWidget(title_label)
+        card_layout.addLayout(value_layout)
+
+        return card
+
+    def create_component_page(self, component_type):
+        page = QWidget()
+        layout = QGridLayout(page)
+        layout.setContentsMargins(25, 25, 25, 25)
+
+        title = QLabel(f"{component_type} Footprint")
+        title.setObjectName("PageTitle")
+        font = title.font()
+        font.setPointSize(36)
+        font.setBold(True)
+        title.setFont(font)
+        layout.addWidget(title, 0, 0, 1, 2)
+
+        image_label = QSvgWidget()
+        image_label.setMinimumSize(400, 400)
+        image_label.setStyleSheet("background-color:#232730; border-radius:8px;")
+
+        default_svg = self.DEFAULT_CATEGORY_IMAGE_MAP.get(component_type)
+        if default_svg:
+            try:
+                image_label.load(default_svg)
+            except:
+                pass
+
+        layout.addWidget(image_label, 1, 1, 2, 1)
+        layout.setColumnStretch(1, 1)
+
+        options_layout = QVBoxLayout()
+        options_layout.setSpacing(15)
+
+        options = {
+            "Discrete": ["Discrete Normal", "Discrete Fillet-Shape"],
+            "Sot-23": ["Normal", "Normal with MP Expansion", "Fillet-Shape", "Fillet with MP Expansion"],
+        }
+
+        component_options = options.get(component_type, ["Option A", "Option B"])
+
+        for option_text in component_options:
+            option_label = ClickableLabel(option_text)
+            option_label.setFixedWidth(300)
+            option_label.setStyleSheet('''
+                ClickableLabel {
+                    background-color: #4a5568;
+                    border: 1px solid #6a7c92;
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin: 4px;
+                }
+                ClickableLabel:hover {
+                    background-color: #5a6578;
+                    border: 1px solid #7a8c9a;
+                }
+            ''')
+            option_label.singleClicked.connect(lambda checked=True, p=default_svg: image_label.load(default_svg) if default_svg else None)
+            option_label.doubleClicked.connect(lambda checked=True, c=component_type, o=option_text: self.go_to_generator(c, o))
+            options_layout.addWidget(option_label)
+
+        options_layout.addStretch()
+        layout.addLayout(options_layout, 1, 0)
+        return page
+
+    def create_settings_page(self):
+        page_widget = QWidget()
+        page_layout = QVBoxLayout(page_widget)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setObjectName("SettingsScrollArea")
+        page_layout.addWidget(scroll_area)
+
+        container_widget = QWidget()
+        scroll_area.setWidget(container_widget)
+        container_layout = QVBoxLayout(container_widget)
+        container_layout.setContentsMargins(25, 25, 25, 25)
+        container_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        container_layout.setSpacing(20)
+
+        title = QLabel("Settings")
+        title.setObjectName("PageTitle")
+        title.setFont(QFont("Arial", 24, QFont.Weight.Bold))
+        container_layout.addWidget(title)
+
+        tab_widget = QTabWidget()
+        tab_widget.addTab(self._create_default_settings_tab(), "Default")
+        tab_widget.addTab(self._create_enhanced_tool_settings_tab("altium", "Altium"), "Altium")
+        tab_widget.addTab(self._create_enhanced_tool_settings_tab("allegro", "Allegro"), "Allegro")
+        tab_widget.addTab(self._create_enhanced_tool_settings_tab("pads", "PADS"), "PADS")
+        tab_widget.addTab(self._create_enhanced_tool_settings_tab("xpedition", "Xpedition"), "Xpedition")
+        tab_widget.addTab(self._create_account_tab(), "Account")
+
+        container_layout.addWidget(tab_widget)
+
+        return page_widget
+
+    def _create_default_settings_tab(self):
+        tab_widget = QWidget()
+        main_layout = QVBoxLayout(tab_widget)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        main_layout.setSpacing(15)
+
+        # Decimal Precision Group
+        precision_group = QGroupBox("Decimal Precision")
+        precision_layout = QFormLayout(precision_group)
+
+        self.precision_lineedit = QLineEdit()
+        self.precision_lineedit.setMaxLength(1)
+        self.precision_lineedit.setText(str(self.decimal_precision.get('decimal_precision', 3)))
+        self.precision_lineedit.setValidator(QIntValidator(0, 6))
+        self.precision_lineedit.textChanged.connect(self.on_precision_changed)
+        precision_layout.addRow("Decimal Places:", self.precision_lineedit)
+
+        main_layout.addWidget(precision_group)
+
+        # Script Output Paths Group
+        paths_group = QGroupBox("Script Output Paths")
+        paths_layout = QGridLayout(paths_group)
+
+        tool_names = ['Altium', 'Allegro', 'PADS', 'Xpedition']
+        self.path_edits = {}
+
+        for i, tool in enumerate(tool_names):
+            tool_key = tool.lower()
+            paths_layout.addWidget(QLabel(f"{tool} Script Path:"), i, 0)
+            path_edit = QLineEdit(self.script_paths[tool_key])
+            path_edit.setReadOnly(True)
+            self.path_edits[tool_key] = path_edit
+
+            browse_btn = QPushButton("Browse")
+            browse_btn.clicked.connect(lambda checked, t=tool_key: self.browse_for_script_path(t))
+
+            paths_layout.addWidget(path_edit, i, 1)
+            paths_layout.addWidget(browse_btn, i, 2)
+
+        main_layout.addWidget(paths_group)
+
+        # Multithreading Group
+        threading_group = QGroupBox("Multithreading Settings")
+        threading_layout = QFormLayout(threading_group)
+
+        self.max_threads_spin = QSpinBox()
+        self.max_threads_spin.setRange(1, 8)
+        self.max_threads_spin.setValue(self.thread_pool.maxThreadCount())
+        self.max_threads_spin.valueChanged.connect(self.on_max_threads_changed)
+        threading_layout.addRow("Maximum Threads:", self.max_threads_spin)
+
+        main_layout.addWidget(threading_group)
+
+        return tab_widget
+
+    def _create_enhanced_tool_settings_tab(self, tool_key, tool_name):
+        '''Create enhanced settings tab with standard profiles'''
+        tab_widget = QWidget()
+        main_layout = QVBoxLayout(tab_widget)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        main_layout.setSpacing(15)
+
+        header = QLabel(f"{tool_name} Settings")
+        header.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        main_layout.addWidget(header)
+
+        # Standard Profile Selection
+        standard_group = QGroupBox("Standard Profile")
+        standard_layout = QHBoxLayout(standard_group)
+
+        # Dropdown for standards (read-only line edits replaced with combo box)
+        self.standard_combos = getattr(self, 'standard_combos', {})
+        standard_combo = QComboBox()
+        standard_combo.addItems(list(self.standard_profiles[tool_key].keys()))
+        self.standard_combos[tool_key] = standard_combo
+
+        # Add Standard button
+        add_standard_btn = QPushButton("Add Standard")
+        add_standard_btn.clicked.connect(lambda: self.add_new_standard(tool_key, tool_name))
+
+        standard_layout.addWidget(QLabel("Standard:"))
+        standard_layout.addWidget(standard_combo)
+        standard_layout.addWidget(add_standard_btn)
+        standard_layout.addStretch()
+
+        main_layout.addWidget(standard_group)
+
+        # Settings fields (now read-only labels)
+        settings_group = QGroupBox("Current Settings")
+        settings_layout = QFormLayout(settings_group)
+
+        # Create read-only labels for current settings
+        tool_settings = getattr(self, f'{tool_key}_settings')
+        self.setting_labels = getattr(self, 'setting_labels', {})
+
+        if tool_key not in self.setting_labels:
+            self.setting_labels[tool_key] = {}
+
+        setting_names = [
+            ('assmbly_layout_line_width', 'Assembly Line Width (mm):'),
+            ('courtyard_expansion', 'Courtyard Expansion (mm):'),
+            ('BGA_TH_courtyard_expansion', 'BGA/TH Courtyard Expansion (mm):'),
+            ('courtyard_line_width', 'Courtyard Line Width (mm):'),
+            ('silkscreen_expansion', 'Silkscreen Expansion (mm):'),
+            ('silkscreen_line_width', 'Silkscreen Line Width (mm):')
+        ]
+
+        for key, label in setting_names:
+            value_label = QLabel(str(tool_settings.get(key, 0.1)))
+            value_label.setStyleSheet("background-color: #4a5568; padding: 6px; border-radius: 3px;")
+            self.setting_labels[tool_key][key] = value_label
+            settings_layout.addRow(label, value_label)
+
+        main_layout.addWidget(settings_group)
+
+        # Connect standard combo change
+        standard_combo.currentTextChanged.connect(lambda text: self.on_standard_changed(tool_key, text))
+
+        return tab_widget
+
+    def add_new_standard(self, tool_key, tool_name):
+        '''Add new standard profile'''
+        dialog = StandardDialog(tool_name, self)
+        if dialog.exec() == QDialog.Accepted:
+            name, settings = dialog.get_standard_data()
+            if name and settings:
+                # Add to profiles
+                self.standard_profiles[tool_key][name] = settings
+
+                # Update combo box
+                combo = self.standard_combos[tool_key]
+                combo.addItem(name)
+                combo.setCurrentText(name)
+
+                # Apply settings
+                self.apply_standard_settings(tool_key, settings)
+
+                QMessageBox.information(self, "Standard Added", f"New standard '{name}' added successfully!")
+
+    def on_standard_changed(self, tool_key, standard_name):
+        '''Handle standard profile change'''
+        if standard_name in self.standard_profiles[tool_key]:
+            settings = self.standard_profiles[tool_key][standard_name]
+            self.apply_standard_settings(tool_key, settings)
+
+    def apply_standard_settings(self, tool_key, settings):
+        '''Apply standard settings to tool'''
+        tool_settings = getattr(self, f'{tool_key}_settings')
+        tool_settings.update(settings)
+
+        # Update UI labels
+        if tool_key in self.setting_labels:
+            for key, label in self.setting_labels[tool_key].items():
+                if key in settings:
+                    label.setText(str(settings[key]))
+
+    def on_max_threads_changed(self, value):
+        '''Handle max threads change'''
+        self.thread_pool.setMaxThreadCount(value)
+
+    def on_precision_changed(self, value):
+        '''Handle decimal precision change'''
+        try:
+            self.decimal_precision['decimal_precision'] = int(value) if value else 3
+        except ValueError:
+            self.decimal_precision['decimal_precision'] = 3
+
+    def _create_account_tab(self):
+        '''Create account/license verification tab'''
+        tab_widget = QWidget()
+        main_layout = QVBoxLayout(tab_widget)
+        main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        main_layout.setSpacing(15)
+
+        # License Verification Group
+        license_group = QGroupBox("License Verification")
+        license_layout = QGridLayout(license_group)
+
+        # Status
+        license_layout.addWidget(QLabel("Status:"), 0, 0)
+        self.license_status_label = QLabel("Not Verified")
+        if self.verification_data:
+            self.license_status_label.setText("Verified")
+            self.license_status_label.setStyleSheet("color: green; font-weight: bold;")
+        else:
+            self.license_status_label.setStyleSheet("color: red; font-weight: bold;")
+        license_layout.addWidget(self.license_status_label, 0, 1)
+
+        # User info
+        if self.verification_data:
+            license_layout.addWidget(QLabel("Username:"), 1, 0)
+            license_layout.addWidget(QLabel(self.verification_data.get('username', 'Unknown')), 1, 1)
+
+        # Verify/Clear buttons
+        button_layout = QHBoxLayout()
+
+        self.verify_button = QPushButton("Verify License")
+        self.verify_button.clicked.connect(self.show_license_verification_dialog)
+        button_layout.addWidget(self.verify_button)
+
+        self.clear_button = QPushButton("Clear License")
+        self.clear_button.clicked.connect(self.clear_license)
+        self.clear_button.setEnabled(bool(self.verification_data))
+        button_layout.addWidget(self.clear_button)
+
+        button_layout.addStretch()
+        license_layout.addLayout(button_layout, 2, 0, 1, 2)
+
+        main_layout.addWidget(license_group)
+
+        return tab_widget
+
+    def show_license_verification_dialog(self):
+        '''Show license verification dialog'''
+        dialog = LicenseVerificationDialog(self)
+        if dialog.exec() == QDialog.Accepted:
+            self.verification_data = dialog.verification_data
+            self.update_license_ui()
+
+    def clear_license(self):
+        '''Clear license verification'''
+        self.verification_data = None
+        self.update_license_ui()
+        QMessageBox.information(self, "License Cleared", "License verification cleared")
+
+    def update_license_ui(self):
+        '''Update license UI elements'''
+        if hasattr(self, 'license_status_label'):
+            if self.verification_data:
+                self.license_status_label.setText("Verified")
+                self.license_status_label.setStyleSheet("color: green; font-weight: bold;")
+                self.verify_button.setText("Re-verify License")
+                self.clear_button.setEnabled(True)
+            else:
+                self.license_status_label.setText("Not Verified")
+                self.license_status_label.setStyleSheet("color: red; font-weight: bold;")
+                self.verify_button.setText("Verify License")
+                self.clear_button.setEnabled(False)
+
+    def go_to_generator(self, component_type, option_name):
+        # Implementation for navigation to generator pages
+        QMessageBox.information(self, "Generator", f"Opening {component_type} - {option_name} generator")
+
+    def go_to_settings(self):
+        self.stacked_widget.setCurrentIndex(self.settings_page_index)
+        for button in self.button_group:
+            button.setChecked(False)
+
+    def browse_for_script_path(self, script_type):
+        '''Browse for script output path for specific tool type'''
+        current_path = self.script_paths.get(script_type, os.path.expanduser("~"))
+        directory = QFileDialog.getExistingDirectory(
+            self, f"Select {script_type.title()} Script Output Folder", current_path
+        )
+        if directory:
+            self.script_paths[script_type] = directory
+            self.path_edits[script_type].setText(directory)
+
+            QMessageBox.information(
+                self, "Path Set", 
+                f"{script_type.title()} script output path has been set to:\n{directory}"
+            )
+
+    def save_settings(self):
+        settings_data = {
+            "script_paths": self.script_paths,
+            "verification_data": self.verification_data,
+            "altium_settings": self.altium_settings,
+            "allegro_settings": self.allegro_settings,
+            "pads_settings": self.pads_settings,
+            "xpedition_settings": self.xpedition_settings,
+            "standard_profiles": self.standard_profiles,
+            "max_threads": self.thread_pool.maxThreadCount()
+        }
+
+        try:
+            with open(SETTINGS_FILE, "w") as f:
+                json.dump(settings_data, f, indent=4)
+            print("Settings saved.")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", f"Failed to save settings:\n{str(e)}")
+
+    def load_settings(self):
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, "r") as f:
+                    settings_data = json.load(f)
+
+                # Load all settings
+                if "script_paths" in settings_data:
+                    self.script_paths.update(settings_data["script_paths"])
+
+                self.verification_data = settings_data.get("verification_data", None)
+
+                if "altium_settings" in settings_data:
+                    self.altium_settings.update(settings_data["altium_settings"])
+                if "allegro_settings" in settings_data:
+                    self.allegro_settings.update(settings_data["allegro_settings"])
+                if "pads_settings" in settings_data:
+                    self.pads_settings.update(settings_data["pads_settings"])
+                if "xpedition_settings" in settings_data:
+                    self.xpedition_settings.update(settings_data["xpedition_settings"])
+
+                if "standard_profiles" in settings_data:
+                    self.standard_profiles.update(settings_data["standard_profiles"])
+
+                if "max_threads" in settings_data:
+                    self.thread_pool.setMaxThreadCount(settings_data["max_threads"])
+
+                print("Settings loaded.")
+            except Exception as e:
+                QMessageBox.warning(self, "Load Error", f"Failed to load settings:\n{str(e)}")
+
+    def closeEvent(self, event):
+        # Wait for all threads to complete
+        self.thread_pool.waitForDone(3000)  # Wait up to 3 seconds
+        self.save_settings()
+        event.accept()
+
+
+# Application Entry Point
+if __name__ == "__main__":
+    if not os.path.exists("images"):
+        os.makedirs("images")
+        print("Created 'images' directory. Please add placeholder SVG images for the best experience.")
+
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
