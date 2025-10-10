@@ -1,6 +1,1432 @@
+"""
+Altium Symbol Generator with Datasheet Extraction
+Full working application with PDF parsing and user overrides
+"""
+
 import sys
+import os
+import re
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QTableWidget, QTableWidgetItem, 
+                              QHBoxLayout, QTabWidget, QPushButton, QTableWidget,
+                              QTableWidgetItem, QFileDialog, QLabel, QComboBox,
+                              QSpinBox, QTextEdit, QMessageBox, QGroupBox, 
+                              QLineEdit, QCheckBox, QHeaderView)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+import pdfplumber
+import pandas as pd
+import json
+
+class PDFExtractor(QThread):
+    """Background thread for PDF extraction"""
+    extraction_complete = pyqtSignal(list)
+    extraction_error = pyqtSignal(str)
+    
+    def __init__(self, pdf_path):
+        super().__init__()
+        self.pdf_path = pdf_path
+    
+    def run(self):
+        try:
+            pin_data = []
+            with pdfplumber.open(self.pdf_path) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    # Extract tables from page
+                    tables = page.extract_tables()
+                    
+                    for table in tables:
+                        if not table:
+                            continue
+                        
+                        # Try to identify pin table by headers
+                        headers = [str(cell).lower() if cell else '' 
+                                  for cell in table[0]]
+                        
+                        # Check if this looks like a pin table
+                        if any(keyword in ' '.join(headers) 
+                               for keyword in ['pin', 'name', 'number', 'type', 'signal']):
+                            
+                            pin_data.extend(self.parse_pin_table(table, headers))
+            
+            if not pin_data:
+                self.extraction_error.emit("No pin tables found in PDF")
+            else:
+                self.extraction_complete.emit(pin_data)
+                
+        except Exception as e:
+            self.extraction_error.emit(f"Extraction failed: {str(e)}")
+    
+    def parse_pin_table(self, table, headers):
+        """Parse pin table and extract pin data"""
+        pins = []
+        
+        # Find column indices
+        pin_num_col = self.find_column(headers, ['pin', 'num', 'no'])
+        pin_name_col = self.find_column(headers, ['name', 'signal', 'function'])
+        pin_type_col = self.find_column(headers, ['type', 'i/o', 'direction'])
+        
+        # Process rows (skip header)
+        for row in table[1:]:
+            if not row or len(row) < 2:
+                continue
+            
+            pin_num = str(row[pin_num_col]).strip() if pin_num_col >= 0 else ''
+            pin_name = str(row[pin_name_col]).strip() if pin_name_col >= 0 else ''
+            pin_type = str(row[pin_type_col]).strip() if pin_type_col >= 0 else ''
+            
+            # Skip empty rows
+            if not pin_num or pin_num == 'None':
+                continue
+            
+            # Detect electrical type
+            elec_type = self.detect_electrical_type(pin_name, pin_type)
+            
+            # Determine side based on pin function
+            side = self.determine_side(pin_name, elec_type)
+            
+            pins.append({
+                'pin_number': pin_num,
+                'pin_name': pin_name,
+                'electrical_type': elec_type,
+                'side': side
+            })
+        
+        return pins
+    
+    def find_column(self, headers, keywords):
+        """Find column index by keywords"""
+        for i, header in enumerate(headers):
+            if any(kw in header for kw in keywords):
+                return i
+        return -1 if not headers else 0
+    
+    def detect_electrical_type(self, name, type_str):
+        """Detect electrical type from pin name/type"""
+        name_lower = name.lower()
+        type_lower = type_str.lower()
+        
+        if any(x in name_lower for x in ['vcc', 'vdd', 'v+', 'power']):
+            return 'Power'
+        elif any(x in name_lower for x in ['gnd', 'vss', 'v-', 'ground']):
+            return 'Ground'
+        elif any(x in type_lower for x in ['input', 'in']):
+            return 'Input'
+        elif any(x in type_lower for x in ['output', 'out']):
+            return 'Output'
+        elif any(x in type_lower for x in ['i/o', 'bidirectional', 'inout']):
+            return 'Bidirectional'
+        else:
+            return 'Passive'
+    
+    def determine_side(self, name, elec_type):
+        """Determine which side to place pin"""
+        if elec_type == 'Power':
+            return 'Top'
+        elif elec_type == 'Ground':
+            return 'Bottom'
+        else:
+            return 'Left'
+
+class SymbolPreviewWidget(QWidget):
+    """Widget to preview generated symbol"""
+    def __init__(self):
+        super().__init__()
+        self.pins = []
+        self.body_width = 400
+        self.body_height = 600
+        self.setMinimumSize(600, 800)
+    
+    def set_pin_data(self, pins):
+        """Update pin data for preview"""
+        self.pins = pins
+        self.update()
+    
+    def paintEvent(self, event):
+        """Draw symbol preview"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw background
+        painter.fillRect(self.rect(), QColor(255, 255, 255))
+        
+        # Set up coordinate system (centered)
+        offset_x = (self.width() - self.body_width) // 2
+        offset_y = (self.height() - self.body_height) // 2
+        
+        # Draw body rectangle
+        painter.setPen(QPen(QColor(0, 0, 0), 2))
+        painter.drawRect(offset_x, offset_y, self.body_width, self.body_height)
+        
+        # Draw pins
+        pin_length = 100
+        pin_spacing = 100
+        
+        # Group pins by side
+        sides = {'Left': [], 'Right': [], 'Top': [], 'Bottom': []}
+        for pin in self.pins:
+            sides[pin['side']].append(pin)
+        
+        # Draw each side
+        for side, side_pins in sides.items():
+            for i, pin in enumerate(side_pins):
+                if side == 'Left':
+                    x1 = offset_x - pin_length
+                    y1 = offset_y + 100 + i * pin_spacing
+                    x2 = offset_x
+                    y2 = y1
+                    name_x = x1 - 10
+                    name_y = y1
+                    num_x = offset_x + 10
+                    num_y = y1
+                elif side == 'Right':
+                    x1 = offset_x + self.body_width + pin_length
+                    y1 = offset_y + 100 + i * pin_spacing
+                    x2 = offset_x + self.body_width
+                    y2 = y1
+                    name_x = x1 + 10
+                    name_y = y1
+                    num_x = offset_x + self.body_width - 10
+                    num_y = y1
+                elif side == 'Top':
+                    x1 = offset_x + 100 + i * pin_spacing
+                    y1 = offset_y - pin_length
+                    x2 = x1
+                    y2 = offset_y
+                    name_x = x1
+                    name_y = y1 - 10
+                    num_x = x1
+                    num_y = offset_y + 20
+                else:  # Bottom
+                    x1 = offset_x + 100 + i * pin_spacing
+                    y1 = offset_y + self.body_height + pin_length
+                    x2 = x1
+                    y2 = offset_y + self.body_height
+                    name_x = x1
+                    name_y = y1 + 20
+                    num_x = x1
+                    num_y = offset_y + self.body_height - 10
+                
+                # Draw pin line
+                painter.setPen(QPen(QColor(255, 0, 0), 2))
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+                
+                # Draw pin name
+                painter.setPen(QPen(QColor(0, 0, 255), 1))
+                painter.setFont(QFont('Arial', 8))
+                painter.drawText(int(name_x), int(name_y), pin['pin_name'])
+                
+                # Draw pin number
+                painter.setPen(QPen(QColor(0, 128, 0), 1))
+                painter.drawText(int(num_x), int(num_y), pin['pin_number'])
+
+class AltiumSymbolGenerator(QMainWindow):
+    """Main application window"""
+    def __init__(self):
+        super().__init__()
+        self.pin_data = []
+        self.pdf_path = None
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize user interface"""
+        self.setWindowTitle('Altium Symbol Generator with Datasheet Extraction')
+        self.setGeometry(100, 100, 1400, 900)
+        
+        # Create central widget and main layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Create tab widget
+        tabs = QTabWidget()
+        main_layout.addWidget(tabs)
+        
+        # Tab 1: PDF Extraction
+        tab1 = self.create_extraction_tab()
+        tabs.addTab(tab1, 'PDF Extraction')
+        
+        # Tab 2: Pin Configuration
+        tab2 = self.create_configuration_tab()
+        tabs.addTab(tab2, 'Pin Configuration')
+        
+        # Tab 3: Script Generation
+        tab3 = self.create_generation_tab()
+        tabs.addTab(tab3, 'Script Generation')
+    
+    def create_extraction_tab(self):
+        """Create PDF extraction tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # File selection group
+        file_group = QGroupBox('PDF Datasheet')
+        file_layout = QHBoxLayout(file_group)
+        
+        self.pdf_label = QLabel('No file selected')
+        file_layout.addWidget(self.pdf_label)
+        
+        select_btn = QPushButton('Select PDF')
+        select_btn.clicked.connect(self.select_pdf)
+        file_layout.addWidget(select_btn)
+        
+        layout.addWidget(file_group)
+        
+        # Extraction controls
+        extract_btn = QPushButton('Extract Pin Data')
+        extract_btn.clicked.connect(self.extract_pin_data)
+        extract_btn.setStyleSheet('QPushButton {background-color: #4CAF50; color: white; padding: 10px; font-size: 14px;}')
+        layout.addWidget(extract_btn)
+        
+        # Status label
+        self.status_label = QLabel('Ready to extract')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #f0f0f0;}')
+        layout.addWidget(self.status_label)
+        
+        # Preview table
+        layout.addWidget(QLabel('Extracted Data Preview:'))
+        self.preview_table = QTableWidget()
+        self.preview_table.setColumnCount(4)
+        self.preview_table.setHorizontalHeaderLabels(['Pin #', 'Pin Name', 'Type', 'Side'])
+        self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.preview_table)
+        
+        return widget
+    
+    def create_configuration_tab(self):
+        """Create pin configuration tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Controls
+        controls_layout = QHBoxLayout()
+        
+        add_btn = QPushButton('Add Pin')
+        add_btn.clicked.connect(self.add_pin_row)
+        controls_layout.addWidget(add_btn)
+        
+        delete_btn = QPushButton('Delete Selected')
+        delete_btn.clicked.connect(self.delete_pin_row)
+        controls_layout.addWidget(delete_btn)
+        
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+        
+        # Editable pin table
+        self.pin_table = QTableWidget()
+        self.pin_table.setColumnCount(4)
+        self.pin_table.setHorizontalHeaderLabels(['Pin Number', 'Pin Name', 'Electrical Type', 'Side'])
+        self.pin_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.pin_table)
+        
+        return widget
+    
+    def create_generation_tab(self):
+        """Create script generation tab"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        
+        # Left panel: Settings
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        
+        # Component settings
+        settings_group = QGroupBox('Component Settings')
+        settings_layout = QVBoxLayout(settings_group)
+        
+        # Component name
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel('Component Name:'))
+        self.comp_name_edit = QLineEdit('COMPONENT')
+        name_layout.addWidget(self.comp_name_edit)
+        settings_layout.addLayout(name_layout)
+        
+        # Designator
+        des_layout = QHBoxLayout()
+        des_layout.addWidget(QLabel('Designator:'))
+        self.designator_edit = QLineEdit('U?')
+        des_layout.addWidget(self.designator_edit)
+        settings_layout.addLayout(des_layout)
+        
+        # Description
+        desc_layout = QHBoxLayout()
+        desc_layout.addWidget(QLabel('Description:'))
+        self.description_edit = QLineEdit('Auto-generated symbol')
+        desc_layout.addWidget(self.description_edit)
+        settings_layout.addLayout(desc_layout)
+        
+        # Pin spacing
+        spacing_layout = QHBoxLayout()
+        spacing_layout.addWidget(QLabel('Pin Spacing (mils):'))
+        self.pin_spacing_spin = QSpinBox()
+        self.pin_spacing_spin.setRange(50, 200)
+        self.pin_spacing_spin.setValue(100)
+        spacing_layout.addWidget(self.pin_spacing_spin)
+        settings_layout.addLayout(spacing_layout)
+        
+        left_layout.addWidget(settings_group)
+        
+        # Validation options
+        validation_group = QGroupBox('Validation')
+        validation_layout = QVBoxLayout(validation_group)
+        
+        self.check_duplicates = QCheckBox('Check duplicate pin numbers')
+        self.check_duplicates.setChecked(True)
+        validation_layout.addWidget(self.check_duplicates)
+        
+        self.check_names = QCheckBox('Validate pin names')
+        self.check_names.setChecked(True)
+        validation_layout.addWidget(self.check_names)
+        
+        left_layout.addWidget(validation_group)
+        
+        # Generate button
+        generate_btn = QPushButton('Generate Altium Script')
+        generate_btn.clicked.connect(self.generate_script)
+        generate_btn.setStyleSheet('QPushButton {background-color: #2196F3; color: white; padding: 15px; font-size: 16px; font-weight: bold;}')
+        left_layout.addWidget(generate_btn)
+        
+        # Export button
+        export_btn = QPushButton('Export to File')
+        export_btn.clicked.connect(self.export_script)
+        left_layout.addWidget(export_btn)
+        
+        left_layout.addStretch()
+        
+        # Right panel: Preview and Script
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        
+        # Symbol preview
+        right_layout.addWidget(QLabel('Symbol Preview:'))
+        self.preview_widget = SymbolPreviewWidget()
+        right_layout.addWidget(self.preview_widget)
+        
+        # Generated script
+        right_layout.addWidget(QLabel('Generated Altium DelphiScript:'))
+        self.script_text = QTextEdit()
+        self.script_text.setReadOnly(True)
+        self.script_text.setFont(QFont('Courier', 9))
+        right_layout.addWidget(self.script_text)
+        
+        # Add panels to main layout
+        layout.addWidget(left_panel, 1)
+        layout.addWidget(right_panel, 2)
+        
+        return widget
+    
+    def select_pdf(self):
+        """Select PDF file"""
+        file_path, _ = QFileDialog.getOpenFileName(self, 'Select PDF Datasheet', '', 'PDF Files (*.pdf)')
+        if file_path:
+            self.pdf_path = file_path
+            self.pdf_label.setText(os.path.basename(file_path))
+    
+    def extract_pin_data(self):
+        """Extract pin data from PDF"""
+        if not self.pdf_path:
+            QMessageBox.warning(self, 'Warning', 'Please select a PDF file first')
+            return
+        
+        self.status_label.setText('Extracting data...')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #FFF9C4;}')
+        
+        # Create and start extraction thread
+        self.extractor = PDFExtractor(self.pdf_path)
+        self.extractor.extraction_complete.connect(self.on_extraction_complete)
+        self.extractor.extraction_error.connect(self.on_extraction_error)
+        self.extractor.start()
+    
+    def on_extraction_complete(self, pin_data):
+        """Handle successful extraction"""
+        self.pin_data = pin_data
+        self.status_label.setText(f'Extracted {len(pin_data)} pins successfully')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #C8E6C9;}')
+        
+        # Update preview table
+        self.preview_table.setRowCount(len(pin_data))
+        for i, pin in enumerate(pin_data):
+            self.preview_table.setItem(i, 0, QTableWidgetItem(pin['pin_number']))
+            self.preview_table.setItem(i, 1, QTableWidgetItem(pin['pin_name']))
+            self.preview_table.setItem(i, 2, QTableWidgetItem(pin['electrical_type']))
+            self.preview_table.setItem(i, 3, QTableWidgetItem(pin['side']))
+        
+        # Update configuration table
+        self.update_configuration_table()
+    
+    def on_extraction_error(self, error_msg):
+        """Handle extraction error"""
+        self.status_label.setText(f'Error: {error_msg}')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #FFCDD2;}')
+        QMessageBox.critical(self, 'Extraction Error', error_msg)
+    
+    def update_configuration_table(self):
+        """Update configuration table with extracted data"""
+        self.pin_table.setRowCount(len(self.pin_data))
+        
+        for i, pin in enumerate(self.pin_data):
+            # Pin number
+            self.pin_table.setItem(i, 0, QTableWidgetItem(pin['pin_number']))
+            
+            # Pin name
+            self.pin_table.setItem(i, 1, QTableWidgetItem(pin['pin_name']))
+            
+            # Electrical type (combo box)
+            type_combo = QComboBox()
+            type_combo.addItems(['Input', 'Output', 'Bidirectional', 'Power', 'Ground', 'Passive'])
+            type_combo.setCurrentText(pin['electrical_type'])
+            self.pin_table.setCellWidget(i, 2, type_combo)
+            
+            # Side (combo box)
+            side_combo = QComboBox()
+            side_combo.addItems(['Left', 'Right', 'Top', 'Bottom'])
+            side_combo.setCurrentText(pin['side'])
+            self.pin_table.setCellWidget(i, 3, side_combo)
+    
+    def add_pin_row(self):
+        """Add new pin row"""
+        row = self.pin_table.rowCount()
+        self.pin_table.insertRow(row)
+        
+        self.pin_table.setItem(row, 0, QTableWidgetItem('1'))
+        self.pin_table.setItem(row, 1, QTableWidgetItem('PIN'))
+        
+        type_combo = QComboBox()
+        type_combo.addItems(['Input', 'Output', 'Bidirectional', 'Power', 'Ground', 'Passive'])
+        self.pin_table.setCellWidget(row, 2, type_combo)
+        
+        side_combo = QComboBox()
+        side_combo.addItems(['Left', 'Right', 'Top', 'Bottom'])
+        self.pin_table.setCellWidget(row, 3, side_combo)
+    
+    def delete_pin_row(self):
+        """Delete selected pin row"""
+        current_row = self.pin_table.currentRow()
+        if current_row >= 0:
+            self.pin_table.removeRow(current_row)
+    
+    def validate_pins(self):
+        """Validate pin configuration"""
+        errors = []
+        pin_numbers = set()
+        
+        for row in range(self.pin_table.rowCount()):
+            pin_num = self.pin_table.item(row, 0)
+            pin_name = self.pin_table.item(row, 1)
+            
+            if not pin_num or not pin_num.text():
+                errors.append(f'Row {row + 1}: Missing pin number')
+                continue
+            
+            if self.check_duplicates.isChecked():
+                if pin_num.text() in pin_numbers:
+                    errors.append(f'Row {row + 1}: Duplicate pin number {pin_num.text()}')
+                pin_numbers.add(pin_num.text())
+            
+            if self.check_names.isChecked():
+                if not pin_name or not pin_name.text():
+                    errors.append(f'Row {row + 1}: Missing pin name')
+        
+        return errors
+    
+    def generate_script(self):
+        """Generate Altium DelphiScript"""
+        # Validate pins
+        errors = self.validate_pins()
+        if errors:
+            QMessageBox.warning(self, 'Validation Errors', '\n'.join(errors))
+            return
+        
+        # Collect pin data from table
+        pins = []
+        for row in range(self.pin_table.rowCount()):
+            pin = {
+                'pin_number': self.pin_table.item(row, 0).text(),
+                'pin_name': self.pin_table.item(row, 1).text(),
+                'electrical_type': self.pin_table.cellWidget(row, 2).currentText(),
+                'side': self.pin_table.cellWidget(row, 3).currentText()
+            }
+            pins.append(pin)
+        
+        # Update preview
+        self.preview_widget.set_pin_data(pins)
+        
+        # Generate script
+        script = self.create_altium_script(pins)
+        self.script_text.setPlainText(script)
+        
+        QMessageBox.information(self, 'Success', 'Altium script generated successfully!')
+    
+    def create_altium_script(self, pins):
+        """Create Altium DelphiScript for symbol generation"""
+        comp_name = self.comp_name_edit.text()
+        designator = self.designator_edit.text()
+        description = self.description_edit.text()
+        pin_spacing = self.pin_spacing_spin.value()
+        
+        # Calculate body dimensions
+        sides = {'Left': [], 'Right': [], 'Top': [], 'Bottom': []}
+        for pin in pins:
+            sides[pin['side']].append(pin)
+        
+        body_width = max(400, max(len(sides['Top']), len(sides['Bottom'])) * pin_spacing + 200)
+        body_height = max(600, max(len(sides['Left']), len(sides['Right'])) * pin_spacing + 200)
+        
+        # Electrical type mapping
+        elec_type_map = {
+            'Input': 'eElectricInput',
+            'Output': 'eElectricOutput',
+            'Bidirectional': 'eElectricBidirectional',
+            'Power': 'eElectricPower',
+            'Ground': 'eElectricPower',
+            'Passive': 'eElectricPassive'
+        }
+        
+        # Orientation mapping
+        orientation_map = {
+            'Left': 'eRotate0',
+            'Right': 'eRotate180',
+            'Top': 'eRotate270',
+            'Bottom': 'eRotate90'
+        }
+        
+        script = f'''{{ Altium DelphiScript - Auto-Generated Symbol
+   Component: {comp_name}
+   Generated by: Altium Symbol Generator
+}}
+
+Procedure CreateSymbol_{comp_name.replace('-', '_').replace(' ', '_')};
+Var
+    SchLib : ISch_Lib;
+    Component : ISch_Component;
+    Pin : ISch_Pin;
+    Body : ISch_Rectangle;
+    Label : ISch_Label;
+Begin
+    SchLib := SchServer.GetCurrentSchDocument;
+    If SchLib = Nil Then
+    Begin
+        ShowMessage('Please open a schematic library document');
+        Exit;
+    End;
+    
+    SchServer.ProcessControl.PreProcess(SchLib, '');
+    
+    Try
+        // Create new component
+        Component := SchServer.SchObjectFactory(eSchComponent, eCreate_Default);
+        Component.LibReference := '{comp_name}';
+        Component.Designator.Text := '{designator}';
+        Component.ComponentDescription := '{description}';
+        
+        // Create body rectangle
+        Body := SchServer.SchObjectFactory(eRectangle, eCreate_Default);
+        Body.Location := Point(MilsToCoord(0), MilsToCoord(0));
+        Body.Corner := Point(MilsToCoord({body_width}), MilsToCoord({body_height}));
+        Body.LineWidth := MilsToCoord(10);
+        Body.Color := $000000;
+        Component.AddSchObject(Body);
+        
+        // Create pins
+'''
+        
+        # Generate pin creation code for each side
+        for side_name, side_pins in sides.items():
+            for i, pin in enumerate(side_pins):
+                elec_type = elec_type_map.get(pin['electrical_type'], 'eElectricPassive')
+                orientation = orientation_map.get(side_name, 'eRotate0')
+                
+                # Calculate pin position
+                if side_name == 'Left':
+                    x = -100
+                    y = 100 + i * pin_spacing
+                elif side_name == 'Right':
+                    x = body_width + 100
+                    y = 100 + i * pin_spacing
+                elif side_name == 'Top':
+                    x = 100 + i * pin_spacing
+                    y = -100
+                else:  # Bottom
+                    x = 100 + i * pin_spacing
+                    y = body_height + 100
+                
+                script += f'''
+        // Pin: {pin['pin_name']} ({pin['pin_number']})
+        Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);
+        Pin.Location := Point(MilsToCoord({x}), MilsToCoord({y}));
+        Pin.PinLength := MilsToCoord(100);
+        Pin.Orientation := {orientation};
+        Pin.Designator := '{pin['pin_number']}';
+        Pin.Name := '{pin['pin_name']}';
+        Pin.Electrical := {elec_type};
+        Component.AddSchObject(Pin);
+'''
+        
+        script += f'''
+        // Register component in library
+        SchLib.RegisterSchComponent(Component);
+        
+        ShowMessage('Symbol {comp_name} created successfully!');
+        
+    Finally
+        SchServer.ProcessControl.PostProcess(SchLib, '');
+        SchLib.GraphicallyInvalidate;
+    End;
+End;
+'''
+        
+        return script
+    
+    def export_script(self):
+        """Export script to file"""
+        if not self.script_text.toPlainText():
+            QMessageBox.warning(self, 'Warning', 'Please generate script first')
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            'Save Altium Script', 
+            f'{self.comp_name_edit.text()}.pas',
+            'DelphiScript Files (*.pas);;All Files (*)'
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(self.script_text.toPlainText())
+                QMessageBox.information(self, 'Success', f'Script exported to {file_path}')
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to export: {str(e)}')
+
+def main():
+    app = QApplication(sys.argv)
+    window = AltiumSymbolGenerator()
+    window.show()
+    sys.exit(app.exec())
+
+if __name__ == '__main__':
+    main()
+
+
+
+
+
+
+
+
+
+
+
+
+
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                       """
+Altium Symbol Generator with Datasheet Extraction
+Full working application with PDF parsing and user overrides
+"""
+
+import sys
+import os
+import re
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                              QHBoxLayout, QTabWidget, QPushButton, QTableWidget,
+                              QTableWidgetItem, QFileDialog, QLabel, QComboBox,
+                              QSpinBox, QTextEdit, QMessageBox, QGroupBox, 
+                              QLineEdit, QCheckBox, QHeaderView)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtGui import QPainter, QColor, QPen, QFont
+import pdfplumber
+import pandas as pd
+import json
+
+class PDFExtractor(QThread):
+    """Background thread for PDF extraction"""
+    extraction_complete = pyqtSignal(list)
+    extraction_error = pyqtSignal(str)
+    
+    def __init__(self, pdf_path):
+        super().__init__()
+        self.pdf_path = pdf_path
+    
+    def run(self):
+        try:
+            pin_data = []
+            with pdfplumber.open(self.pdf_path) as pdf:
+                for page_num, page in enumerate(pdf.pages):
+                    # Extract tables from page
+                    tables = page.extract_tables()
+                    
+                    for table in tables:
+                        if not table:
+                            continue
+                        
+                        # Try to identify pin table by headers
+                        headers = [str(cell).lower() if cell else '' 
+                                  for cell in table[0]]
+                        
+                        # Check if this looks like a pin table
+                        if any(keyword in ' '.join(headers) 
+                               for keyword in ['pin', 'name', 'number', 'type', 'signal']):
+                            
+                            pin_data.extend(self.parse_pin_table(table, headers))
+            
+            if not pin_data:
+                self.extraction_error.emit("No pin tables found in PDF")
+            else:
+                self.extraction_complete.emit(pin_data)
+                
+        except Exception as e:
+            self.extraction_error.emit(f"Extraction failed: {str(e)}")
+    
+    def parse_pin_table(self, table, headers):
+        """Parse pin table and extract pin data"""
+        pins = []
+        
+        # Find column indices
+        pin_num_col = self.find_column(headers, ['pin', 'num', 'no'])
+        pin_name_col = self.find_column(headers, ['name', 'signal', 'function'])
+        pin_type_col = self.find_column(headers, ['type', 'i/o', 'direction'])
+        
+        # Process rows (skip header)
+        for row in table[1:]:
+            if not row or len(row) < 2:
+                continue
+            
+            pin_num = str(row[pin_num_col]).strip() if pin_num_col >= 0 else ''
+            pin_name = str(row[pin_name_col]).strip() if pin_name_col >= 0 else ''
+            pin_type = str(row[pin_type_col]).strip() if pin_type_col >= 0 else ''
+            
+            # Skip empty rows
+            if not pin_num or pin_num == 'None':
+                continue
+            
+            # Detect electrical type
+            elec_type = self.detect_electrical_type(pin_name, pin_type)
+            
+            # Determine side based on pin function
+            side = self.determine_side(pin_name, elec_type)
+            
+            pins.append({
+                'pin_number': pin_num,
+                'pin_name': pin_name,
+                'electrical_type': elec_type,
+                'side': side
+            })
+        
+        return pins
+    
+    def find_column(self, headers, keywords):
+        """Find column index by keywords"""
+        for i, header in enumerate(headers):
+            if any(kw in header for kw in keywords):
+                return i
+        return -1 if not headers else 0
+    
+    def detect_electrical_type(self, name, type_str):
+        """Detect electrical type from pin name/type"""
+        name_lower = name.lower()
+        type_lower = type_str.lower()
+        
+        if any(x in name_lower for x in ['vcc', 'vdd', 'v+', 'power']):
+            return 'Power'
+        elif any(x in name_lower for x in ['gnd', 'vss', 'v-', 'ground']):
+            return 'Ground'
+        elif any(x in type_lower for x in ['input', 'in']):
+            return 'Input'
+        elif any(x in type_lower for x in ['output', 'out']):
+            return 'Output'
+        elif any(x in type_lower for x in ['i/o', 'bidirectional', 'inout']):
+            return 'Bidirectional'
+        else:
+            return 'Passive'
+    
+    def determine_side(self, name, elec_type):
+        """Determine which side to place pin"""
+        if elec_type == 'Power':
+            return 'Top'
+        elif elec_type == 'Ground':
+            return 'Bottom'
+        else:
+            return 'Left'
+
+class SymbolPreviewWidget(QWidget):
+    """Widget to preview generated symbol"""
+    def __init__(self):
+        super().__init__()
+        self.pins = []
+        self.body_width = 400
+        self.body_height = 600
+        self.setMinimumSize(600, 800)
+    
+    def set_pin_data(self, pins):
+        """Update pin data for preview"""
+        self.pins = pins
+        self.update()
+    
+    def paintEvent(self, event):
+        """Draw symbol preview"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        
+        # Draw background
+        painter.fillRect(self.rect(), QColor(255, 255, 255))
+        
+        # Set up coordinate system (centered)
+        offset_x = (self.width() - self.body_width) // 2
+        offset_y = (self.height() - self.body_height) // 2
+        
+        # Draw body rectangle
+        painter.setPen(QPen(QColor(0, 0, 0), 2))
+        painter.drawRect(offset_x, offset_y, self.body_width, self.body_height)
+        
+        # Draw pins
+        pin_length = 100
+        pin_spacing = 100
+        
+        # Group pins by side
+        sides = {'Left': [], 'Right': [], 'Top': [], 'Bottom': []}
+        for pin in self.pins:
+            sides[pin['side']].append(pin)
+        
+        # Draw each side
+        for side, side_pins in sides.items():
+            for i, pin in enumerate(side_pins):
+                if side == 'Left':
+                    x1 = offset_x - pin_length
+                    y1 = offset_y + 100 + i * pin_spacing
+                    x2 = offset_x
+                    y2 = y1
+                    name_x = x1 - 10
+                    name_y = y1
+                    num_x = offset_x + 10
+                    num_y = y1
+                elif side == 'Right':
+                    x1 = offset_x + self.body_width + pin_length
+                    y1 = offset_y + 100 + i * pin_spacing
+                    x2 = offset_x + self.body_width
+                    y2 = y1
+                    name_x = x1 + 10
+                    name_y = y1
+                    num_x = offset_x + self.body_width - 10
+                    num_y = y1
+                elif side == 'Top':
+                    x1 = offset_x + 100 + i * pin_spacing
+                    y1 = offset_y - pin_length
+                    x2 = x1
+                    y2 = offset_y
+                    name_x = x1
+                    name_y = y1 - 10
+                    num_x = x1
+                    num_y = offset_y + 20
+                else:  # Bottom
+                    x1 = offset_x + 100 + i * pin_spacing
+                    y1 = offset_y + self.body_height + pin_length
+                    x2 = x1
+                    y2 = offset_y + self.body_height
+                    name_x = x1
+                    name_y = y1 + 20
+                    num_x = x1
+                    num_y = offset_y + self.body_height - 10
+                
+                # Draw pin line
+                painter.setPen(QPen(QColor(255, 0, 0), 2))
+                painter.drawLine(int(x1), int(y1), int(x2), int(y2))
+                
+                # Draw pin name
+                painter.setPen(QPen(QColor(0, 0, 255), 1))
+                painter.setFont(QFont('Arial', 8))
+                painter.drawText(int(name_x), int(name_y), pin['pin_name'])
+                
+                # Draw pin number
+                painter.setPen(QPen(QColor(0, 128, 0), 1))
+                painter.drawText(int(num_x), int(num_y), pin['pin_number'])
+
+class AltiumSymbolGenerator(QMainWindow):
+    """Main application window"""
+    def __init__(self):
+        super().__init__()
+        self.pin_data = []
+        self.pdf_path = None
+        self.init_ui()
+    
+    def init_ui(self):
+        """Initialize user interface"""
+        self.setWindowTitle('Altium Symbol Generator with Datasheet Extraction')
+        self.setGeometry(100, 100, 1400, 900)
+        
+        # Create central widget and main layout
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Create tab widget
+        tabs = QTabWidget()
+        main_layout.addWidget(tabs)
+        
+        # Tab 1: PDF Extraction
+        tab1 = self.create_extraction_tab()
+        tabs.addTab(tab1, 'PDF Extraction')
+        
+        # Tab 2: Pin Configuration
+        tab2 = self.create_configuration_tab()
+        tabs.addTab(tab2, 'Pin Configuration')
+        
+        # Tab 3: Script Generation
+        tab3 = self.create_generation_tab()
+        tabs.addTab(tab3, 'Script Generation')
+    
+    def create_extraction_tab(self):
+        """Create PDF extraction tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # File selection group
+        file_group = QGroupBox('PDF Datasheet')
+        file_layout = QHBoxLayout(file_group)
+        
+        self.pdf_label = QLabel('No file selected')
+        file_layout.addWidget(self.pdf_label)
+        
+        select_btn = QPushButton('Select PDF')
+        select_btn.clicked.connect(self.select_pdf)
+        file_layout.addWidget(select_btn)
+        
+        layout.addWidget(file_group)
+        
+        # Extraction controls
+        extract_btn = QPushButton('Extract Pin Data')
+        extract_btn.clicked.connect(self.extract_pin_data)
+        extract_btn.setStyleSheet('QPushButton {background-color: #4CAF50; color: white; padding: 10px; font-size: 14px;}')
+        layout.addWidget(extract_btn)
+        
+        # Status label
+        self.status_label = QLabel('Ready to extract')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #f0f0f0;}')
+        layout.addWidget(self.status_label)
+        
+        # Preview table
+        layout.addWidget(QLabel('Extracted Data Preview:'))
+        self.preview_table = QTableWidget()
+        self.preview_table.setColumnCount(4)
+        self.preview_table.setHorizontalHeaderLabels(['Pin #', 'Pin Name', 'Type', 'Side'])
+        self.preview_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.preview_table)
+        
+        return widget
+    
+    def create_configuration_tab(self):
+        """Create pin configuration tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Controls
+        controls_layout = QHBoxLayout()
+        
+        add_btn = QPushButton('Add Pin')
+        add_btn.clicked.connect(self.add_pin_row)
+        controls_layout.addWidget(add_btn)
+        
+        delete_btn = QPushButton('Delete Selected')
+        delete_btn.clicked.connect(self.delete_pin_row)
+        controls_layout.addWidget(delete_btn)
+        
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+        
+        # Editable pin table
+        self.pin_table = QTableWidget()
+        self.pin_table.setColumnCount(4)
+        self.pin_table.setHorizontalHeaderLabels(['Pin Number', 'Pin Name', 'Electrical Type', 'Side'])
+        self.pin_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.pin_table)
+        
+        return widget
+    
+    def create_generation_tab(self):
+        """Create script generation tab"""
+        widget = QWidget()
+        layout = QHBoxLayout(widget)
+        
+        # Left panel: Settings
+        left_panel = QWidget()
+        left_layout = QVBoxLayout(left_panel)
+        
+        # Component settings
+        settings_group = QGroupBox('Component Settings')
+        settings_layout = QVBoxLayout(settings_group)
+        
+        # Component name
+        name_layout = QHBoxLayout()
+        name_layout.addWidget(QLabel('Component Name:'))
+        self.comp_name_edit = QLineEdit('COMPONENT')
+        name_layout.addWidget(self.comp_name_edit)
+        settings_layout.addLayout(name_layout)
+        
+        # Designator
+        des_layout = QHBoxLayout()
+        des_layout.addWidget(QLabel('Designator:'))
+        self.designator_edit = QLineEdit('U?')
+        des_layout.addWidget(self.designator_edit)
+        settings_layout.addLayout(des_layout)
+        
+        # Description
+        desc_layout = QHBoxLayout()
+        desc_layout.addWidget(QLabel('Description:'))
+        self.description_edit = QLineEdit('Auto-generated symbol')
+        desc_layout.addWidget(self.description_edit)
+        settings_layout.addLayout(desc_layout)
+        
+        # Pin spacing
+        spacing_layout = QHBoxLayout()
+        spacing_layout.addWidget(QLabel('Pin Spacing (mils):'))
+        self.pin_spacing_spin = QSpinBox()
+        self.pin_spacing_spin.setRange(50, 200)
+        self.pin_spacing_spin.setValue(100)
+        spacing_layout.addWidget(self.pin_spacing_spin)
+        settings_layout.addLayout(spacing_layout)
+        
+        left_layout.addWidget(settings_group)
+        
+        # Validation options
+        validation_group = QGroupBox('Validation')
+        validation_layout = QVBoxLayout(validation_group)
+        
+        self.check_duplicates = QCheckBox('Check duplicate pin numbers')
+        self.check_duplicates.setChecked(True)
+        validation_layout.addWidget(self.check_duplicates)
+        
+        self.check_names = QCheckBox('Validate pin names')
+        self.check_names.setChecked(True)
+        validation_layout.addWidget(self.check_names)
+        
+        left_layout.addWidget(validation_group)
+        
+        # Generate button
+        generate_btn = QPushButton('Generate Altium Script')
+        generate_btn.clicked.connect(self.generate_script)
+        generate_btn.setStyleSheet('QPushButton {background-color: #2196F3; color: white; padding: 15px; font-size: 16px; font-weight: bold;}')
+        left_layout.addWidget(generate_btn)
+        
+        # Export button
+        export_btn = QPushButton('Export to File')
+        export_btn.clicked.connect(self.export_script)
+        left_layout.addWidget(export_btn)
+        
+        left_layout.addStretch()
+        
+        # Right panel: Preview and Script
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        
+        # Symbol preview
+        right_layout.addWidget(QLabel('Symbol Preview:'))
+        self.preview_widget = SymbolPreviewWidget()
+        right_layout.addWidget(self.preview_widget)
+        
+        # Generated script
+        right_layout.addWidget(QLabel('Generated Altium DelphiScript:'))
+        self.script_text = QTextEdit()
+        self.script_text.setReadOnly(True)
+        self.script_text.setFont(QFont('Courier', 9))
+        right_layout.addWidget(self.script_text)
+        
+        # Add panels to main layout
+        layout.addWidget(left_panel, 1)
+        layout.addWidget(right_panel, 2)
+        
+        return widget
+    
+    def select_pdf(self):
+        """Select PDF file"""
+        file_path, _ = QFileDialog.getOpenFileName(self, 'Select PDF Datasheet', '', 'PDF Files (*.pdf)')
+        if file_path:
+            self.pdf_path = file_path
+            self.pdf_label.setText(os.path.basename(file_path))
+    
+    def extract_pin_data(self):
+        """Extract pin data from PDF"""
+        if not self.pdf_path:
+            QMessageBox.warning(self, 'Warning', 'Please select a PDF file first')
+            return
+        
+        self.status_label.setText('Extracting data...')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #FFF9C4;}')
+        
+        # Create and start extraction thread
+        self.extractor = PDFExtractor(self.pdf_path)
+        self.extractor.extraction_complete.connect(self.on_extraction_complete)
+        self.extractor.extraction_error.connect(self.on_extraction_error)
+        self.extractor.start()
+    
+    def on_extraction_complete(self, pin_data):
+        """Handle successful extraction"""
+        self.pin_data = pin_data
+        self.status_label.setText(f'Extracted {len(pin_data)} pins successfully')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #C8E6C9;}')
+        
+        # Update preview table
+        self.preview_table.setRowCount(len(pin_data))
+        for i, pin in enumerate(pin_data):
+            self.preview_table.setItem(i, 0, QTableWidgetItem(pin['pin_number']))
+            self.preview_table.setItem(i, 1, QTableWidgetItem(pin['pin_name']))
+            self.preview_table.setItem(i, 2, QTableWidgetItem(pin['electrical_type']))
+            self.preview_table.setItem(i, 3, QTableWidgetItem(pin['side']))
+        
+        # Update configuration table
+        self.update_configuration_table()
+    
+    def on_extraction_error(self, error_msg):
+        """Handle extraction error"""
+        self.status_label.setText(f'Error: {error_msg}')
+        self.status_label.setStyleSheet('QLabel {padding: 10px; background-color: #FFCDD2;}')
+        QMessageBox.critical(self, 'Extraction Error', error_msg)
+    
+    def update_configuration_table(self):
+        """Update configuration table with extracted data"""
+        self.pin_table.setRowCount(len(self.pin_data))
+        
+        for i, pin in enumerate(self.pin_data):
+            # Pin number
+            self.pin_table.setItem(i, 0, QTableWidgetItem(pin['pin_number']))
+            
+            # Pin name
+            self.pin_table.setItem(i, 1, QTableWidgetItem(pin['pin_name']))
+            
+            # Electrical type (combo box)
+            type_combo = QComboBox()
+            type_combo.addItems(['Input', 'Output', 'Bidirectional', 'Power', 'Ground', 'Passive'])
+            type_combo.setCurrentText(pin['electrical_type'])
+            self.pin_table.setCellWidget(i, 2, type_combo)
+            
+            # Side (combo box)
+            side_combo = QComboBox()
+            side_combo.addItems(['Left', 'Right', 'Top', 'Bottom'])
+            side_combo.setCurrentText(pin['side'])
+            self.pin_table.setCellWidget(i, 3, side_combo)
+    
+    def add_pin_row(self):
+        """Add new pin row"""
+        row = self.pin_table.rowCount()
+        self.pin_table.insertRow(row)
+        
+        self.pin_table.setItem(row, 0, QTableWidgetItem('1'))
+        self.pin_table.setItem(row, 1, QTableWidgetItem('PIN'))
+        
+        type_combo = QComboBox()
+        type_combo.addItems(['Input', 'Output', 'Bidirectional', 'Power', 'Ground', 'Passive'])
+        self.pin_table.setCellWidget(row, 2, type_combo)
+        
+        side_combo = QComboBox()
+        side_combo.addItems(['Left', 'Right', 'Top', 'Bottom'])
+        self.pin_table.setCellWidget(row, 3, side_combo)
+    
+    def delete_pin_row(self):
+        """Delete selected pin row"""
+        current_row = self.pin_table.currentRow()
+        if current_row >= 0:
+            self.pin_table.removeRow(current_row)
+    
+    def validate_pins(self):
+        """Validate pin configuration"""
+        errors = []
+        pin_numbers = set()
+        
+        for row in range(self.pin_table.rowCount()):
+            pin_num = self.pin_table.item(row, 0)
+            pin_name = self.pin_table.item(row, 1)
+            
+            if not pin_num or not pin_num.text():
+                errors.append(f'Row {row + 1}: Missing pin number')
+                continue
+            
+            if self.check_duplicates.isChecked():
+                if pin_num.text() in pin_numbers:
+                    errors.append(f'Row {row + 1}: Duplicate pin number {pin_num.text()}')
+                pin_numbers.add(pin_num.text())
+            
+            if self.check_names.isChecked():
+                if not pin_name or not pin_name.text():
+                    errors.append(f'Row {row + 1}: Missing pin name')
+        
+        return errors
+    
+    def generate_script(self):
+        """Generate Altium DelphiScript"""
+        # Validate pins
+        errors = self.validate_pins()
+        if errors:
+            QMessageBox.warning(self, 'Validation Errors', '\n'.join(errors))
+            return
+        
+        # Collect pin data from table
+        pins = []
+        for row in range(self.pin_table.rowCount()):
+            pin = {
+                'pin_number': self.pin_table.item(row, 0).text(),
+                'pin_name': self.pin_table.item(row, 1).text(),
+                'electrical_type': self.pin_table.cellWidget(row, 2).currentText(),
+                'side': self.pin_table.cellWidget(row, 3).currentText()
+            }
+            pins.append(pin)
+        
+        # Update preview
+        self.preview_widget.set_pin_data(pins)
+        
+        # Generate script
+        script = self.create_altium_script(pins)
+        self.script_text.setPlainText(script)
+        
+        QMessageBox.information(self, 'Success', 'Altium script generated successfully!')
+    
+    def create_altium_script(self, pins):
+        """Create Altium DelphiScript for symbol generation"""
+        comp_name = self.comp_name_edit.text()
+        designator = self.designator_edit.text()
+        description = self.description_edit.text()
+        pin_spacing = self.pin_spacing_spin.value()
+        
+        # Calculate body dimensions
+        sides = {'Left': [], 'Right': [], 'Top': [], 'Bottom': []}
+        for pin in pins:
+            sides[pin['side']].append(pin)
+        
+        body_width = max(400, max(len(sides['Top']), len(sides['Bottom'])) * pin_spacing + 200)
+        body_height = max(600, max(len(sides['Left']), len(sides['Right'])) * pin_spacing + 200)
+        
+        # Electrical type mapping
+        elec_type_map = {
+            'Input': 'eElectricInput',
+            'Output': 'eElectricOutput',
+            'Bidirectional': 'eElectricBidirectional',
+            'Power': 'eElectricPower',
+            'Ground': 'eElectricPower',
+            'Passive': 'eElectricPassive'
+        }
+        
+        # Orientation mapping
+        orientation_map = {
+            'Left': 'eRotate0',
+            'Right': 'eRotate180',
+            'Top': 'eRotate270',
+            'Bottom': 'eRotate90'
+        }
+        
+        script = f'''{{ Altium DelphiScript - Auto-Generated Symbol
+   Component: {comp_name}
+   Generated by: Altium Symbol Generator
+}}
+
+Procedure CreateSymbol_{comp_name.replace('-', '_').replace(' ', '_')};
+Var
+    SchLib : ISch_Lib;
+    Component : ISch_Component;
+    Pin : ISch_Pin;
+    Body : ISch_Rectangle;
+    Label : ISch_Label;
+Begin
+    SchLib := SchServer.GetCurrentSchDocument;
+    If SchLib = Nil Then
+    Begin
+        ShowMessage('Please open a schematic library document');
+        Exit;
+    End;
+    
+    SchServer.ProcessControl.PreProcess(SchLib, '');
+    
+    Try
+        // Create new component
+        Component := SchServer.SchObjectFactory(eSchComponent, eCreate_Default);
+        Component.LibReference := '{comp_name}';
+        Component.Designator.Text := '{designator}';
+        Component.ComponentDescription := '{description}';
+        
+        // Create body rectangle
+        Body := SchServer.SchObjectFactory(eRectangle, eCreate_Default);
+        Body.Location := Point(MilsToCoord(0), MilsToCoord(0));
+        Body.Corner := Point(MilsToCoord({body_width}), MilsToCoord({body_height}));
+        Body.LineWidth := MilsToCoord(10);
+        Body.Color := $000000;
+        Component.AddSchObject(Body);
+        
+        // Create pins
+'''
+        
+        # Generate pin creation code for each side
+        for side_name, side_pins in sides.items():
+            for i, pin in enumerate(side_pins):
+                elec_type = elec_type_map.get(pin['electrical_type'], 'eElectricPassive')
+                orientation = orientation_map.get(side_name, 'eRotate0')
+                
+                # Calculate pin position
+                if side_name == 'Left':
+                    x = -100
+                    y = 100 + i * pin_spacing
+                elif side_name == 'Right':
+                    x = body_width + 100
+                    y = 100 + i * pin_spacing
+                elif side_name == 'Top':
+                    x = 100 + i * pin_spacing
+                    y = -100
+                else:  # Bottom
+                    x = 100 + i * pin_spacing
+                    y = body_height + 100
+                
+                script += f'''
+        // Pin: {pin['pin_name']} ({pin['pin_number']})
+        Pin := SchServer.SchObjectFactory(ePin, eCreate_Default);
+        Pin.Location := Point(MilsToCoord({x}), MilsToCoord({y}));
+        Pin.PinLength := MilsToCoord(100);
+        Pin.Orientation := {orientation};
+        Pin.Designator := '{pin['pin_number']}';
+        Pin.Name := '{pin['pin_name']}';
+        Pin.Electrical := {elec_type};
+        Component.AddSchObject(Pin);
+'''
+        
+        script += f'''
+        // Register component in library
+        SchLib.RegisterSchComponent(Component);
+        
+        ShowMessage('Symbol {comp_name} created successfully!');
+        
+    Finally
+        SchServer.ProcessControl.PostProcess(SchLib, '');
+        SchLib.GraphicallyInvalidate;
+    End;
+End;
+'''
+        
+        return script
+    
+    def export_script(self):
+        """Export script to file"""
+        if not self.script_text.toPlainText():
+            QMessageBox.warning(self, 'Warning', 'Please generate script first')
+            return
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            'Save Altium Script', 
+            f'{self.comp_name_edit.text()}.pas',
+            'DelphiScript Files (*.pas);;All Files (*)'
+        )
+        
+        if file_path:
+            try:
+                with open(file_path, 'w') as f:
+                    f.write(self.script_text.toPlainText())
+                QMessageBox.information(self, 'Success', f'Script exported to {file_path}')
+            except Exception as e:
+                QMessageBox.critical(self, 'Error', f'Failed to export: {str(e)}')
+
+def main():
+    app = QApplication(sys.argv)
+    window = AltiumSymbolGenerator()
+    window.show()
+    sys.exit(app.exec())
+
+if __name__ == '__main__':
+    main()
+      QHBoxLayout, QTableWidget, QTableWidgetItem, 
                              QPushButton, QLabel, QLineEdit, QComboBox, 
                              QSpinBox, QTextEdit, QFileDialog, QMessageBox,
                              QGroupBox, QFormLayout, QCheckBox)
