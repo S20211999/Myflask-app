@@ -1,64 +1,423 @@
-BuildError
-werkzeug.routing.exceptions.BuildError: Could not build url for endpoint 'add_table_widget'. Did you mean 'add_app_user' instead?
+import sys
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QTableWidget, QTableWidgetItem, 
+                             QPushButton, QLabel, QLineEdit, QComboBox, 
+                             QSpinBox, QTextEdit, QFileDialog, QMessageBox,
+                             QGroupBox, QFormLayout, QCheckBox)
+from PyQt6.QtCore import Qt
+import pytesseract
+from PIL import Image, ImageGrab
+import re
 
-Traceback (most recent call last)
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 2213, in __call__
-return self.wsgi_app(environ, start_response)
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 2193, in wsgi_app
-response = self.handle_exception(e)
-           ^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 2190, in wsgi_app
-response = self.full_dispatch_request()
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 1486, in full_dispatch_request
-rv = self.handle_user_exception(e)
-     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 1484, in full_dispatch_request
-rv = self.dispatch_request()
-     ^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 1469, in dispatch_request
-return self.ensure_sync(self.view_functions[rule.endpoint])(**view_args)
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask_login\utils.py", line 290, in decorated_view
-return current_app.ensure_sync(func)(*args, **kwargs)
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "d:\VScode\VScode\flaskwebapp\app1.py", line 678, in footprint_database
-return render_template('footprint.html',
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\templating.py", line 151, in render_template
-return _render(app, template, context)
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\templating.py", line 132, in _render
-rv = template.render(context)
-     ^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\jinja2\environment.py", line 1295, in render
-self.environment.handle_exception()
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\jinja2\environment.py", line 942, in handle_exception
-raise rewrite_traceback_stack(source=source)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "d:\VScode\VScode\flaskwebapp\templates\footprint.html", line 1, in top-level template code
-{% extends "base.html" %}
-File "d:\VScode\VScode\flaskwebapp\templates\base.html", line 264, in top-level template code
-{% block content %}{% endblock %}
-File "d:\VScode\VScode\flaskwebapp\templates\footprint.html", line 176, in block 'content'
-<form method="POST" action="{{ url_for('add_table_widget') }}">
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 1697, in url_for
-return self.handle_url_build_error(error, endpoint, values)
-       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\flask\app.py", line 1686, in url_for
-rv = url_adapter.build(  # type: ignore[union-attr]
-     
-File "D:\VScode\VScode\flaskwebapp\.venv\Lib\site-packages\werkzeug\routing\map.py", line 950, in build
-raise BuildError(endpoint, values, method, self)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-werkzeug.routing.exceptions.BuildError: Could not build url for endpoint 'add_table_widget'. Did you mean 'add_app_user' instead?
-The debugger caught an exception in your WSGI application. You can now look at the traceback which led to the error.
-To switch between the interactive traceback and the plaintext one, you can click on the "Traceback" headline. From the text traceback you can also create a paste of it. For code execution mouse-over the frame you want to debug and click on the console icon on the right side.
+class SymbolGeneratorApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Altium Symbol Generator")
+        self.setGeometry(100, 100, 1200, 800)
+        
+        # Main widget and layout
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        layout = QVBoxLayout(main_widget)
+        
+        # Component Info Section
+        info_group = QGroupBox("Component Information")
+        info_layout = QFormLayout()
+        
+        self.comp_name = QLineEdit()
+        self.comp_designator = QLineEdit("U")
+        self.comp_description = QLineEdit()
+        
+        info_layout.addRow("Component Name:", self.comp_name)
+        info_layout.addRow("Designator:", self.comp_designator)
+        info_layout.addRow("Description:", self.comp_description)
+        
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+        
+        # Datasheet Snap Section
+        snap_group = QGroupBox("Datasheet Pin Extraction")
+        snap_layout = QHBoxLayout()
+        
+        self.snap_btn = QPushButton("Snap from Clipboard")
+        self.snap_btn.clicked.connect(self.snap_from_clipboard)
+        
+        self.ocr_btn = QPushButton("Load Image for OCR")
+        self.ocr_btn.clicked.connect(self.load_image_ocr)
+        
+        snap_layout.addWidget(self.snap_btn)
+        snap_layout.addWidget(self.ocr_btn)
+        snap_group.setLayout(snap_layout)
+        layout.addWidget(snap_group)
+        
+        # Pin Table
+        pin_group = QGroupBox("Pin Configuration (Editable)")
+        pin_layout = QVBoxLayout()
+        
+        self.pin_table = QTableWidget()
+        self.pin_table.setColumnCount(6)
+        self.pin_table.setHorizontalHeaderLabels(
+            ["Pin Number", "Pin Name", "Electrical Type", "Side", "X", "Y"])
+        self.pin_table.setRowCount(20)
+        
+        # Add electrical types to each row
+        for row in range(20):
+            electrical_combo = QComboBox()
+            electrical_combo.addItems([
+                "Input", "I/O", "Output", "Open Collector", 
+                "Passive", "Hi-Z", "Open Emitter", "Power"])
+            self.pin_table.setCellWidget(row, 2, electrical_combo)
+            
+            side_combo = QComboBox()
+            side_combo.addItems(["Left", "Right", "Top", "Bottom"])
+            self.pin_table.setCellWidget(row, 3, side_combo)
+        
+        pin_layout.addWidget(self.pin_table)
+        
+        pin_btn_layout = QHBoxLayout()
+        self.add_row_btn = QPushButton("Add Row")
+        self.add_row_btn.clicked.connect(self.add_pin_row)
+        self.remove_row_btn = QPushButton("Remove Selected")
+        self.remove_row_btn.clicked.connect(self.remove_pin_row)
+        
+        pin_btn_layout.addWidget(self.add_row_btn)
+        pin_btn_layout.addWidget(self.remove_row_btn)
+        pin_layout.addLayout(pin_btn_layout)
+        
+        pin_group.setLayout(pin_layout)
+        layout.addWidget(pin_group)
+        
+        # Symbol Guidelines
+        guidelines_group = QGroupBox("Symbol Creation Guidelines")
+        guidelines_layout = QVBoxLayout()
+        
+        self.auto_arrange_check = QCheckBox("Auto-arrange pins by function")
+        self.ieee_standard_check = QCheckBox("Follow IEEE 315 standard (Recommended)")
+        self.ieee_standard_check.setChecked(True)
+        self.power_separate_check = QCheckBox("Separate power pins")
+        
+        guidelines_layout.addWidget(self.auto_arrange_check)
+        guidelines_layout.addWidget(self.ieee_standard_check)
+        guidelines_layout.addWidget(self.power_separate_check)
+        
+        guidelines_group.setLayout(guidelines_layout)
+        layout.addWidget(guidelines_group)
+        
+        # Script Output
+        output_group = QGroupBox("Generated Altium Script")
+        output_layout = QVBoxLayout()
+        
+        self.script_output = QTextEdit()
+        self.script_output.setReadOnly(True)
+        output_layout.addWidget(self.script_output)
+        
+        output_group.setLayout(output_layout)
+        layout.addWidget(output_group)
+        
+        # Generate Button
+        gen_layout = QHBoxLayout()
+        self.generate_btn = QPushButton("Generate Altium Script")
+        self.generate_btn.clicked.connect(self.generate_script)
+        self.generate_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-size: 14pt; padding: 10px; }")
+        
+        self.save_btn = QPushButton("Save Script")
+        self.save_btn.clicked.connect(self.save_script)
+        
+        gen_layout.addWidget(self.generate_btn)
+        gen_layout.addWidget(self.save_btn)
+        layout.addLayout(gen_layout)
+    
+    def snap_from_clipboard(self):
+        """Extract pin data from clipboard screenshot using OCR"""
+        try:
+            img = ImageGrab.grabclipboard()
+            if img is None:
+                QMessageBox.warning(self, "Error", "No image in clipboard")
+                return
+            
+            # Perform OCR
+            text = pytesseract.image_to_string(img)
+            self.parse_pin_data(text)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"OCR failed: {str(e)}")
+    
+    def load_image_ocr(self):
+        """Load image file and perform OCR"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Datasheet Image", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+        
+        if file_path:
+            try:
+                img = Image.open(file_path)
+                text = pytesseract.image_to_string(img)
+                self.parse_pin_data(text)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"OCR failed: {str(e)}")
+    
+    def parse_pin_data(self, text):
+        """Parse OCR text to extract pin information"""
+        # Pattern: Pin number, pin name
+        # Common patterns in datasheets: "1 VDD", "2 GND", "3 SCL/I2C"
+        
+        patterns = [
+            r'(\d+)\s+([A-Z][A-Z0-9_/\-]+)',  # "1 VDD"
+            r'Pin\s*(\d+)[:\s]+([A-Z][A-Z0-9_/\-]+)',  # "Pin 1: VDD"
+        ]
+        
+        pins_found = []
+        for pattern in patterns:
+            matches = re.findall(pattern, text, re.MULTILINE)
+            pins_found.extend(matches)
+        
+        # Auto-fill table
+        for idx, (pin_num, pin_name) in enumerate(pins_found[:self.pin_table.rowCount()]):
+            self.pin_table.setItem(idx, 0, QTableWidgetItem(pin_num))
+            self.pin_table.setItem(idx, 1, QTableWidgetItem(pin_name))
+            
+            # Auto-detect electrical type
+            electrical_type = self.detect_electrical_type(pin_name)
+            combo = self.pin_table.cellWidget(idx, 2)
+            combo.setCurrentText(electrical_type)
+        
+        QMessageBox.information(self, "Success", f"Extracted {len(pins_found)} pins from datasheet")
+    
+    def detect_electrical_type(self, pin_name):
+        """Auto-detect electrical type based on pin name"""
+        pin_upper = pin_name.upper()
+        
+        if any(x in pin_upper for x in ["VDD", "VCC", "VIN", "VBAT", "3V3", "5V"]):
+            return "Power"
+        elif any(x in pin_upper for x in ["GND", "VSS"]):
+            return "Power"
+        elif any(x in pin_upper for x in ["SCL", "SDA", "MOSI", "MISO", "SCK", "CS"]):
+            return "I/O"
+        elif any(x in pin_upper for x in ["TX", "OUT", "DO"]):
+            return "Output"
+        elif any(x in pin_upper for x in ["RX", "IN", "DI"]):
+            return "Input"
+        else:
+            return "Passive"
+    
+    def add_pin_row(self):
+        """Add a new row to pin table"""
+        row_count = self.pin_table.rowCount()
+        self.pin_table.insertRow(row_count)
+        
+        electrical_combo = QComboBox()
+        electrical_combo.addItems([
+            "Input", "I/O", "Output", "Open Collector", 
+            "Passive", "Hi-Z", "Open Emitter", "Power"])
+        self.pin_table.setCellWidget(row_count, 2, electrical_combo)
+        
+        side_combo = QComboBox()
+        side_combo.addItems(["Left", "Right", "Top", "Bottom"])
+        self.pin_table.setCellWidget(row_count, 3, side_combo)
+    
+    def remove_pin_row(self):
+        """Remove selected row"""
+        current_row = self.pin_table.currentRow()
+        if current_row >= 0:
+            self.pin_table.removeRow(current_row)
+    
+    def generate_script(self):
+        """Generate DelphiScript for Altium symbol creation"""
+        comp_name = self.comp_name.text()
+        designator = self.comp_designator.text()
+        
+        if not comp_name:
+            QMessageBox.warning(self, "Error", "Component name is required")
+            return
+        
+        # Collect pin data
+        pins = []
+        for row in range(self.pin_table.rowCount()):
+            pin_num_item = self.pin_table.item(row, 0)
+            pin_name_item = self.pin_table.item(row, 1)
+            
+            if pin_num_item and pin_name_item:
+                pin_num = pin_num_item.text()
+                pin_name = pin_name_item.text()
+                
+                if pin_num and pin_name:
+                    electrical = self.pin_table.cellWidget(row, 2).currentText()
+                    side = self.pin_table.cellWidget(row, 3).currentText()
+                    pins.append({
+                        'num': pin_num,
+                        'name': pin_name,
+                        'electrical': electrical,
+                        'side': side
+                    })
+        
+        # Auto-arrange pins
+        if self.auto_arrange_check.isChecked():
+            pins = self.auto_arrange_pins(pins)
+        
+        # Generate DelphiScript
+        script = self.create_altium_script(comp_name, designator, pins)
+        self.script_output.setText(script)
+    
+    def auto_arrange_pins(self, pins):
+        """Auto-arrange pins by function"""
+        left_pins = []
+        right_pins = []
+        top_pins = []
+        bottom_pins = []
+        
+        for pin in pins:
+            pin_upper = pin['name'].upper()
+            
+            # Power pins on top/bottom
+            if any(x in pin_upper for x in ["VDD", "VCC", "VIN", "VBAT"]):
+                pin['side'] = "Top"
+                top_pins.append(pin)
+            elif any(x in pin_upper for x in ["GND", "VSS"]):
+                pin['side'] = "Bottom"
+                bottom_pins.append(pin)
+            # Input pins on left
+            elif pin['electrical'] in ["Input", "I/O"]:
+                pin['side'] = "Left"
+                left_pins.append(pin)
+            # Output pins on right
+            else:
+                pin['side'] = "Right"
+                right_pins.append(pin)
+        
+        return left_pins + right_pins + top_pins + bottom_pins
+    
+    def create_altium_script(self, comp_name, designator, pins):
+        """Create DelphiScript for Altium Designer"""
+        
+        script = f'''{{..............................................................................}}
+{{ Script: Create_{comp_name.replace(" ", "_")}.pas                                }}
+{{ Purpose: Creates schematic symbol for {comp_name}                              }}
+{{ Generated by: Altium Symbol Generator                                         }}
+{{..............................................................................}}
 
-You can execute arbitrary Python code in the stack frames and there are some extra helpers available for introspection:
+Procedure CreateSymbol_{comp_name.replace(" ", "_")};
+Var
+    SchLib       : ISch_Lib;
+    SchComponent : ISch_Component;
+    Pin          : ISch_Pin;
+    Rectangle    : ISch_Rectangle;
+    Label        : ISch_Label;
+    PinSpacing   : Integer;
+    BodyWidth    : Integer;
+    BodyHeight   : Integer;
+    X, Y         : Integer;
+Begin
+    // Get current schematic library
+    If SchServer = Nil Then Exit;
+    SchLib := SchServer.GetCurrentSchDocument;
+    If SchLib = Nil Then Exit;
+    If SchLib.ObjectId <> eSchLib Then
+    Begin
+        ShowMessage('Please open a Schematic Library document');
+        Exit;
+    End;
 
-dump() shows all variables in the frame
-dump(obj) dumps all that's known about the object
-Brought to you by DON'T PANIC, your friendly Werkzeug powered traceback interpreter.
+    // Create new component
+    SchComponent := SchServer.SchObjectFactory(eSchComponent, eCreate_Default);
+    If SchComponent = Nil Then Exit;
+
+    // Set component properties
+    SchComponent.LibReference := '{comp_name}';
+    SchComponent.ComponentDescription := '{self.comp_description.text()}';
+    SchComponent.Designator.Text := '{designator}?';
+    
+    // Symbol body dimensions
+    PinSpacing := 10;  // 10 mil spacing (following IEEE 315 standard)
+    BodyWidth := 40;   // 40 mil width
+    BodyHeight := {len([p for p in pins if p['side'] in ['Left', 'Right']]) * 10};
+
+    // Create rectangle body
+    Rectangle := SchServer.SchObjectFactory(eSchRectangle, eCreate_Default);
+    Rectangle.Location := Point(MilsToCoord(0), MilsToCoord(0));
+    Rectangle.Corner := Point(MilsToCoord(BodyWidth), MilsToCoord(BodyHeight));
+    Rectangle.LineWidth := eSmall;
+    SchComponent.AddSchObject(Rectangle);
+
+    // Create pins
+'''
+        
+        # Generate pin creation code
+        left_y = 0
+        right_y = 0
+        top_x = 0
+        bottom_x = 0
+        
+        for pin in pins:
+            electrical_map = {
+                'Input': 'eElectricInput',
+                'Output': 'eElectricOutput',
+                'I/O': 'eElectricIOPort',
+                'Power': 'eElectricPower',
+                'Passive': 'eElectricPassive'
+            }
+            
+            elec_type = electrical_map.get(pin['electrical'], 'eElectricPassive')
+            
+            if pin['side'] == 'Left':
+                x = -10
+                y = left_y + 10
+                rotation = 0
+                left_y += 10
+            elif pin['side'] == 'Right':
+                x = 50
+                y = right_y + 10
+                rotation = 180
+                right_y += 10
+            elif pin['side'] == 'Top':
+                x = top_x + 10
+                y = -10
+                rotation = 90
+                top_x += 10
+            else:  # Bottom
+                x = bottom_x + 10
+                y = BodyHeight + 10
+                rotation = 270
+                bottom_x += 10
+            
+            script += f'''
+    // Pin {pin['num']}: {pin['name']}
+    Pin := SchServer.SchObjectFactory(eSchPin, eCreate_Default);
+    Pin.Location := Point(MilsToCoord({x}), MilsToCoord({y}));
+    Pin.Orientation := eRotate{rotation};
+    Pin.Electrical := {elec_type};
+    Pin.Designator := '{pin['num']}';
+    Pin.Name := '{pin['name']}';
+    Pin.PinLength := MilsToCoord(10);
+    SchComponent.AddSchObject(Pin);
+'''
+        
+        script += f'''
+    // Register component in library
+    SchLib.RegisterSchObjectBySchComponentLibReference(SchComponent);
+    SchLib.CurrentSchComponent := SchComponent;
+    
+    // Refresh library
+    SchLib.GraphicallyInvalidate;
+    
+    ShowMessage('Symbol {comp_name} created successfully!');
+End;
+'''
+        
+        return script
+    
+    def save_script(self):
+        """Save generated script to file"""
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, "Save Script", f"{self.comp_name.text().replace(' ', '_')}.pas", 
+            "DelphiScript (*.pas)")
+        
+        if file_path:
+            with open(file_path, 'w') as f:
+                f.write(self.script_output.toPlainText())
+            QMessageBox.information(self, "Success", "Script saved successfully!")
+
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    window = SymbolGeneratorApp()
+    window.show()
+    sys.exit(app.exec())
