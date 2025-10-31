@@ -1,1 +1,1868 @@
 
+import sys
+import json
+import os
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                             QMessageBox, QRadioButton, QButtonGroup, QProgressBar,
+                             QTextEdit, QListWidget, QGroupBox, QScrollArea, QComboBox,
+                             QTabWidget, QTableWidget, QTableWidgetItem, QHeaderView,
+                             QDialog, QCheckBox)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QImage, QPixmap
+import cv2
+from datetime import datetime
+
+# File to store questions, students, and security logs
+QUESTIONS_FILE = "exam_questions.json"
+STUDENTS_FILE = "students.json"
+EMAIL_CONFIG_FILE = "email_config.json"
+SECURITY_LOGS_FILE = "security_logs.json"
+
+# Security log class
+class SecurityLogger:
+    @staticmethod
+    def log_violation(username, violation_type, details=""):
+        """Log security violations"""
+        try:
+            logs = []
+            if os.path.exists(SECURITY_LOGS_FILE):
+                with open(SECURITY_LOGS_FILE, 'r') as f:
+                    logs = json.load(f)
+            
+            log_entry = {
+                "username": username,
+                "violation_type": violation_type,
+                "details": details,
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            
+            logs.append(log_entry)
+            
+            with open(SECURITY_LOGS_FILE, 'w') as f:
+                json.dump(logs, f, indent=4)
+        except Exception as e:
+            print(f"Error logging security violation: {e}")
+    
+    @staticmethod
+    def get_logs():
+        """Get all security logs"""
+        try:
+            if os.path.exists(SECURITY_LOGS_FILE):
+                with open(SECURITY_LOGS_FILE, 'r') as f:
+                    return json.load(f)
+            return []
+        except:
+            return []
+
+# Webcam monitoring thread
+class WebcamThread(QThread):
+    frame_ready = pyqtSignal(QImage)
+    camera_lost = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.camera = None
+    
+    def run(self):
+        self.running = True
+        self.camera = cv2.VideoCapture(0)
+        
+        if not self.camera.isOpened():
+            self.camera_lost.emit()
+            return
+        
+        while self.running:
+            ret, frame = self.camera.read()
+            if ret:
+                # Convert frame to QImage
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb_frame.shape
+                bytes_per_line = ch * w
+                q_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                self.frame_ready.emit(q_image)
+            else:
+                self.camera_lost.emit()
+                break
+            
+            self.msleep(100)
+    
+    def stop(self):
+        self.running = False
+        if self.camera:
+            self.camera.release()
+        self.wait()
+
+# Exam Rules Dialog
+class ExamRulesDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Examination Rules and Regulations")
+        self.setModal(True)
+        self.setMinimumSize(700, 500)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        title = QLabel("Examination Rules and Regulations")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #2c3e50; padding: 10px;")
+        layout.addWidget(title)
+        
+        rules_text = QTextEdit()
+        rules_text.setReadOnly(True)
+        rules_text.setStyleSheet("""
+            QTextEdit {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                padding: 15px;
+                font-size: 12px;
+            }
+        """)
+        
+        rules = """
+<h3 style='color: #e74c3c;'>IMPORTANT: Read Carefully Before Starting</h3>
+
+<h4 style='color: #2c3e50;'>Camera Monitoring:</h4>
+<ul>
+    <li>Your webcam <b>MUST be turned ON</b> throughout the entire examination.</li>
+    <li>If the camera is turned off during the exam, it will be recorded as a <b>security violation</b>.</li>
+    <li>Ensure your face is clearly visible to the camera at all times.</li>
+    <li>Multiple camera violations may result in exam disqualification.</li>
+</ul>
+
+<h4 style='color: #2c3e50;'>Tab Switching Policy:</h4>
+<ul>
+    <li><b>DO NOT switch to other tabs or applications</b> during the examination.</li>
+    <li>The exam will automatically pause if you switch tabs.</li>
+    <li>The exam will resume only when ALL other tabs are closed.</li>
+    <li>Each tab switch attempt will be <b>recorded as a cheating attempt</b>.</li>
+    <li>Your exam may be invalidated if multiple violations occur.</li>
+</ul>
+
+<h4 style='color: #2c3e50;'>General Rules:</h4>
+<ul>
+    <li>You have a limited time to complete the examination.</li>
+    <li>Once time expires, the exam will be automatically submitted.</li>
+    <li>You can navigate between questions using Previous/Next buttons.</li>
+    <li>Ensure you have a stable internet connection.</li>
+    <li>Do not refresh or close the browser during the exam.</li>
+</ul>
+
+<h4 style='color: #e74c3c;'>Consequences of Violations:</h4>
+<ul>
+    <li>All violations are logged with timestamp and student name.</li>
+    <li>The administrator will review all security violations.</li>
+    <li>Multiple violations may result in exam cancellation.</li>
+    <li>Severe violations may result in disciplinary action.</li>
+</ul>
+
+<p style='color: #27ae60; font-weight: bold; margin-top: 20px;'>
+By clicking "I Agree and Start Exam", you acknowledge that you have read, 
+understood, and agree to comply with all the above rules and regulations.
+</p>
+        """
+        
+        rules_text.setHtml(rules)
+        layout.addWidget(rules_text)
+        
+        # Agreement checkbox
+        self.agree_checkbox = QCheckBox("I have read and agree to all examination rules")
+        self.agree_checkbox.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.agree_checkbox.setStyleSheet("color: #2c3e50; padding: 10px;")
+        self.agree_checkbox.stateChanged.connect(self.toggle_start_button)
+        layout.addWidget(self.agree_checkbox)
+        
+        # Button layout
+        btn_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFont(QFont("Arial", 11))
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        btn_layout.addStretch()
+        
+        self.start_btn = QPushButton("I Agree and Start Exam")
+        self.start_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.start_btn.setEnabled(False)
+        self.start_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.start_btn)
+        
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+    
+    def toggle_start_button(self):
+        self.start_btn.setEnabled(self.agree_checkbox.isChecked())
+
+class LoginWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.exam_window = None
+        self.admin_window = None
+        self.user_type = "candidate"
+        self.current_username = ""
+        self.init_ui()
+        self.load_default_questions()
+        self.load_default_students()
+        
+    def load_default_questions(self):
+        """Load default questions if file doesn't exist"""
+        if not os.path.exists(QUESTIONS_FILE):
+            default_questions = [
+                {
+                    "question": "What does HTML stand for?",
+                    "options": ["Hyper Text Markup Language", "High Tech Modern Language", 
+                               "Home Tool Markup Language", "Hyperlinks and Text Markup Language"],
+                    "answer": 0
+                },
+                {
+                    "question": "Which programming language is known as the 'language of the web'?",
+                    "options": ["Python", "Java", "JavaScript", "C++"],
+                    "answer": 2
+                },
+                {
+                    "question": "What does CPU stand for?",
+                    "options": ["Central Processing Unit", "Computer Personal Unit", 
+                               "Central Program Utility", "Computer Processing Unit"],
+                    "answer": 0
+                }
+            ]
+            with open(QUESTIONS_FILE, 'w') as f:
+                json.dump(default_questions, f, indent=4)
+    
+    def load_default_students(self):
+        """Load default students if file doesn't exist"""
+        if not os.path.exists(STUDENTS_FILE):
+            default_students = [
+                {
+                    "name": "Demo Student",
+                    "email": "student@example.com",
+                    "username": "student",
+                    "password": "exam123"
+                }
+            ]
+            with open(STUDENTS_FILE, 'w') as f:
+                json.dump(default_students, f, indent=4)
+        
+    def init_ui(self):
+        self.setWindowTitle("Online Examination - Login")
+        self.setGeometry(100, 100, 450, 400)
+        self.setStyleSheet("background-color: #f0f0f0;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 40, 50, 40)
+        
+        title = QLabel("Online Examination System")
+        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #2c3e50;")
+        layout.addWidget(title)
+        
+        user_type_label = QLabel("Select User Type:")
+        user_type_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout.addWidget(user_type_label)
+        
+        user_type_layout = QHBoxLayout()
+        self.candidate_radio = QRadioButton("Candidate")
+        self.candidate_radio.setFont(QFont("Arial", 10))
+        self.candidate_radio.setChecked(True)
+        self.candidate_radio.toggled.connect(lambda: self.set_user_type("candidate"))
+        
+        self.admin_radio = QRadioButton("Admin")
+        self.admin_radio.setFont(QFont("Arial", 10))
+        self.admin_radio.toggled.connect(lambda: self.set_user_type("admin"))
+        
+        user_type_layout.addWidget(self.candidate_radio)
+        user_type_layout.addWidget(self.admin_radio)
+        user_type_layout.addStretch()
+        layout.addLayout(user_type_layout)
+        
+        username_label = QLabel("Username:")
+        username_label.setFont(QFont("Arial", 10))
+        layout.addWidget(username_label)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter your username")
+        self.username_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        layout.addWidget(self.username_input)
+        
+        password_label = QLabel("Password:")
+        password_label.setFont(QFont("Arial", 10))
+        layout.addWidget(password_label)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter your password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        self.password_input.returnPressed.connect(self.login)
+        layout.addWidget(self.password_input)
+        
+        info_label = QLabel("Demo Credentials:\nCandidate - user: student, pass: exam123\nAdmin - user: admin, pass: admin123")
+        info_label.setFont(QFont("Arial", 8))
+        info_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
+        layout.addWidget(info_label)
+        
+        login_btn = QPushButton("Login")
+        login_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        login_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 12px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #1c6ea4;
+            }
+        """)
+        login_btn.clicked.connect(self.login)
+        layout.addWidget(login_btn)
+        
+        layout.addStretch()
+        central_widget.setLayout(layout)
+    
+    def set_user_type(self, user_type):
+        self.user_type = user_type
+        
+    def login(self):
+        username = self.username_input.text()
+        password = self.password_input.text()
+        
+        if not username or not password:
+            QMessageBox.warning(self, "Input Error", "Please enter both username and password!")
+            return
+        
+        if self.user_type == "candidate":
+            students = self.load_students()
+            valid_login = False
+            student_name = ""
+            for student in students:
+                if student['username'] == username and student['password'] == password:
+                    valid_login = True
+                    student_name = student['name']
+                    break
+            
+            if valid_login:
+                self.current_username = username
+                self.open_exam_window(username, student_name)
+            else:
+                QMessageBox.warning(self, "Login Failed", 
+                                  "Invalid candidate credentials!\n\nDemo credentials:\nUsername: student\nPassword: exam123")
+        else:  # admin
+            if username == "admin" and password == "admin123":
+                self.open_admin_window()
+            else:
+                QMessageBox.warning(self, "Login Failed", 
+                                  "Invalid admin credentials!\n\nDemo credentials:\nUsername: admin\nPassword: admin123")
+    
+    def load_students(self):
+        """Load students from file"""
+        try:
+            with open(STUDENTS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    
+    def open_exam_window(self, username, student_name):
+        # Show rules dialog first
+        rules_dialog = ExamRulesDialog(self)
+        if rules_dialog.exec() == QDialog.DialogCode.Accepted:
+            self.exam_window = ExamWindow(username, student_name)
+            self.exam_window.show()
+            self.close()
+    
+    def open_admin_window(self):
+        self.admin_window = AdminWindow()
+        self.admin_window.show()
+        self.close()
+
+class ExamWindow(QMainWindow):
+    def __init__(self, username, student_name):
+        super().__init__()
+        self.username = username
+        self.student_name = student_name
+        self.current_question = 0
+        self.score = 0
+        self.time_remaining = 300  # 5 minutes in seconds
+        self.camera_active = False
+        self.exam_paused = False
+        self.tab_switch_count = 0
+        self.camera_violation_count = 0
+        
+        self.questions = self.load_questions()
+        
+        if not self.questions:
+            QMessageBox.warning(self, "No Questions", "No questions available. Please contact admin.")
+            self.close()
+            return
+        
+        self.user_answers = [-1] * len(self.questions)
+        self.init_ui()
+        self.setup_camera()
+        self.start_timer()
+        
+        # Install event filter for focus detection
+        self.installEventFilter(self)
+    
+    def load_questions(self):
+        """Load questions from file"""
+        try:
+            with open(QUESTIONS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    
+    def setup_camera(self):
+        """Initialize webcam monitoring"""
+        self.webcam_thread = WebcamThread()
+        self.webcam_thread.frame_ready.connect(self.update_camera_frame)
+        self.webcam_thread.camera_lost.connect(self.handle_camera_loss)
+        self.webcam_thread.start()
+        self.camera_active = True
+    
+    def update_camera_frame(self, q_image):
+        """Update camera preview"""
+        pixmap = QPixmap.fromImage(q_image)
+        scaled_pixmap = pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
+        self.camera_label.setPixmap(scaled_pixmap)
+    
+    def handle_camera_loss(self):
+        """Handle camera being turned off"""
+        if self.camera_active:
+            self.camera_active = False
+            self.camera_violation_count += 1
+            SecurityLogger.log_violation(
+                self.username,
+                "Camera Disabled",
+                f"Student: {self.student_name} - Violation #{self.camera_violation_count}"
+            )
+            
+            QMessageBox.critical(self, "Camera Violation", 
+                               f"WARNING: Camera has been disabled!\n\n"
+                               f"This is violation #{self.camera_violation_count}\n"
+                               f"This incident has been reported to the administrator.\n\n"
+                               f"Please enable your camera immediately!")
+            
+            # Try to restart camera
+            self.setup_camera()
+        
+    def init_ui(self):
+        self.setWindowTitle("Online Examination")
+        self.setGeometry(100, 100, 1000, 700)
+        self.setStyleSheet("background-color: #ecf0f1;")
+        
+        # Set window flags to prevent closing
+        self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.CustomizeWindowHint | 
+                          Qt.WindowType.WindowTitleHint | Qt.WindowType.WindowMinimizeButtonHint)
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QHBoxLayout()
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Left panel - Exam content
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(20)
+        
+        header_layout = QHBoxLayout()
+        
+        title = QLabel(f"Examination - {self.student_name}")
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2c3e50;")
+        header_layout.addWidget(title)
+        
+        header_layout.addStretch()
+        
+        self.timer_label = QLabel("Time: 05:00")
+        self.timer_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.timer_label.setStyleSheet("color: #e74c3c; background-color: white; padding: 10px; border-radius: 5px;")
+        header_layout.addWidget(self.timer_label)
+        
+        left_layout.addLayout(header_layout)
+        
+        # Security status
+        security_layout = QHBoxLayout()
+        
+        self.camera_status = QLabel("📹 Camera: Active")
+        self.camera_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
+        security_layout.addWidget(self.camera_status)
+        
+        self.tab_status = QLabel("🔒 Tab Status: Focused")
+        self.tab_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
+        security_layout.addWidget(self.tab_status)
+        
+        security_layout.addStretch()
+        
+        left_layout.addLayout(security_layout)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(len(self.questions))
+        self.progress_bar.setValue(1)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                text-align: center;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background-color: #27ae60;
+            }
+        """)
+        left_layout.addWidget(self.progress_bar)
+        
+        question_widget = QWidget()
+        question_widget.setStyleSheet("background-color: white; border-radius: 10px;")
+        question_layout = QVBoxLayout()
+        question_layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.question_label = QLabel()
+        self.question_label.setFont(QFont("Arial", 13))
+        self.question_label.setWordWrap(True)
+        self.question_label.setStyleSheet("color: #2c3e50; padding: 10px;")
+        question_layout.addWidget(self.question_label)
+        
+        self.option_group = QButtonGroup()
+        self.option_buttons = []
+        
+        for i in range(4):
+            radio = QRadioButton()
+            radio.setFont(QFont("Arial", 11))
+            radio.setStyleSheet("padding: 8px;")
+            radio.toggled.connect(lambda checked, idx=i: self.option_selected(idx) if checked else None)
+            self.option_buttons.append(radio)
+            self.option_group.addButton(radio)
+            question_layout.addWidget(radio)
+        
+        question_widget.setLayout(question_layout)
+        left_layout.addWidget(question_widget)
+        
+        nav_layout = QHBoxLayout()
+        
+        self.prev_btn = QPushButton("Previous")
+        self.prev_btn.setFont(QFont("Arial", 11))
+        self.prev_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.prev_btn.clicked.connect(self.previous_question)
+        nav_layout.addWidget(self.prev_btn)
+        
+        nav_layout.addStretch()
+        
+        self.next_btn = QPushButton("Next")
+        self.next_btn.setFont(QFont("Arial", 11))
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.next_btn.clicked.connect(self.next_question)
+        nav_layout.addWidget(self.next_btn)
+        
+        self.submit_btn = QPushButton("Submit Exam")
+        self.submit_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.submit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        self.submit_btn.clicked.connect(self.submit_exam)
+        self.submit_btn.hide()
+        nav_layout.addWidget(self.submit_btn)
+        
+        left_layout.addLayout(nav_layout)
+        
+        left_panel.setLayout(left_layout)
+        main_layout.addWidget(left_panel, 3)
+        
+        # Right panel - Camera feed
+        right_panel = QWidget()
+        right_panel.setStyleSheet("background-color: white; border-radius: 10px;")
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(15, 15, 15, 15)
+        
+        camera_title = QLabel("Live Monitoring")
+        camera_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(camera_title)
+        
+        self.camera_label = QLabel()
+        self.camera_label.setStyleSheet("border: 2px solid #bdc3c7; background-color: #2c3e50;")
+        self.camera_label.setMinimumSize(200, 150)
+        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(self.camera_label)
+        
+        warning_label = QLabel("⚠️ Keep camera ON\nthroughout exam")
+        warning_label.setStyleSheet("color: #e74c3c; padding: 10px; font-weight: bold;")
+        warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        warning_label.setWordWrap(True)
+        right_layout.addWidget(warning_label)
+        
+        violations_label = QLabel("Security Violations:")
+        violations_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        right_layout.addWidget(violations_label)
+        
+        self.violations_display = QLabel(f"Tab Switches: {self.tab_switch_count}\nCamera Off: {self.camera_violation_count}")
+        self.violations_display.setStyleSheet("background-color: #f8f9fa; padding: 10px; border-radius: 5px;")
+        right_layout.addWidget(self.violations_display)
+        
+        right_layout.addStretch()
+        
+        right_panel.setLayout(right_layout)
+        main_layout.addWidget(right_panel, 1)
+        
+        central_widget.setLayout(main_layout)
+        self.load_question()
+    
+    def changeEvent(self, event):
+        """Detect window state changes (focus loss)"""
+        if event.type() == event.Type.WindowStateChange or event.type() == event.Type.ActivationChange:
+            if not self.isActiveWindow() and not self.exam_paused:
+                self.handle_tab_switch()
+        super().changeEvent(event)
+    
+    def handle_tab_switch(self):
+        """Handle tab switching / focus loss"""
+        if self.exam_paused:
+            return
+        
+        self.exam_paused = True
+        self.tab_switch_count += 1
+        self.timer.stop()
+        
+        # Log the violation
+        SecurityLogger.log_violation(
+            self.username,
+            "Tab Switch",
+            f"Student: {self.student_name} - Attempt #{self.tab_switch_count}"
+        )
+        
+        # Update status
+        self.tab_status.setText(f"⚠️ Tab Status: SWITCHED (#{self.tab_switch_count})")
+        self.tab_status.setStyleSheet("color: #e74c3c; font-weight: bold; padding: 5px;")
+        self.update_violations_display()
+        
+        # Show warning dialog
+        QMessageBox.critical(self, "Tab Switch Detected!", 
+                           f"WARNING: Tab switching is prohibited!\n\n"
+                           f"This is violation #{self.tab_switch_count}\n"
+                           f"This incident has been reported to the administrator.\n\n"
+                           f"Please close ALL other tabs to continue the exam.")
+        
+        # Resume when window regains focus
+        self.check_focus_timer = QTimer()
+        self.check_focus_timer.timeout.connect(self.check_window_focus)
+        self.check_focus_timer.start(500)
+    
+    def check_window_focus(self):
+        """Check if window has regained focus"""
+        if self.isActiveWindow():
+            self.exam_paused = False
+            self.timer.start(1000)
+            self.tab_status.setText("🔒 Tab Status: Focused")
+            self.tab_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
+            self.check_focus_timer.stop()
+    
+    def update_violations_display(self):
+        """Update the violations counter"""
+        self.violations_display.setText(
+            f"Tab Switches: {self.tab_switch_count}\nCamera Off: {self.camera_violation_count}"
+        )
+        
+    def start_timer(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(1000)
+        
+    def update_timer(self):
+        self.time_remaining -= 1
+        minutes = self.time_remaining // 60
+        seconds = self.time_remaining % 60
+        self.timer_label.setText(f"Time: {minutes:02d}:{seconds:02d}")
+        
+        if self.time_remaining <= 0:
+            self.timer.stop()
+            QMessageBox.warning(self, "Time's Up!", "Time is over! Exam will be submitted automatically.")
+            self.submit_exam()
+            
+    def load_question(self):
+        q = self.questions[self.current_question]
+        self.question_label.setText(f"Q{self.current_question + 1}. {q['question']}")
+        
+        for i, option in enumerate(q['options']):
+            self.option_buttons[i].setText(option)
+            self.option_buttons[i].setChecked(self.user_answers[self.current_question] == i)
+        
+        self.prev_btn.setEnabled(self.current_question > 0)
+        self.progress_bar.setValue(self.current_question + 1)
+        
+        if self.current_question == len(self.questions) - 1:
+            self.next_btn.hide()
+            self.submit_btn.show()
+        else:
+            self.next_btn.show()
+            self.submit_btn.hide()
+            
+    def option_selected(self, index):
+        self.user_answers[self.current_question] = index
+        
+    def next_question(self):
+        if self.current_question < len(self.questions) - 1:
+            self.current_question += 1
+            self.load_question()
+            
+    def previous_question(self):
+        if self.current_question > 0:
+            self.current_question -= 1
+            self.load_question()
+            
+    def submit_exam(self):
+        self.timer.stop()
+        if self.webcam_thread:
+            self.webcam_thread.stop()
+        
+        self.score = 0
+        for i, q in enumerate(self.questions):
+            if self.user_answers[i] == q['answer']:
+                self.score += 1
+        
+        percentage = (self.score / len(self.questions)) * 100
+        
+        result_msg = f"""
+Exam Completed!
+
+Total Questions: {len(self.questions)}
+Correct Answers: {self.score}
+Wrong Answers: {len(self.questions) - self.score}
+
+Score: {percentage:.1f}%
+
+Security Summary:
+Tab Switch Violations: {self.tab_switch_count}
+Camera Violations: {self.camera_violation_count}
+
+Note: All violations have been reported to the administrator.
+        """
+        
+        QMessageBox.information(self, "Exam Results", result_msg)
+        self.close()
+    
+    def closeEvent(self, event):
+        """Handle window close event"""
+        if self.webcam_thread:
+            self.webcam_thread.stop()
+        event.accept()
+
+class AdminWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.questions = self.load_questions()
+        self.students = self.load_students()
+        self.current_edit_index = -1
+        self.init_ui()
+        
+    def load_questions(self):
+        """Load questions from file"""
+        try:
+            with open(QUESTIONS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    
+    def save_questions(self):
+        """Save questions to file"""
+        with open(QUESTIONS_FILE, 'w') as f:
+            json.dump(self.questions, f, indent=4)
+    
+    def load_students(self):
+        """Load students from file"""
+        try:
+            with open(STUDENTS_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return []
+    
+    def save_students(self):
+        """Save students to file"""
+        with open(STUDENTS_FILE, 'w') as f:
+            json.dump(self.students, f, indent=4)
+        
+    def init_ui(self):
+        self.setWindowTitle("Admin Panel - Management System")
+        self.setGeometry(100, 100, 1200, 700)
+        self.setStyleSheet("background-color: #ecf0f1;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Title
+        title = QLabel("Admin Panel")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2c3e50; padding: 10px;")
+        main_layout.addWidget(title)
+        
+        # Tab widget
+        self.tabs = QTabWidget()
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                background: white;
+            }
+            QTabBar::tab {
+                background: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                margin-right: 5px;
+                border-top-left-radius: 5px;
+                border-top-right-radius: 5px;
+            }
+            QTabBar::tab:selected {
+                background: #3498db;
+            }
+        """)
+        
+        # Questions tab
+        self.questions_tab = self.create_questions_tab()
+        self.tabs.addTab(self.questions_tab, "Questions Management")
+        
+        # Students tab
+        self.students_tab = self.create_students_tab()
+        self.tabs.addTab(self.students_tab, "Students Management")
+        
+        # Security Logs tab (NEW)
+        self.security_tab = self.create_security_logs_tab()
+        self.tabs.addTab(self.security_tab, "Security Violations")
+        
+        # Email Config tab
+        self.email_tab = self.create_email_config_tab()
+        self.tabs.addTab(self.email_tab, "Email Configuration")
+        
+        main_layout.addWidget(self.tabs)
+        
+        # Logout button
+        logout_btn = QPushButton("Logout")
+        logout_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        logout_btn.clicked.connect(self.logout)
+        main_layout.addWidget(logout_btn)
+        
+        central_widget.setLayout(main_layout)
+    
+    def create_security_logs_tab(self):
+        """Create security violations monitoring tab"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        title = QLabel("Security Violations Monitor")
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2c3e50;")
+        layout.addWidget(title)
+        
+        info = QLabel("All cheating attempts and security violations are logged here with timestamps.")
+        info.setStyleSheet("color: #7f8c8d; padding: 5px;")
+        layout.addWidget(info)
+        
+        # Controls
+        controls_layout = QHBoxLayout()
+        
+        refresh_btn = QPushButton("🔄 Refresh Logs")
+        refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px 15px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        refresh_btn.clicked.connect(self.refresh_security_logs)
+        controls_layout.addWidget(refresh_btn)
+        
+        clear_btn = QPushButton("🗑️ Clear All Logs")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                padding: 10px 15px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+        """)
+        clear_btn.clicked.connect(self.clear_security_logs)
+        controls_layout.addWidget(clear_btn)
+        
+        controls_layout.addStretch()
+        layout.addLayout(controls_layout)
+        
+        # Security logs table
+        self.security_table = QTableWidget()
+        self.security_table.setColumnCount(5)
+        self.security_table.setHorizontalHeaderLabels(["Timestamp", "Student Username", "Student Name", "Violation Type", "Details"])
+        self.security_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.security_table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+            QTableWidget::item {
+                padding: 8px;
+            }
+            QHeaderView::section {
+                background-color: #e74c3c;
+                color: white;
+                padding: 10px;
+                font-weight: bold;
+            }
+        """)
+        layout.addWidget(self.security_table)
+        
+        # Statistics
+        self.stats_label = QLabel()
+        self.stats_label.setStyleSheet("""
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            font-weight: bold;
+        """)
+        layout.addWidget(self.stats_label)
+        
+        tab.setLayout(layout)
+        self.refresh_security_logs()
+        return tab
+    
+    def refresh_security_logs(self):
+        """Refresh security logs display"""
+        logs = SecurityLogger.get_logs()
+        self.security_table.setRowCount(len(logs))
+        
+        # Get student names mapping
+        students = self.load_students()
+        username_to_name = {s['username']: s['name'] for s in students}
+        
+        tab_switches = 0
+        camera_violations = 0
+        
+        for i, log in enumerate(reversed(logs)):  # Show most recent first
+            self.security_table.setItem(i, 0, QTableWidgetItem(log['timestamp']))
+            self.security_table.setItem(i, 1, QTableWidgetItem(log['username']))
+            
+            student_name = username_to_name.get(log['username'], "Unknown")
+            self.security_table.setItem(i, 2, QTableWidgetItem(student_name))
+            
+            violation_item = QTableWidgetItem(log['violation_type'])
+            if log['violation_type'] == "Tab Switch":
+                violation_item.setBackground(Qt.GlobalColor.yellow)
+                tab_switches += 1
+            elif log['violation_type'] == "Camera Disabled":
+                violation_item.setBackground(Qt.GlobalColor.red)
+                violation_item.setForeground(Qt.GlobalColor.white)
+                camera_violations += 1
+            
+            self.security_table.setItem(i, 3, violation_item)
+            self.security_table.setItem(i, 4, QTableWidgetItem(log.get('details', '')))
+        
+        # Update statistics
+        total_violations = len(logs)
+        self.stats_label.setText(
+            f"📊 Statistics: Total Violations: {total_violations} | "
+            f"Tab Switches: {tab_switches} | Camera Violations: {camera_violations}"
+        )
+    
+    def clear_security_logs(self):
+        """Clear all security logs"""
+        reply = QMessageBox.question(self, "Confirm Clear", 
+                                     "Are you sure you want to clear ALL security logs?\n\nThis action cannot be undone!",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                if os.path.exists(SECURITY_LOGS_FILE):
+                    os.remove(SECURITY_LOGS_FILE)
+                self.refresh_security_logs()
+                QMessageBox.information(self, "Success", "All security logs have been cleared.")
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to clear logs: {str(e)}")
+    
+    def create_questions_tab(self):
+        """Create questions management tab"""
+        tab = QWidget()
+        layout = QHBoxLayout()
+        layout.setSpacing(20)
+        
+        # Left panel - Question List
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+        
+        list_title = QLabel("Questions List")
+        list_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        left_layout.addWidget(list_title)
+        
+        self.question_list = QListWidget()
+        self.question_list.setStyleSheet("""
+            QListWidget {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                padding: 5px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #ecf0f1;
+            }
+            QListWidget::item:selected {
+                background-color: #3498db;
+                color: white;
+            }
+        """)
+        self.question_list.itemClicked.connect(self.load_question_for_edit)
+        left_layout.addWidget(self.question_list)
+        
+        list_btn_layout = QHBoxLayout()
+        
+        delete_btn = QPushButton("Delete")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+        """)
+        delete_btn.clicked.connect(self.delete_question)
+        list_btn_layout.addWidget(delete_btn)
+        
+        new_btn = QPushButton("New")
+        new_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        new_btn.clicked.connect(self.new_question)
+        list_btn_layout.addWidget(new_btn)
+        
+        left_layout.addLayout(list_btn_layout)
+        left_panel.setLayout(left_layout)
+        layout.addWidget(left_panel, 1)
+        
+        # Right panel - Question Editor
+        right_panel = QWidget()
+        right_layout = QVBoxLayout()
+        
+        editor_title = QLabel("Question Editor")
+        editor_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        right_layout.addWidget(editor_title)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none;")
+        
+        form_widget = QWidget()
+        form_layout = QVBoxLayout()
+        form_layout.setSpacing(15)
+        
+        q_label = QLabel("Question:")
+        q_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(q_label)
+        
+        self.question_input = QTextEdit()
+        self.question_input.setPlaceholderText("Enter the question here...")
+        self.question_input.setMaximumHeight(100)
+        self.question_input.setStyleSheet("""
+            QTextEdit {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                padding: 10px;
+            }
+        """)
+        form_layout.addWidget(self.question_input)
+        
+        options_label = QLabel("Options:")
+        options_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(options_label)
+        
+        self.option_inputs = []
+        for i in range(4):
+            opt_layout = QHBoxLayout()
+            opt_label = QLabel(f"Option {i+1}:")
+            opt_label.setFixedWidth(70)
+            opt_input = QLineEdit()
+            opt_input.setPlaceholderText(f"Enter option {i+1}")
+            opt_input.setStyleSheet("""
+                QLineEdit {
+                    padding: 8px;
+                    border: 2px solid #bdc3c7;
+                    border-radius: 5px;
+                }
+            """)
+            self.option_inputs.append(opt_input)
+            opt_layout.addWidget(opt_label)
+            opt_layout.addWidget(opt_input)
+            form_layout.addLayout(opt_layout)
+        
+        answer_label = QLabel("Correct Answer:")
+        answer_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(answer_label)
+        
+        self.answer_combo = QComboBox()
+        self.answer_combo.addItems(["Option 1", "Option 2", "Option 3", "Option 4"])
+        self.answer_combo.setStyleSheet("""
+            QComboBox {
+                padding: 8px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                background-color: white;
+            }
+        """)
+        form_layout.addWidget(self.answer_combo)
+        
+        save_btn = QPushButton("Save Question")
+        save_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 12px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        save_btn.clicked.connect(self.save_question)
+        form_layout.addWidget(save_btn)
+        
+        form_layout.addStretch()
+        form_widget.setLayout(form_layout)
+        scroll.setWidget(form_widget)
+        right_layout.addWidget(scroll)
+        
+        right_panel.setLayout(right_layout)
+        layout.addWidget(right_panel, 2)
+        
+        tab.setLayout(layout)
+        self.refresh_question_list()
+        return tab
+    
+    def create_students_tab(self):
+        """Create students management tab"""
+        tab = QWidget()
+        layout = QHBoxLayout()
+        layout.setSpacing(20)
+        
+        # Left panel - Student List
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+        
+        list_title = QLabel("Students List")
+        list_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        left_layout.addWidget(list_title)
+        
+        # Table for students
+        self.student_table = QTableWidget()
+        self.student_table.setColumnCount(4)
+        self.student_table.setHorizontalHeaderLabels(["Name", "Email", "Username", "Password"])
+        self.student_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.student_table.setStyleSheet("""
+            QTableWidget {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+            QTableWidget::item {
+                padding: 5px;
+            }
+            QHeaderView::section {
+                background-color: #3498db;
+                color: white;
+                padding: 8px;
+                font-weight: bold;
+            }
+        """)
+        self.student_table.itemClicked.connect(self.load_student_for_edit)
+        left_layout.addWidget(self.student_table)
+        
+        list_btn_layout = QHBoxLayout()
+        
+        delete_student_btn = QPushButton("Delete Student")
+        delete_student_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+        """)
+        delete_student_btn.clicked.connect(self.delete_student)
+        list_btn_layout.addWidget(delete_student_btn)
+        
+        new_student_btn = QPushButton("New Student")
+        new_student_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        new_student_btn.clicked.connect(self.new_student)
+        list_btn_layout.addWidget(new_student_btn)
+        
+        left_layout.addLayout(list_btn_layout)
+        left_panel.setLayout(left_layout)
+        layout.addWidget(left_panel, 2)
+        
+        # Right panel - Student Form
+        right_panel = QWidget()
+        right_layout = QVBoxLayout()
+        
+        form_title = QLabel("Student Form")
+        form_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        right_layout.addWidget(form_title)
+        
+        form_layout = QVBoxLayout()
+        form_layout.setSpacing(15)
+        
+        # Name
+        name_label = QLabel("Full Name:")
+        name_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(name_label)
+        
+        self.student_name_input = QLineEdit()
+        self.student_name_input.setPlaceholderText("Enter student name")
+        self.student_name_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        form_layout.addWidget(self.student_name_input)
+        
+        # Email
+        email_label = QLabel("Email Address:")
+        email_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(email_label)
+        
+        self.student_email_input = QLineEdit()
+        self.student_email_input.setPlaceholderText("Enter email address")
+        self.student_email_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        form_layout.addWidget(self.student_email_input)
+        
+        # Username
+        username_label = QLabel("Username:")
+        username_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(username_label)
+        
+        self.student_username_input = QLineEdit()
+        self.student_username_input.setPlaceholderText("Enter username")
+        self.student_username_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        form_layout.addWidget(self.student_username_input)
+        
+        # Password
+        password_label = QLabel("Password:")
+        password_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        form_layout.addWidget(password_label)
+        
+        self.student_password_input = QLineEdit()
+        self.student_password_input.setPlaceholderText("Enter password")
+        self.student_password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        form_layout.addWidget(self.student_password_input)
+        
+        # Generate password button
+        generate_pwd_btn = QPushButton("Generate Random Password")
+        generate_pwd_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #9b59b6;
+                color: white;
+                padding: 8px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #8e44ad;
+            }
+        """)
+        generate_pwd_btn.clicked.connect(self.generate_password)
+        form_layout.addWidget(generate_pwd_btn)
+        
+        # Send email checkbox
+        self.send_email_check = QRadioButton("Send credentials via email")
+        self.send_email_check.setFont(QFont("Arial", 10))
+        self.send_email_check.setChecked(True)
+        form_layout.addWidget(self.send_email_check)
+        
+        # Save button
+        save_student_btn = QPushButton("Save Student")
+        save_student_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        save_student_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 12px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        save_student_btn.clicked.connect(self.save_student)
+        form_layout.addWidget(save_student_btn)
+        
+        form_layout.addStretch()
+        right_layout.addLayout(form_layout)
+        
+        right_panel.setLayout(right_layout)
+        layout.addWidget(right_panel, 1)
+        
+        tab.setLayout(layout)
+        self.refresh_student_table()
+        return tab
+    
+    def create_email_config_tab(self):
+        """Create email configuration tab"""
+        tab = QWidget()
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 30, 50, 30)
+        
+        title = QLabel("Email Configuration")
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2c3e50;")
+        layout.addWidget(title)
+        
+        info_label = QLabel("Configure your email settings to send credentials to students automatically.")
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: #7f8c8d; padding: 10px;")
+        layout.addWidget(info_label)
+        
+        # SMTP Server
+        smtp_label = QLabel("SMTP Server:")
+        smtp_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout.addWidget(smtp_label)
+        
+        self.smtp_server_input = QLineEdit()
+        self.smtp_server_input.setPlaceholderText("e.g., smtp.gmail.com")
+        self.smtp_server_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        layout.addWidget(self.smtp_server_input)
+        
+        # SMTP Port
+        port_label = QLabel("SMTP Port:")
+        port_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout.addWidget(port_label)
+        
+        self.smtp_port_input = QLineEdit()
+        self.smtp_port_input.setPlaceholderText("e.g., 587")
+        self.smtp_port_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        layout.addWidget(self.smtp_port_input)
+        
+        # Email
+        email_label = QLabel("Your Email:")
+        email_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout.addWidget(email_label)
+        
+        self.email_address_input = QLineEdit()
+        self.email_address_input.setPlaceholderText("your-email@example.com")
+        self.email_address_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        layout.addWidget(self.email_address_input)
+        
+        # Password
+        email_pwd_label = QLabel("Email Password / App Password:")
+        email_pwd_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout.addWidget(email_pwd_label)
+        
+        self.email_password_input = QLineEdit()
+        self.email_password_input.setPlaceholderText("Your email password or app-specific password")
+        self.email_password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.email_password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+            }
+        """)
+        layout.addWidget(self.email_password_input)
+        
+        # Gmail note
+        note_label = QLabel("Note: For Gmail, use an App Password instead of your regular password.\n"
+                          "Go to Google Account → Security → 2-Step Verification → App passwords")
+        note_label.setWordWrap(True)
+        note_label.setStyleSheet("color: #e67e22; background-color: #fef5e7; padding: 10px; border-radius: 5px;")
+        layout.addWidget(note_label)
+        
+        # Save config button
+        save_config_btn = QPushButton("Save Email Configuration")
+        save_config_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        save_config_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 12px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        save_config_btn.clicked.connect(self.save_email_config)
+        layout.addWidget(save_config_btn)
+        
+        layout.addStretch()
+        tab.setLayout(layout)
+        
+        # Load existing config
+        self.load_email_config()
+        return tab
+    
+    def load_email_config(self):
+        """Load email configuration"""
+        try:
+            with open(EMAIL_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                self.smtp_server_input.setText(config.get('smtp_server', ''))
+                self.smtp_port_input.setText(str(config.get('smtp_port', '')))
+                self.email_address_input.setText(config.get('email', ''))
+                self.email_password_input.setText(config.get('password', ''))
+        except:
+            pass
+    
+    def save_email_config(self):
+        """Save email configuration"""
+        config = {
+            'smtp_server': self.smtp_server_input.text(),
+            'smtp_port': self.smtp_port_input.text(),
+            'email': self.email_address_input.text(),
+            'password': self.email_password_input.text()
+        }
+        
+        if not all([config['smtp_server'], config['smtp_port'], config['email'], config['password']]):
+            QMessageBox.warning(self, "Input Error", "Please fill in all email configuration fields!")
+            return
+        
+        try:
+            with open(EMAIL_CONFIG_FILE, 'w') as f:
+                json.dump(config, f, indent=4)
+            QMessageBox.information(self, "Success", "Email configuration saved successfully!")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save email configuration: {str(e)}")
+    
+    def generate_password(self):
+        """Generate random password"""
+        import random
+        import string
+        chars = string.ascii_letters + string.digits
+        password = ''.join(random.choice(chars) for _ in range(10))
+        self.student_password_input.setText(password)
+    
+    def refresh_question_list(self):
+        """Refresh the question list display"""
+        self.question_list.clear()
+        for i, q in enumerate(self.questions):
+            question_text = q['question'][:60] + "..." if len(q['question']) > 60 else q['question']
+            self.question_list.addItem(f"Q{i+1}: {question_text}")
+    
+    def refresh_student_table(self):
+        """Refresh the student table display"""
+        self.student_table.setRowCount(len(self.students))
+        for i, student in enumerate(self.students):
+            self.student_table.setItem(i, 0, QTableWidgetItem(student['name']))
+            self.student_table.setItem(i, 1, QTableWidgetItem(student['email']))
+            self.student_table.setItem(i, 2, QTableWidgetItem(student['username']))
+            self.student_table.setItem(i, 3, QTableWidgetItem(student['password']))
+    
+    def new_question(self):
+        """Clear form for new question"""
+        self.current_edit_index = -1
+        self.question_input.clear()
+        for opt_input in self.option_inputs:
+            opt_input.clear()
+        self.answer_combo.setCurrentIndex(0)
+    
+    def new_student(self):
+        """Clear form for new student"""
+        self.current_student_index = -1
+        self.student_name_input.clear()
+        self.student_email_input.clear()
+        self.student_username_input.clear()
+        self.student_password_input.clear()
+    
+    def load_question_for_edit(self, item):
+        """Load selected question into editor"""
+        index = self.question_list.row(item)
+        self.current_edit_index = index
+        
+        q = self.questions[index]
+        self.question_input.setText(q['question'])
+        
+        for i, opt in enumerate(q['options']):
+            self.option_inputs[i].setText(opt)
+        
+        self.answer_combo.setCurrentIndex(q['answer'])
+    
+    def load_student_for_edit(self, item):
+        """Load selected student into form"""
+        row = item.row()
+        self.current_student_index = row
+        
+        student = self.students[row]
+        self.student_name_input.setText(student['name'])
+        self.student_email_input.setText(student['email'])
+        self.student_username_input.setText(student['username'])
+        self.student_password_input.setText(student['password'])
+    
+    def save_question(self):
+        """Save the current question"""
+        question_text = self.question_input.toPlainText().strip()
+        
+        if not question_text:
+            QMessageBox.warning(self, "Input Error", "Please enter a question!")
+            return
+        
+        options = []
+        for i, opt_input in enumerate(self.option_inputs):
+            opt_text = opt_input.text().strip()
+            if not opt_text:
+                QMessageBox.warning(self, "Input Error", f"Please enter Option {i+1}!")
+                return
+            options.append(opt_text)
+        
+        question_data = {
+            "question": question_text,
+            "options": options,
+            "answer": self.answer_combo.currentIndex()
+        }
+        
+        if self.current_edit_index == -1:
+            self.questions.append(question_data)
+            QMessageBox.information(self, "Success", "Question added successfully!")
+        else:
+            self.questions[self.current_edit_index] = question_data
+            QMessageBox.information(self, "Success", "Question updated successfully!")
+        
+        self.save_questions()
+        self.refresh_question_list()
+        self.new_question()
+    
+    def save_student(self):
+        """Save the current student"""
+        name = self.student_name_input.text().strip()
+        email = self.student_email_input.text().strip()
+        username = self.student_username_input.text().strip()
+        password = self.student_password_input.text().strip()
+        
+        if not all([name, email, username, password]):
+            QMessageBox.warning(self, "Input Error", "Please fill in all student fields!")
+            return
+        
+        # Validate email format
+        if '@' not in email:
+            QMessageBox.warning(self, "Input Error", "Please enter a valid email address!")
+            return
+        
+        # Check for duplicate username
+        for i, student in enumerate(self.students):
+            if hasattr(self, 'current_student_index') and i == self.current_student_index:
+                continue
+            if student['username'] == username:
+                QMessageBox.warning(self, "Duplicate Error", "Username already exists!")
+                return
+        
+        student_data = {
+            "name": name,
+            "email": email,
+            "username": username,
+            "password": password
+        }
+        
+        is_new = not hasattr(self, 'current_student_index') or self.current_student_index == -1
+        
+        if is_new:
+            self.students.append(student_data)
+        else:
+            self.students[self.current_student_index] = student_data
+        
+        self.save_students()
+        self.refresh_student_table()
+        
+        # Send email if checkbox is checked and it's a new student
+        if self.send_email_check.isChecked() and is_new:
+            self.send_credentials_email(student_data)
+        else:
+            msg = "Student added successfully!" if is_new else "Student updated successfully!"
+            QMessageBox.information(self, "Success", msg)
+        
+        self.new_student()
+    
+    def send_credentials_email(self, student):
+        """Send credentials to student via email"""
+        try:
+            # Load email config
+            with open(EMAIL_CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+            
+            smtp_server = config.get('smtp_server')
+            smtp_port = int(config.get('smtp_port'))
+            sender_email = config.get('email')
+            sender_password = config.get('password')
+            
+            if not all([smtp_server, smtp_port, sender_email, sender_password]):
+                QMessageBox.warning(self, "Config Error", 
+                                  "Email configuration is incomplete. Please configure email settings first.")
+                return
+            
+            # Create email message
+            message = MIMEMultipart()
+            message['From'] = sender_email
+            message['To'] = student['email']
+            message['Subject'] = "Your Exam Login Credentials"
+            
+            body = f"""
+Dear {student['name']},
+
+Welcome to the Online Examination System!
+
+Your login credentials have been created:
+
+Username: {student['username']}
+Password: {student['password']}
+
+Please use these credentials to log in to the examination system.
+
+Important: Keep your credentials secure and do not share them with anyone.
+
+Best regards,
+Examination Admin
+"""
+            
+            message.attach(MIMEText(body, 'plain'))
+            
+            # Send email
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                server.starttls()
+                server.login(sender_email, sender_password)
+                server.send_message(message)
+            
+            QMessageBox.information(self, "Success", 
+                                  f"Student added successfully!\nCredentials sent to {student['email']}")
+        
+        except FileNotFoundError:
+            QMessageBox.warning(self, "Config Error", 
+                              "Email configuration not found. Please configure email settings first.")
+        except Exception as e:
+            QMessageBox.critical(self, "Email Error", 
+                               f"Failed to send email: {str(e)}\n\nStudent has been added but email was not sent.")
+    
+    def delete_question(self):
+        """Delete selected question"""
+        current_item = self.question_list.currentItem()
+        if not current_item:
+            QMessageBox.warning(self, "Selection Error", "Please select a question to delete!")
+            return
+        
+        reply = QMessageBox.question(self, "Confirm Delete", 
+                                     "Are you sure you want to delete this question?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            index = self.question_list.row(current_item)
+            del self.questions[index]
+            self.save_questions()
+            self.refresh_question_list()
+            self.new_question()
+            QMessageBox.information(self, "Success", "Question deleted successfully!")
+    
+    def delete_student(self):
+        """Delete selected student"""
+        current_row = self.student_table.currentRow()
+        if current_row < 0:
+            QMessageBox.warning(self, "Selection Error", "Please select a student to delete!")
+            return
+        
+        reply = QMessageBox.question(self, "Confirm Delete", 
+                                     "Are you sure you want to delete this student?",
+                                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            del self.students[current_row]
+            self.save_students()
+            self.refresh_student_table()
+            self.new_student()
+            QMessageBox.information(self, "Success", "Student deleted successfully!")
+    
+    def logout(self):
+        """Logout and return to login"""
+        login_window = LoginWindow()
+        login_window.show()
+        self.close()
+
+def main():
+    app = QApplication(sys.argv)
+    login_window = LoginWindow()
+    login_window.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
