@@ -1,1 +1,2226 @@
-q_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
+"""
+Central Examination Server
+Run this on a central server accessible over the internet
+"""
+
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+import json
+import os
+from datetime import datetime
+import hashlib
+
+app = Flask(__name__)
+CORS(app)  # Enable CORS for cross-origin requests
+
+# File paths
+QUESTIONS_FILE = "server_questions.json"
+STUDENTS_FILE = "server_students.json"
+SECURITY_LOGS_FILE = "server_security_logs.json"
+RESULTS_FILE = "server_results.json"
+SERVER_CONFIG_FILE = "server_config.json"
+
+# Simple authentication token (in production, use proper JWT tokens)
+def verify_token(token):
+    """Verify authentication token"""
+    try:
+        with open(SERVER_CONFIG_FILE, 'r') as f:
+            config = json.load(f)
+            return token == config.get('api_token', 'secure_token_12345')
+    except:
+        return token == 'secure_token_12345'
+
+def generate_api_token():
+    """Generate a secure API token"""
+    return hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()
+
+# Initialize server files
+def init_server_files():
+    """Initialize server data files"""
+    if not os.path.exists(SERVER_CONFIG_FILE):
+        config = {
+            'api_token': 'secure_token_12345',  # Change this in production
+            'server_name': 'Central Examination Server',
+            'version': '1.0'
+        }
+        with open(SERVER_CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=4)
+    
+    if not os.path.exists(QUESTIONS_FILE):
+        default_questions = [
+            {
+                "question": "What does HTML stand for?",
+                "options": ["Hyper Text Markup Language", "High Tech Modern Language", 
+                           "Home Tool Markup Language", "Hyperlinks and Text Markup Language"],
+                "answer": 0
+            },
+            {
+                "question": "Which programming language is known as the 'language of the web'?",
+                "options": ["Python", "Java", "JavaScript", "C++"],
+                "answer": 2
+            }
+        ]
+        with open(QUESTIONS_FILE, 'w') as f:
+            json.dump(default_questions, f, indent=4)
+    
+    if not os.path.exists(STUDENTS_FILE):
+        default_students = [
+            {
+                "name": "Demo Student",
+                "email": "student@example.com",
+                "username": "student",
+                "password": "exam123",
+                "student_id": "STU001"
+            }
+        ]
+        with open(STUDENTS_FILE, 'w') as f:
+            json.dump(default_students, f, indent=4)
+    
+    if not os.path.exists(SECURITY_LOGS_FILE):
+        with open(SECURITY_LOGS_FILE, 'w') as f:
+            json.dump([], f)
+    
+    if not os.path.exists(RESULTS_FILE):
+        with open(RESULTS_FILE, 'w') as f:
+            json.dump([], f)
+
+init_server_files()
+
+# API Endpoints
+
+@app.route('/api/health', methods=['GET'])
+def health_check():
+    """Health check endpoint"""
+    return jsonify({
+        'status': 'online',
+        'message': 'Central Examination Server is running',
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/login', methods=['POST'])
+def login():
+    """Student login endpoint"""
+    data = request.json
+    username = data.get('username')
+    password = data.get('password')
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        with open(STUDENTS_FILE, 'r') as f:
+            students = json.load(f)
+        
+        for student in students:
+            if student['username'] == username and student['password'] == password:
+                return jsonify({
+                    'success': True,
+                    'student': {
+                        'name': student['name'],
+                        'email': student['email'],
+                        'username': student['username'],
+                        'student_id': student.get('student_id', 'N/A')
+                    }
+                })
+        
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/questions', methods=['GET'])
+def get_questions():
+    """Get exam questions"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        with open(QUESTIONS_FILE, 'r') as f:
+            questions = json.load(f)
+        return jsonify({'success': True, 'questions': questions})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/security-log', methods=['POST'])
+def log_security_violation():
+    """Log security violations from clients"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        data = request.json
+        log_entry = {
+            'username': data.get('username'),
+            'student_name': data.get('student_name'),
+            'violation_type': data.get('violation_type'),
+            'details': data.get('details'),
+            'timestamp': datetime.now().isoformat(),
+            'client_ip': request.remote_addr
+        }
+        
+        logs = []
+        if os.path.exists(SECURITY_LOGS_FILE):
+            with open(SECURITY_LOGS_FILE, 'r') as f:
+                logs = json.load(f)
+        
+        logs.append(log_entry)
+        
+        with open(SECURITY_LOGS_FILE, 'w') as f:
+            json.dump(logs, f, indent=4)
+        
+        return jsonify({'success': True, 'message': 'Violation logged'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/security-logs', methods=['GET'])
+def get_security_logs():
+    """Get all security logs (admin only)"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        with open(SECURITY_LOGS_FILE, 'r') as f:
+            logs = json.load(f)
+        return jsonify({'success': True, 'logs': logs})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/submit-exam', methods=['POST'])
+def submit_exam():
+    """Submit exam results"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        data = request.json
+        result_entry = {
+            'username': data.get('username'),
+            'student_name': data.get('student_name'),
+            'score': data.get('score'),
+            'total_questions': data.get('total_questions'),
+            'percentage': data.get('percentage'),
+            'time_taken': data.get('time_taken'),
+            'tab_switch_count': data.get('tab_switch_count'),
+            'camera_violation_count': data.get('camera_violation_count'),
+            'timestamp': datetime.now().isoformat(),
+            'client_ip': request.remote_addr
+        }
+        
+        results = []
+        if os.path.exists(RESULTS_FILE):
+            with open(RESULTS_FILE, 'r') as f:
+                results = json.load(f)
+        
+        results.append(result_entry)
+        
+        with open(RESULTS_FILE, 'w') as f:
+            json.dump(results, f, indent=4)
+        
+        return jsonify({'success': True, 'message': 'Exam submitted successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/results', methods=['GET'])
+def get_results():
+    """Get all exam results (admin only)"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        with open(RESULTS_FILE, 'r') as f:
+            results = json.load(f)
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/students', methods=['GET'])
+def get_students():
+    """Get all students (admin only)"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        with open(STUDENTS_FILE, 'r') as f:
+            students = json.load(f)
+        # Remove passwords from response
+        safe_students = [{'name': s['name'], 'email': s['email'], 
+                         'username': s['username'], 'student_id': s.get('student_id', 'N/A')} 
+                        for s in students]
+        return jsonify({'success': True, 'students': safe_students})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/admin/add-question', methods=['POST'])
+def add_question():
+    """Add a new question (admin only)"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        data = request.json
+        
+        with open(QUESTIONS_FILE, 'r') as f:
+            questions = json.load(f)
+        
+        questions.append(data)
+        
+        with open(QUESTIONS_FILE, 'w') as f:
+            json.dump(questions, f, indent=4)
+        
+        return jsonify({'success': True, 'message': 'Question added successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/admin/add-student', methods=['POST'])
+def add_student():
+    """Add a new student (admin only)"""
+    token = request.headers.get('Authorization')
+    
+    if not verify_token(token):
+        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+    
+    try:
+        data = request.json
+        
+        with open(STUDENTS_FILE, 'r') as f:
+            students = json.load(f)
+        
+        # Check for duplicate username
+        if any(s['username'] == data.get('username') for s in students):
+            return jsonify({'success': False, 'message': 'Username already exists'}), 400
+        
+        students.append(data)
+        
+        with open(STUDENTS_FILE, 'w') as f:
+            json.dump(students, f, indent=4)
+        
+        return jsonify({'success': True, 'message': 'Student added successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+if __name__ == '__main__':
+    print("\n" + "="*60)
+    print("  CENTRAL EXAMINATION SERVER")
+    print("="*60)
+    print("\n📡 Server starting...")
+    print("🔐 API Token: secure_token_12345 (Change in server_config.json)")
+    print("🌐 Server will be accessible at: http://YOUR_IP:5000")
+    print("\nTo access from other computers:")
+    print("  1. Find your IP address (ipconfig/ifconfig)")
+    print("  2. Update client applications with your IP")
+    print("  3. Ensure port 5000 is open in firewall")
+    print("\n" + "="*60 + "\n")
+    
+    # Run on all interfaces to be accessible from network
+    app.run(host='0.0.0.0', port=5000, debug=True)
+
+"""
+Enhanced Examination Client with Kiosk Mode and Server Connection
+"""
+
+import sys
+import json
+import os
+import requests
+from datetime import datetime
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                             QMessageBox, QRadioButton, QButtonGroup, QProgressBar,
+                             QTextEdit, QGroupBox, QDialog, QCheckBox)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QImage, QPixmap
+import cv2
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Server configuration - CHANGE THIS TO YOUR SERVER IP/URL
+SERVER_URL = "http://localhost:5000"  # Change to your server IP, e.g., "http://192.168.1.100:5000"
+API_TOKEN = "secure_token_12345"  # Must match server token
+
+# Local cache files (for offline fallback)
+LOCAL_CACHE_FILE = "client_cache.json"
+
+# ============================================================================
+# SERVER API CLIENT
+# ============================================================================
+
+class ExamServerAPI:
+    """API client for communicating with central exam server"""
+    
+    @staticmethod
+    def test_connection():
+        """Test connection to server"""
+        try:
+            response = requests.get(f"{SERVER_URL}/api/health", timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+    
+    @staticmethod
+    def login(username, password):
+        """Login to server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            data = {'username': username, 'password': password}
+            response = requests.post(f"{SERVER_URL}/api/login", 
+                                    json=data, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {'success': False, 'message': f'Connection error: {str(e)}'}
+    
+    @staticmethod
+    def get_questions():
+        """Get questions from server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            response = requests.get(f"{SERVER_URL}/api/questions", 
+                                   headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {'success': False, 'message': f'Connection error: {str(e)}'}
+    
+    @staticmethod
+    def log_security_violation(username, student_name, violation_type, details):
+        """Log security violation to server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            data = {
+                'username': username,
+                'student_name': student_name,
+                'violation_type': violation_type,
+                'details': details
+            }
+            response = requests.post(f"{SERVER_URL}/api/security-log", 
+                                    json=data, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            print(f"Failed to log violation: {e}")
+            return {'success': False, 'message': str(e)}
+    
+    @staticmethod
+    def submit_exam(username, student_name, score, total, percentage, 
+                   time_taken, tab_switches, camera_violations):
+        """Submit exam results to server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            data = {
+                'username': username,
+                'student_name': student_name,
+                'score': score,
+                'total_questions': total,
+                'percentage': percentage,
+                'time_taken': time_taken,
+                'tab_switch_count': tab_switches,
+                'camera_violation_count': camera_violations
+            }
+            response = requests.post(f"{SERVER_URL}/api/submit-exam", 
+                                    json=data, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {'success': False, 'message': f'Connection error: {str(e)}'}
+
+# ============================================================================
+# WEBCAM MONITORING
+# ============================================================================
+
+class WebcamThread(QThread):
+    frame_ready = pyqtSignal(QImage)
+    camera_lost = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.camera = None
+    
+    def run(self):
+        self.running = True
+        self.camera = cv2.VideoCapture(0)
+        
+        if not self.camera.isOpened():
+            self.camera_lost.emit()
+            return
+        
+        while self.running:
+            ret, frame = self.camera.read()
+            if ret:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb_frame.shape
+                bytes_per_line = ch * w
+                q_image = QImage(rgb_frame.data, w, h, bytes_per_line, 
+                               QImage.Format.Format_RGB888)
+                self.frame_ready.emit(q_image)
+            else:
+                self.camera_lost.emit()
+                break
+            
+            self.msleep(100)
+    
+    def stop(self):
+        self.running = False
+        if self.camera:
+            self.camera.release()
+        self.wait()
+
+# ============================================================================
+# EXAM RULES DIALOG
+# ============================================================================
+
+class ExamRulesDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Examination Rules and Regulations")
+        self.setModal(True)
+        self.setMinimumSize(700, 500)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        title = QLabel("Examination Rules and Regulations")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #2c3e50; padding: 10px;")
+        layout.addWidget(title)
+        
+        rules_text = QTextEdit()
+        rules_text.setReadOnly(True)
+        rules_text.setStyleSheet("""
+            QTextEdit {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                padding: 15px;
+                font-size: 12px;
+            }
+        """)
+        
+        rules = """
+<h3 style='color: #e74c3c;'>IMPORTANT: Read Carefully Before Starting</h3>
+
+<h4 style='color: #2c3e50;'>Kiosk Mode Security:</h4>
+<ul>
+    <li>The application will run in <b>FULL SCREEN KIOSK MODE</b>.</li>
+    <li>You <b>CANNOT minimize, close, or switch</b> to other applications.</li>
+    <li>The exam window will stay on top at all times.</li>
+    <li>All violations are logged to the central server immediately.</li>
+</ul>
+
+<h4 style='color: #2c3e50;'>Camera Monitoring:</h4>
+<ul>
+    <li>Your webcam <b>MUST be turned ON</b> throughout the entire examination.</li>
+    <li>If the camera is turned off, it will be recorded as a security violation.</li>
+    <li>Ensure your face is clearly visible to the camera at all times.</li>
+</ul>
+
+<h4 style='color: #2c3e50;'>Data Collection:</h4>
+<ul>
+    <li>All exam data is sent to the <b>central examination server</b>.</li>
+    <li>Security violations are logged in real-time.</li>
+    <li>Your exam results are automatically submitted upon completion.</li>
+    <li>Network connectivity is required throughout the exam.</li>
+</ul>
+
+<h4 style='color: #e74c3c;'>Consequences of Violations:</h4>
+<ul>
+    <li>All violations are logged with timestamp and IP address.</li>
+    <li>Multiple violations may result in exam cancellation.</li>
+    <li>The administrator can review all activities from the central server.</li>
+</ul>
+
+<p style='color: #27ae60; font-weight: bold; margin-top: 20px;'>
+By clicking "I Agree and Start Exam", you acknowledge that you have read, 
+understood, and agree to comply with all the above rules and regulations.
+</p>
+        """
+        
+        rules_text.setHtml(rules)
+        layout.addWidget(rules_text)
+        
+        self.agree_checkbox = QCheckBox("I have read and agree to all examination rules")
+        self.agree_checkbox.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.agree_checkbox.setStyleSheet("color: #2c3e50; padding: 10px;")
+        self.agree_checkbox.stateChanged.connect(self.toggle_start_button)
+        layout.addWidget(self.agree_checkbox)
+        
+        btn_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFont(QFont("Arial", 11))
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        btn_layout.addStretch()
+        
+        self.start_btn = QPushButton("I Agree and Start Exam")
+        self.start_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.start_btn.setEnabled(False)
+        self.start_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.start_btn)
+        
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+    
+    def toggle_start_button(self):
+        self.start_btn.setEnabled(self.agree_checkbox.isChecked())
+
+# ============================================================================
+# LOGIN WINDOW
+# ============================================================================
+
+class LoginWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.exam_window = None
+        self.init_ui()
+        self.check_server_connection()
+        
+    def check_server_connection(self):
+        """Check if server is reachable"""
+        if ExamServerAPI.test_connection():
+            self.connection_status.setText("🟢 Connected to Server")
+            self.connection_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+        else:
+            self.connection_status.setText("🔴 Server Not Reachable")
+            self.connection_status.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            QMessageBox.warning(self, "Connection Error", 
+                              f"Cannot connect to examination server at:\n{SERVER_URL}\n\n"
+                              "Please check your internet connection and server address.")
+    
+    def init_ui(self):
+        self.setWindowTitle("Online Examination - Secure Login")
+        self.setGeometry(100, 100, 500, 450)
+        self.setStyleSheet("background-color: #f0f0f0;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 40, 50, 40)
+        
+        title = QLabel("Secure Online Examination System")
+        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #2c3e50;")
+        layout.addWidget(title)
+        
+        subtitle = QLabel("Connected to Central Server")
+        subtitle.setFont(QFont("Arial", 10))
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("color: #7f8c8d;")
+        layout.addWidget(subtitle)
+        
+        self.connection_status = QLabel("⚪ Checking connection...")
+        self.connection_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.connection_status.setStyleSheet("padding: 10px;")
+        layout.addWidget(self.connection_status)
+        
+        username_label = QLabel("Username:")
+        username_label.setFont(QFont("Arial", 10))
+        layout.addWidget(username_label)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter your username")
+        self.username_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        layout.addWidget(self.username_input)
+        
+        password_label = QLabel("Password:")
+        password_label.setFont(QFont("Arial", 10))
+        layout.addWidget(password_label)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter your password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        self.password_input.returnPressed.connect(self.login)
+        layout.addWidget(self.password_input)
+        
+        info_label = QLabel("Demo Credentials:\nUsername: student | Password: exam123")
+        info_label.setFont(QFont("Arial", 8))
+        info_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info_label)
+        
+        login_btn = QPushButton("🔐 Login and Start Exam")
+        login_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        login_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 12px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #1c6ea4;
+            }
+        """)
+        login_btn.clicked.connect(self.login)
+        layout.addWidget(login_btn)
+        
+        layout.addStretch()
+        central_widget.setLayout(layout)
+    
+    def login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text().strip()
+        
+        if not username or not password:
+            QMessageBox.warning(self, "Input Error", "Please enter both username and password!")
+            return
+        
+        # Show loading message
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        
+        # Authenticate with server
+        result = ExamServerAPI.login(username, password)
+        
+        QApplication.restoreOverrideCursor()
+        
+        if result.get('success'):
+            student_data = result.get('student', {})
+            student_name = student_data.get('name', 'Student')
+            
+            # Show rules dialog
+            rules_dialog = ExamRulesDialog(self)
+            if rules_dialog.exec() == QDialog.DialogCode.Accepted:
+                self.open_exam_window(username, student_name)
+        else:
+            QMessageBox.warning(self, "Login Failed", 
+                              f"Authentication failed:\n{result.get('message', 'Invalid credentials')}")
+    
+    def open_exam_window(self, username, student_name):
+        self.exam_window = ExamWindow(username, student_name)
+        self.exam_window.show()
+        self.close()
+
+# ============================================================================
+# EXAM WINDOW WITH KIOSK MODE
+# ============================================================================
+
+class ExamWindow(QMainWindow):
+    def __init__(self, username, student_name):
+        super().__init__()
+        self.username = username
+        self.student_name = student_name
+        self.current_question = 0
+        self.score = 0
+        self.time_remaining = 300  # 5 minutes
+        self.start_time = datetime.now()
+        self.camera_active = False
+        self.exam_paused = False
+        self.tab_switch_count = 0
+        self.camera_violation_count = 0
+        
+        # Load questions from server
+        self.questions = self.load_questions_from_server()
+        
+        if not self.questions:
+            QMessageBox.critical(self, "Error", "Failed to load questions from server!")
+            self.close()
+            return
+        
+        self.user_answers = [-1] * len(self.questions)
+        self.init_ui()
+        self.enable_kiosk_mode()
+        self.setup_camera()
+        self.start_timer()
+        
+        # Install event filter for focus detection
+        self.installEventFilter(self)
+    
+    def load_questions_from_server(self):
+        """Load questions from central server"""
+        result = ExamServerAPI.get_questions()
+        if result.get('success'):
+            return result.get('questions', [])
+        return []
+    
+    def enable_kiosk_mode(self):
+        """Enable full-screen kiosk mode"""
+        # Set window to stay on top and full screen
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.CustomizeWindowHint
+        )
+        
+        # Show fullscreen
+        self.showFullScreen()
+        
+        # Grab keyboard to prevent shortcuts
+        self.grabKeyboard()
+        
+        # Set focus policy
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
+        print("🔒 KIOSK MODE ENABLED - Full screen locked")
+    
+    def keyPressEvent(self, event):
+        """Block certain key combinations"""
+        # Block Alt+Tab, Alt+F4, Windows key, etc.
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            if event.key() in [Qt.Key.Key_Tab, Qt.Key.Key_F4]:
+                self.handle_escape_attempt("Alt+Tab/Alt+F4")
+                event.ignore()
+                return
+        
+        # Block Windows key
+        if event.key() in [Qt.Key.Key_Meta, Qt.Key.Key_Super_L, Qt.Key.Key_Super_R]:
+            self.handle_escape_attempt("Windows Key")
+            event.ignore()
+            return
+        
+        # Block Ctrl+Alt+Del (can't fully block but log attempt)
+        if (event.modifiers() & Qt.KeyboardModifier.ControlModifier and 
+            event.modifiers() & Qt.KeyboardModifier.AltModifier and
+            event.key() == Qt.Key.Key_Delete):
+            self.handle_escape_attempt("Ctrl+Alt+Del")
+            event.ignore()
+            return
+        
+        # Allow Esc only for testing - remove in production
+        if event.key() == Qt.Key.Key_Escape:
+            reply = QMessageBox.question(self, "Exit Exam?", 
+                                        "Are you sure you want to exit the exam?\n"
+                                        "This will submit your current answers.",
+                                        QMessageBox.StandardButton.Yes | 
+                                        QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.submit_exam()
+            event.ignore()
+            return
+        
+        super().keyPressEvent(event)
+    
+    def handle_escape_attempt(self, method):
+        """Handle attempts to escape kiosk mode"""
+        self.tab_switch_count += 1
+        ExamServerAPI.log_security_violation(
+            self.username,
+            self.student_name,
+            "Escape Attempt",
+            f"Attempted to use {method} - Violation #{self.tab_switch_count}"
+        )
+        self.update_violations_display()
+        
+        QMessageBox.critical(self, "Security Violation",
+                           f"⚠️ SECURITY ALERT ⚠️\n\n"
+                           f"Attempt to exit kiosk mode detected!\n"
+                           f"Method: {method}\n\n"
+                           f"This is violation #{self.tab_switch_count}\n"
+                           f"This has been reported to the administrator.")
+    
+    def setup_camera(self):
+        """Initialize webcam monitoring"""
+        self.webcam_thread = WebcamThread()
+        self.webcam_thread.frame_ready.connect(self.update_camera_frame)
+        self.webcam_thread.camera_lost.connect(self.handle_camera_loss)
+        self.webcam_thread.start()
+        self.camera_active = True
+    
+    def update_camera_frame(self, q_image):
+        """Update camera preview"""
+        pixmap = QPixmap.fromImage(q_image)
+        scaled_pixmap = pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
+        self.camera_label.setPixmap(scaled_pixmap)
+    
+    def handle_camera_loss(self):
+        """Handle camera being turned off"""
+        if self.camera_active:
+            self.camera_active = False
+            self.camera_violation_count += 1
+            
+            # Log to server
+            ExamServerAPI.log_security_violation(
+                self.username,
+                self.student_name,
+                "Camera Disabled",
+                f"Violation #{self.camera_violation_count}"
+            )
+            
+            self.update_violations_display()
+            
+            QMessageBox.critical(self, "Camera Violation", 
+                               f"⚠️ WARNING ⚠️\n\n"
+                               f"Camera has been disabled!\n\n"
+                               f"Violation #{self.camera_violation_count}\n"
+                               f"Reported to central server.\n\n"
+                               f"Please enable your camera immediately!")
+            
+            # Try to restart camera
+            self.setup_camera()
+    
+    def init_ui(self):
+        self.setWindowTitle("Online Examination - KIOSK MODE")
+        self.setStyleSheet("background-color: #ecf0f1;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QHBoxLayout()
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Left panel
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(20)
+        
+        header_layout = QHBoxLayout()
+        
+        title = QLabel(f"🔒 SECURE EXAM - {self.student_name}")
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2c3e50;")
+        header_layout.addWidget(title)
+        
+        header_layout.addStretch()
+        
+        self.timer_label = QLabel("Time: 05:00")
+        self.timer_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.timer_label.setStyleSheet("color: #e74c3c; background-color: white; "
+                                      "padding: 10px; border-radius: 5px;")
+        header_layout.addWidget(self.timer_label)
+        
+        left_layout.addLayout(header_layout)
+        
+        # Security status
+        security_layout = QHBoxLayout()
+        
+        self.camera_status = QLabel("📹 Camera: Active")
+        self.camera_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
+        security_layout.addWidget(self.camera_status)
+        
+        self.kiosk_status = QLabel("🔒 Kiosk Mode: ACTIVE")
+        self.kiosk_status.setStyleSheet("color: #e74c3c; font-weight: bold; padding: 5px;")
+        security_layout.addWidget(self.kiosk_status)
+        
+        security_layout.addStretch()
+        
+        left_layout.addLayout(security_layout)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(len(self.questions))
+        self.progress_bar.setValue(1)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                text-align: center;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background-color: #27ae60;
+            }
+        """)
+        left_layout.addWidget(self.progress_bar)
+        
+        # Question area
+        question_widget = QWidget()
+        question_widget.setStyleSheet("background-color: white; border-radius: 10px;")
+        question_layout = QVBoxLayout()
+        question_layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.question_label = QLabel()
+        self.question_label.setFont(QFont("Arial", 13))
+        self.question_label.setWordWrap(True)
+        self.question_label.setStyleSheet("color: #2c3e50; padding: 10px;")
+        question_layout.addWidget(self.question_label)
+        
+        self.option_group = QButtonGroup()
+        self.option_buttons = []
+        
+        for i in range(4):
+            radio = QRadioButton()
+            radio.setFont(QFont("Arial", 11))
+            radio.setStyleSheet("padding: 8px;")
+            radio.toggled.connect(lambda checked, idx=i: 
+                                self.option_selected(idx) if checked else None)
+            self.option_buttons.append(radio)
+            self.option_group.addButton(radio)
+            question_layout.addWidget(radio)
+        
+        question_widget.setLayout(question_layout)
+        left_layout.addWidget(question_widget)
+        
+        # Navigation buttons
+        nav_layout = QHBoxLayout()
+        
+        self.prev_btn = QPushButton("⬅ Previous")
+        self.prev_btn.setFont(QFont("Arial", 11))
+        self.prev_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.prev_btn.clicked.connect(self.previous_question)
+        nav_layout.addWidget(self.prev_btn)
+        
+        nav_layout.addStretch()
+        
+        self.next_btn = QPushButton("Next ➡")
+        self.next_btn.setFont(QFont("Arial", 11))
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.next_btn.clicked.connect(self.next_question)
+        nav_layout.addWidget(self.next_btn)
+        
+        self.submit_btn = QPushButton("✓ Submit Exam")
+        self.submit_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.submit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        self.submit_btn.clicked.connect(self.submit_exam)
+        self.submit_btn.hide()
+        nav_layout.addWidget(self.submit_btn)
+        
+        left_layout.addLayout(nav_layout)
+        
+        left_panel.setLayout(left_layout)
+        main_layout.addWidget(left_panel, 3)
+        
+        # Right panel - Monitoring
+        right_panel = QWidget()
+        right_panel.setStyleSheet("background-color: white; border-radius: 10px;")
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(15, 15, 15, 15)
+        
+        camera_title = QLabel("🎥 Live Monitoring")
+        camera_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(camera_title)
+        
+        self.camera_label = QLabel()
+        self.camera_label.setStyleSheet("border: 2px solid #bdc3c7; background-color: #2c3e50;")
+        self.camera_label.setMinimumSize(200, 150)
+        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(self.camera_label)
+        
+        server_label = QLabel("🌐 Connected to:\nCentral Server")
+        server_label.setStyleSheet("color: #27ae60; padding: 10px; font-weight: bold;")
+        server_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        server_label.setWordWrap(True)
+        right_layout.addWidget(server_label)
+        
+        warning_label = QLabel("⚠️ All activities are\nmonitored and logged")
+        warning_label.setStyleSheet("color: #e74c3c; padding: 10px; font-weight: bold;")
+        warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        warning_label.setWordWrap(True)
+        right_layout.addWidget(warning_label)
+        
+        violations_label = QLabel("Security Violations:")
+        violations_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        right_layout.addWidget(violations_label)
+        
+        self.violations_display = QLabel(
+            f"Escape Attempts: {self.tab_switch_count}\n"
+            f"Camera Off: {self.camera_violation_count}"
+        )
+        self.violations_display.setStyleSheet(
+            "background-color: #f8f9fa; padding: 10px; border-radius: 5px;"
+        )
+        right_layout.addWidget(self.violations_display)
+        
+        right_layout.addStretch()
+        
+        right_panel.setLayout(right_layout)
+        main_layout.addWidget(right_panel, 1)
+        
+        central_widget.setLayout(main_layout)
+        self.load_question()
+    
+    def changeEvent(self, event):
+        """Detect window state changes"""
+        if event.type() == event.Type.WindowStateChange or event.type() == event.Type.ActivationChange:
+            if not self.isActiveWindow() and not self.exam_paused:
+                self.handle_focus_loss()
+        super().changeEvent(event)
+    
+    def handle_focus_loss(self):
+        """Handle focus loss"""
+        self.tab_switch_count += 1
+        ExamServerAPI.log_security_violation(
+            self.username,
+            self.student_name,
+            "Focus Loss",
+            f"Attempt #{self.tab_switch_count}"
+        )
+        self.update_violations_display()
+    
+    def update_violations_display(self):
+        """Update the violations counter"""
+        self.violations_display.setText(
+            f"Escape Attempts: {self.tab_switch_count}\n"
+            f"Camera Off: {self.camera_violation_count}"
+        )
+    
+    def start_timer(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(1000)
+    
+    def update_timer(self):
+        self.time_remaining -= 1
+        minutes = self.time_remaining // 60
+        seconds = self.time_remaining % 60
+        self.timer_label.setText(f"Time: {minutes:02d}:{seconds:02d}")
+        
+        if self.time_remaining <= 0:
+            self.timer.stop()
+            QMessageBox.warning(self, "Time's Up!", "Exam time is over! Submitting automatically.")
+            self.submit_exam()
+    
+    def load_question(self):
+        q = self.questions[self.current_question]
+        self.question_label.setText(f"Q{self.current_question + 1}. {q['question']}")
+        
+        for i, option in enumerate(q['options']):
+            self.option_buttons[i].setText(option)
+            self.option_buttons[i].setChecked(self.user_answers[self.current_question] == i)
+        
+        self.prev_btn.setEnabled(self.current_question > 0)
+        self.progress_bar.setValue(self.current_question + 1)
+        
+        if self.current_question == len(self.questions) - 1:
+            self.next_btn.hide()
+            self.submit_btn.show()
+        else:
+            self.next_btn.show()
+            self.submit_btn.hide()
+    
+    def option_selected(self, index):
+        self.user_answers[self.current_question] = index
+    
+    def next_question(self):
+        if self.current_question < len(self.questions) - 1:
+            self.current_question += 1
+            self.load_question()
+    
+    def previous_question(self):
+        if self.current_question > 0:
+            self.current_question -= 1
+            self.load_question()
+    
+    def submit_exam(self):
+        self.timer.stop()
+        if self.webcam_thread:
+            self.webcam_thread.stop()
+        
+        # Calculate score
+        self.score = 0
+        for i, q in enumerate(self.questions):
+            if self.user_answers[i] == q['answer']:
+                self.score += 1
+        
+        percentage = (self.score / len(self.questions)) * 100
+        time_taken = (datetime.now() - self.start_time).total_seconds()
+        
+        # Submit to server
+        result = ExamServerAPI.submit_exam(
+            self.username,
+            self.student_name,
+            self.score,
+            len(self.questions),
+            percentage,
+            int(time_taken),
+            self.tab_switch_count,
+            self.camera_violation_count
+        )
+        
+        result_msg = f"""
+✅ Exam Completed and Submitted!
+
+Total Questions: {len(self.questions)}
+Correct Answers: {self.score}
+Wrong Answers: {len(self.questions) - self.score}
+Score: {percentage:.1f}%
+
+Security Summary:
+Escape Attempts: {self.tab_switch_count}
+Camera Violations: {self.camera_violation_count}
+
+Server Status: {'✓ Submitted Successfully' if result.get('success') else '✗ Submission Failed'}
+
+All data has been sent to the central server.
+        """
+        
+        QMessageBox.information(self, "Exam Results", result_msg)
+        
+        # Release keyboard and close
+        self.releaseKeyboard()
+        self.close()
+    
+    def closeEvent(self, event):
+        """Handle window close event"""
+        if self.webcam_thread:
+            self.webcam_thread.stop()
+        self.releaseKeyboard()
+        event.accept()
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+def main():
+    app = QApplication(sys.argv)
+    
+    print("\n" + "="*60)
+    print("  SECURE ONLINE EXAMINATION CLIENT")
+    print("="*60)
+    print(f"\n📡 Server: {SERVER_URL}")
+    print(f"🔐 API Token: {API_TOKEN[:20]}...")
+    print("\n⚠️  KIOSK MODE ENABLED - Full screen will be locked")
+    print("="*60 + "\n")
+    
+    login_window = LoginWindow()
+    login_window.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
+
+ri """
+Enhanced Examination Client with Kiosk Mode and Server Connection
+"""
+
+import sys
+import json
+import os
+import requests
+from datetime import datetime
+from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
+                             QMessageBox, QRadioButton, QButtonGroup, QProgressBar,
+                             QTextEdit, QGroupBox, QDialog, QCheckBox)
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QImage, QPixmap
+import cv2
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Server configuration - CHANGE THIS TO YOUR SERVER IP/URL
+SERVER_URL = "http://localhost:5000"  # Change to your server IP, e.g., "http://192.168.1.100:5000"
+API_TOKEN = "secure_token_12345"  # Must match server token
+
+# Local cache files (for offline fallback)
+LOCAL_CACHE_FILE = "client_cache.json"
+
+# ============================================================================
+# SERVER API CLIENT
+# ============================================================================
+
+class ExamServerAPI:
+    """API client for communicating with central exam server"""
+    
+    @staticmethod
+    def test_connection():
+        """Test connection to server"""
+        try:
+            response = requests.get(f"{SERVER_URL}/api/health", timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+    
+    @staticmethod
+    def login(username, password):
+        """Login to server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            data = {'username': username, 'password': password}
+            response = requests.post(f"{SERVER_URL}/api/login", 
+                                    json=data, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {'success': False, 'message': f'Connection error: {str(e)}'}
+    
+    @staticmethod
+    def get_questions():
+        """Get questions from server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            response = requests.get(f"{SERVER_URL}/api/questions", 
+                                   headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {'success': False, 'message': f'Connection error: {str(e)}'}
+    
+    @staticmethod
+    def log_security_violation(username, student_name, violation_type, details):
+        """Log security violation to server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            data = {
+                'username': username,
+                'student_name': student_name,
+                'violation_type': violation_type,
+                'details': details
+            }
+            response = requests.post(f"{SERVER_URL}/api/security-log", 
+                                    json=data, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            print(f"Failed to log violation: {e}")
+            return {'success': False, 'message': str(e)}
+    
+    @staticmethod
+    def submit_exam(username, student_name, score, total, percentage, 
+                   time_taken, tab_switches, camera_violations):
+        """Submit exam results to server"""
+        try:
+            headers = {'Authorization': API_TOKEN}
+            data = {
+                'username': username,
+                'student_name': student_name,
+                'score': score,
+                'total_questions': total,
+                'percentage': percentage,
+                'time_taken': time_taken,
+                'tab_switch_count': tab_switches,
+                'camera_violation_count': camera_violations
+            }
+            response = requests.post(f"{SERVER_URL}/api/submit-exam", 
+                                    json=data, headers=headers, timeout=10)
+            return response.json()
+        except Exception as e:
+            return {'success': False, 'message': f'Connection error: {str(e)}'}
+
+# ============================================================================
+# WEBCAM MONITORING
+# ============================================================================
+
+class WebcamThread(QThread):
+    frame_ready = pyqtSignal(QImage)
+    camera_lost = pyqtSignal()
+    
+    def __init__(self):
+        super().__init__()
+        self.running = False
+        self.camera = None
+    
+    def run(self):
+        self.running = True
+        self.camera = cv2.VideoCapture(0)
+        
+        if not self.camera.isOpened():
+            self.camera_lost.emit()
+            return
+        
+        while self.running:
+            ret, frame = self.camera.read()
+            if ret:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                h, w, ch = rgb_frame.shape
+                bytes_per_line = ch * w
+                q_image = QImage(rgb_frame.data, w, h, bytes_per_line, 
+                               QImage.Format.Format_RGB888)
+                self.frame_ready.emit(q_image)
+            else:
+                self.camera_lost.emit()
+                break
+            
+            self.msleep(100)
+    
+    def stop(self):
+        self.running = False
+        if self.camera:
+            self.camera.release()
+        self.wait()
+
+# ============================================================================
+# EXAM RULES DIALOG
+# ============================================================================
+
+class ExamRulesDialog(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Examination Rules and Regulations")
+        self.setModal(True)
+        self.setMinimumSize(700, 500)
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(30, 30, 30, 30)
+        
+        title = QLabel("Examination Rules and Regulations")
+        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #2c3e50; padding: 10px;")
+        layout.addWidget(title)
+        
+        rules_text = QTextEdit()
+        rules_text.setReadOnly(True)
+        rules_text.setStyleSheet("""
+            QTextEdit {
+                background-color: white;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                padding: 15px;
+                font-size: 12px;
+            }
+        """)
+        
+        rules = """
+<h3 style='color: #e74c3c;'>IMPORTANT: Read Carefully Before Starting</h3>
+
+<h4 style='color: #2c3e50;'>Kiosk Mode Security:</h4>
+<ul>
+    <li>The application will run in <b>FULL SCREEN KIOSK MODE</b>.</li>
+    <li>You <b>CANNOT minimize, close, or switch</b> to other applications.</li>
+    <li>The exam window will stay on top at all times.</li>
+    <li>All violations are logged to the central server immediately.</li>
+</ul>
+
+<h4 style='color: #2c3e50;'>Camera Monitoring:</h4>
+<ul>
+    <li>Your webcam <b>MUST be turned ON</b> throughout the entire examination.</li>
+    <li>If the camera is turned off, it will be recorded as a security violation.</li>
+    <li>Ensure your face is clearly visible to the camera at all times.</li>
+</ul>
+
+<h4 style='color: #2c3e50;'>Data Collection:</h4>
+<ul>
+    <li>All exam data is sent to the <b>central examination server</b>.</li>
+    <li>Security violations are logged in real-time.</li>
+    <li>Your exam results are automatically submitted upon completion.</li>
+    <li>Network connectivity is required throughout the exam.</li>
+</ul>
+
+<h4 style='color: #e74c3c;'>Consequences of Violations:</h4>
+<ul>
+    <li>All violations are logged with timestamp and IP address.</li>
+    <li>Multiple violations may result in exam cancellation.</li>
+    <li>The administrator can review all activities from the central server.</li>
+</ul>
+
+<p style='color: #27ae60; font-weight: bold; margin-top: 20px;'>
+By clicking "I Agree and Start Exam", you acknowledge that you have read, 
+understood, and agree to comply with all the above rules and regulations.
+</p>
+        """
+        
+        rules_text.setHtml(rules)
+        layout.addWidget(rules_text)
+        
+        self.agree_checkbox = QCheckBox("I have read and agree to all examination rules")
+        self.agree_checkbox.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.agree_checkbox.setStyleSheet("color: #2c3e50; padding: 10px;")
+        self.agree_checkbox.stateChanged.connect(self.toggle_start_button)
+        layout.addWidget(self.agree_checkbox)
+        
+        btn_layout = QHBoxLayout()
+        
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setFont(QFont("Arial", 11))
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+        
+        btn_layout.addStretch()
+        
+        self.start_btn = QPushButton("I Agree and Start Exam")
+        self.start_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.start_btn.setEnabled(False)
+        self.start_btn.clicked.connect(self.accept)
+        btn_layout.addWidget(self.start_btn)
+        
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+    
+    def toggle_start_button(self):
+        self.start_btn.setEnabled(self.agree_checkbox.isChecked())
+
+# ============================================================================
+# LOGIN WINDOW
+# ============================================================================
+
+class LoginWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.exam_window = None
+        self.init_ui()
+        self.check_server_connection()
+        
+    def check_server_connection(self):
+        """Check if server is reachable"""
+        if ExamServerAPI.test_connection():
+            self.connection_status.setText("🟢 Connected to Server")
+            self.connection_status.setStyleSheet("color: #27ae60; font-weight: bold;")
+        else:
+            self.connection_status.setText("🔴 Server Not Reachable")
+            self.connection_status.setStyleSheet("color: #e74c3c; font-weight: bold;")
+            QMessageBox.warning(self, "Connection Error", 
+                              f"Cannot connect to examination server at:\n{SERVER_URL}\n\n"
+                              "Please check your internet connection and server address.")
+    
+    def init_ui(self):
+        self.setWindowTitle("Online Examination - Secure Login")
+        self.setGeometry(100, 100, 500, 450)
+        self.setStyleSheet("background-color: #f0f0f0;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        layout = QVBoxLayout()
+        layout.setSpacing(20)
+        layout.setContentsMargins(50, 40, 50, 40)
+        
+        title = QLabel("Secure Online Examination System")
+        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("color: #2c3e50;")
+        layout.addWidget(title)
+        
+        subtitle = QLabel("Connected to Central Server")
+        subtitle.setFont(QFont("Arial", 10))
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        subtitle.setStyleSheet("color: #7f8c8d;")
+        layout.addWidget(subtitle)
+        
+        self.connection_status = QLabel("⚪ Checking connection...")
+        self.connection_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.connection_status.setStyleSheet("padding: 10px;")
+        layout.addWidget(self.connection_status)
+        
+        username_label = QLabel("Username:")
+        username_label.setFont(QFont("Arial", 10))
+        layout.addWidget(username_label)
+        
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter your username")
+        self.username_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        layout.addWidget(self.username_input)
+        
+        password_label = QLabel("Password:")
+        password_label.setFont(QFont("Arial", 10))
+        layout.addWidget(password_label)
+        
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter your password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 10px;
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                font-size: 12px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #3498db;
+            }
+        """)
+        self.password_input.returnPressed.connect(self.login)
+        layout.addWidget(self.password_input)
+        
+        info_label = QLabel("Demo Credentials:\nUsername: student | Password: exam123")
+        info_label.setFont(QFont("Arial", 8))
+        info_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info_label)
+        
+        login_btn = QPushButton("🔐 Login and Start Exam")
+        login_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        login_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 12px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:pressed {
+                background-color: #1c6ea4;
+            }
+        """)
+        login_btn.clicked.connect(self.login)
+        layout.addWidget(login_btn)
+        
+        layout.addStretch()
+        central_widget.setLayout(layout)
+    
+    def login(self):
+        username = self.username_input.text().strip()
+        password = self.password_input.text().strip()
+        
+        if not username or not password:
+            QMessageBox.warning(self, "Input Error", "Please enter both username and password!")
+            return
+        
+        # Show loading message
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        
+        # Authenticate with server
+        result = ExamServerAPI.login(username, password)
+        
+        QApplication.restoreOverrideCursor()
+        
+        if result.get('success'):
+            student_data = result.get('student', {})
+            student_name = student_data.get('name', 'Student')
+            
+            # Show rules dialog
+            rules_dialog = ExamRulesDialog(self)
+            if rules_dialog.exec() == QDialog.DialogCode.Accepted:
+                self.open_exam_window(username, student_name)
+        else:
+            QMessageBox.warning(self, "Login Failed", 
+                              f"Authentication failed:\n{result.get('message', 'Invalid credentials')}")
+    
+    def open_exam_window(self, username, student_name):
+        self.exam_window = ExamWindow(username, student_name)
+        self.exam_window.show()
+        self.close()
+
+# ============================================================================
+# EXAM WINDOW WITH KIOSK MODE
+# ============================================================================
+
+class ExamWindow(QMainWindow):
+    def __init__(self, username, student_name):
+        super().__init__()
+        self.username = username
+        self.student_name = student_name
+        self.current_question = 0
+        self.score = 0
+        self.time_remaining = 300  # 5 minutes
+        self.start_time = datetime.now()
+        self.camera_active = False
+        self.exam_paused = False
+        self.tab_switch_count = 0
+        self.camera_violation_count = 0
+        
+        # Load questions from server
+        self.questions = self.load_questions_from_server()
+        
+        if not self.questions:
+            QMessageBox.critical(self, "Error", "Failed to load questions from server!")
+            self.close()
+            return
+        
+        self.user_answers = [-1] * len(self.questions)
+        self.init_ui()
+        self.enable_kiosk_mode()
+        self.setup_camera()
+        self.start_timer()
+        
+        # Install event filter for focus detection
+        self.installEventFilter(self)
+    
+    def load_questions_from_server(self):
+        """Load questions from central server"""
+        result = ExamServerAPI.get_questions()
+        if result.get('success'):
+            return result.get('questions', [])
+        return []
+    
+    def enable_kiosk_mode(self):
+        """Enable full-screen kiosk mode"""
+        # Set window to stay on top and full screen
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint |
+            Qt.WindowType.CustomizeWindowHint
+        )
+        
+        # Show fullscreen
+        self.showFullScreen()
+        
+        # Grab keyboard to prevent shortcuts
+        self.grabKeyboard()
+        
+        # Set focus policy
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        
+        print("🔒 KIOSK MODE ENABLED - Full screen locked")
+    
+    def keyPressEvent(self, event):
+        """Block certain key combinations"""
+        # Block Alt+Tab, Alt+F4, Windows key, etc.
+        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
+            if event.key() in [Qt.Key.Key_Tab, Qt.Key.Key_F4]:
+                self.handle_escape_attempt("Alt+Tab/Alt+F4")
+                event.ignore()
+                return
+        
+        # Block Windows key
+        if event.key() in [Qt.Key.Key_Meta, Qt.Key.Key_Super_L, Qt.Key.Key_Super_R]:
+            self.handle_escape_attempt("Windows Key")
+            event.ignore()
+            return
+        
+        # Block Ctrl+Alt+Del (can't fully block but log attempt)
+        if (event.modifiers() & Qt.KeyboardModifier.ControlModifier and 
+            event.modifiers() & Qt.KeyboardModifier.AltModifier and
+            event.key() == Qt.Key.Key_Delete):
+            self.handle_escape_attempt("Ctrl+Alt+Del")
+            event.ignore()
+            return
+        
+        # Allow Esc only for testing - remove in production
+        if event.key() == Qt.Key.Key_Escape:
+            reply = QMessageBox.question(self, "Exit Exam?", 
+                                        "Are you sure you want to exit the exam?\n"
+                                        "This will submit your current answers.",
+                                        QMessageBox.StandardButton.Yes | 
+                                        QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.submit_exam()
+            event.ignore()
+            return
+        
+        super().keyPressEvent(event)
+    
+    def handle_escape_attempt(self, method):
+        """Handle attempts to escape kiosk mode"""
+        self.tab_switch_count += 1
+        ExamServerAPI.log_security_violation(
+            self.username,
+            self.student_name,
+            "Escape Attempt",
+            f"Attempted to use {method} - Violation #{self.tab_switch_count}"
+        )
+        self.update_violations_display()
+        
+        QMessageBox.critical(self, "Security Violation",
+                           f"⚠️ SECURITY ALERT ⚠️\n\n"
+                           f"Attempt to exit kiosk mode detected!\n"
+                           f"Method: {method}\n\n"
+                           f"This is violation #{self.tab_switch_count}\n"
+                           f"This has been reported to the administrator.")
+    
+    def setup_camera(self):
+        """Initialize webcam monitoring"""
+        self.webcam_thread = WebcamThread()
+        self.webcam_thread.frame_ready.connect(self.update_camera_frame)
+        self.webcam_thread.camera_lost.connect(self.handle_camera_loss)
+        self.webcam_thread.start()
+        self.camera_active = True
+    
+    def update_camera_frame(self, q_image):
+        """Update camera preview"""
+        pixmap = QPixmap.fromImage(q_image)
+        scaled_pixmap = pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
+        self.camera_label.setPixmap(scaled_pixmap)
+    
+    def handle_camera_loss(self):
+        """Handle camera being turned off"""
+        if self.camera_active:
+            self.camera_active = False
+            self.camera_violation_count += 1
+            
+            # Log to server
+            ExamServerAPI.log_security_violation(
+                self.username,
+                self.student_name,
+                "Camera Disabled",
+                f"Violation #{self.camera_violation_count}"
+            )
+            
+            self.update_violations_display()
+            
+            QMessageBox.critical(self, "Camera Violation", 
+                               f"⚠️ WARNING ⚠️\n\n"
+                               f"Camera has been disabled!\n\n"
+                               f"Violation #{self.camera_violation_count}\n"
+                               f"Reported to central server.\n\n"
+                               f"Please enable your camera immediately!")
+            
+            # Try to restart camera
+            self.setup_camera()
+    
+    def init_ui(self):
+        self.setWindowTitle("Online Examination - KIOSK MODE")
+        self.setStyleSheet("background-color: #ecf0f1;")
+        
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QHBoxLayout()
+        main_layout.setSpacing(20)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Left panel
+        left_panel = QWidget()
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(20)
+        
+        header_layout = QHBoxLayout()
+        
+        title = QLabel(f"🔒 SECURE EXAM - {self.student_name}")
+        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title.setStyleSheet("color: #2c3e50;")
+        header_layout.addWidget(title)
+        
+        header_layout.addStretch()
+        
+        self.timer_label = QLabel("Time: 05:00")
+        self.timer_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.timer_label.setStyleSheet("color: #e74c3c; background-color: white; "
+                                      "padding: 10px; border-radius: 5px;")
+        header_layout.addWidget(self.timer_label)
+        
+        left_layout.addLayout(header_layout)
+        
+        # Security status
+        security_layout = QHBoxLayout()
+        
+        self.camera_status = QLabel("📹 Camera: Active")
+        self.camera_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
+        security_layout.addWidget(self.camera_status)
+        
+        self.kiosk_status = QLabel("🔒 Kiosk Mode: ACTIVE")
+        self.kiosk_status.setStyleSheet("color: #e74c3c; font-weight: bold; padding: 5px;")
+        security_layout.addWidget(self.kiosk_status)
+        
+        security_layout.addStretch()
+        
+        left_layout.addLayout(security_layout)
+        
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMaximum(len(self.questions))
+        self.progress_bar.setValue(1)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: 2px solid #bdc3c7;
+                border-radius: 5px;
+                text-align: center;
+                height: 25px;
+            }
+            QProgressBar::chunk {
+                background-color: #27ae60;
+            }
+        """)
+        left_layout.addWidget(self.progress_bar)
+        
+        # Question area
+        question_widget = QWidget()
+        question_widget.setStyleSheet("background-color: white; border-radius: 10px;")
+        question_layout = QVBoxLayout()
+        question_layout.setContentsMargins(20, 20, 20, 20)
+        
+        self.question_label = QLabel()
+        self.question_label.setFont(QFont("Arial", 13))
+        self.question_label.setWordWrap(True)
+        self.question_label.setStyleSheet("color: #2c3e50; padding: 10px;")
+        question_layout.addWidget(self.question_label)
+        
+        self.option_group = QButtonGroup()
+        self.option_buttons = []
+        
+        for i in range(4):
+            radio = QRadioButton()
+            radio.setFont(QFont("Arial", 11))
+            radio.setStyleSheet("padding: 8px;")
+            radio.toggled.connect(lambda checked, idx=i: 
+                                self.option_selected(idx) if checked else None)
+            self.option_buttons.append(radio)
+            self.option_group.addButton(radio)
+            question_layout.addWidget(radio)
+        
+        question_widget.setLayout(question_layout)
+        left_layout.addWidget(question_widget)
+        
+        # Navigation buttons
+        nav_layout = QHBoxLayout()
+        
+        self.prev_btn = QPushButton("⬅ Previous")
+        self.prev_btn.setFont(QFont("Arial", 11))
+        self.prev_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #95a5a6;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #7f8c8d;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.prev_btn.clicked.connect(self.previous_question)
+        nav_layout.addWidget(self.prev_btn)
+        
+        nav_layout.addStretch()
+        
+        self.next_btn = QPushButton("Next ➡")
+        self.next_btn.setFont(QFont("Arial", 11))
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        self.next_btn.clicked.connect(self.next_question)
+        nav_layout.addWidget(self.next_btn)
+        
+        self.submit_btn = QPushButton("✓ Submit Exam")
+        self.submit_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        self.submit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        self.submit_btn.clicked.connect(self.submit_exam)
+        self.submit_btn.hide()
+        nav_layout.addWidget(self.submit_btn)
+        
+        left_layout.addLayout(nav_layout)
+        
+        left_panel.setLayout(left_layout)
+        main_layout.addWidget(left_panel, 3)
+        
+        # Right panel - Monitoring
+        right_panel = QWidget()
+        right_panel.setStyleSheet("background-color: white; border-radius: 10px;")
+        right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(15, 15, 15, 15)
+        
+        camera_title = QLabel("🎥 Live Monitoring")
+        camera_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(camera_title)
+        
+        self.camera_label = QLabel()
+        self.camera_label.setStyleSheet("border: 2px solid #bdc3c7; background-color: #2c3e50;")
+        self.camera_label.setMinimumSize(200, 150)
+        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        right_layout.addWidget(self.camera_label)
+        
+        server_label = QLabel("🌐 Connected to:\nCentral Server")
+        server_label.setStyleSheet("color: #27ae60; padding: 10px; font-weight: bold;")
+        server_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        server_label.setWordWrap(True)
+        right_layout.addWidget(server_label)
+        
+        warning_label = QLabel("⚠️ All activities are\nmonitored and logged")
+        warning_label.setStyleSheet("color: #e74c3c; padding: 10px; font-weight: bold;")
+        warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        warning_label.setWordWrap(True)
+        right_layout.addWidget(warning_label)
+        
+        violations_label = QLabel("Security Violations:")
+        violations_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        right_layout.addWidget(violations_label)
+        
+        self.violations_display = QLabel(
+            f"Escape Attempts: {self.tab_switch_count}\n"
+            f"Camera Off: {self.camera_violation_count}"
+        )
+        self.violations_display.setStyleSheet(
+            "background-color: #f8f9fa; padding: 10px; border-radius: 5px;"
+        )
+        right_layout.addWidget(self.violations_display)
+        
+        right_layout.addStretch()
+        
+        right_panel.setLayout(right_layout)
+        main_layout.addWidget(right_panel, 1)
+        
+        central_widget.setLayout(main_layout)
+        self.load_question()
+    
+    def changeEvent(self, event):
+        """Detect window state changes"""
+        if event.type() == event.Type.WindowStateChange or event.type() == event.Type.ActivationChange:
+            if not self.isActiveWindow() and not self.exam_paused:
+                self.handle_focus_loss()
+        super().changeEvent(event)
+    
+    def handle_focus_loss(self):
+        """Handle focus loss"""
+        self.tab_switch_count += 1
+        ExamServerAPI.log_security_violation(
+            self.username,
+            self.student_name,
+            "Focus Loss",
+            f"Attempt #{self.tab_switch_count}"
+        )
+        self.update_violations_display()
+    
+    def update_violations_display(self):
+        """Update the violations counter"""
+        self.violations_display.setText(
+            f"Escape Attempts: {self.tab_switch_count}\n"
+            f"Camera Off: {self.camera_violation_count}"
+        )
+    
+    def start_timer(self):
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(1000)
+    
+    def update_timer(self):
+        self.time_remaining -= 1
+        minutes = self.time_remaining // 60
+        seconds = self.time_remaining % 60
+        self.timer_label.setText(f"Time: {minutes:02d}:{seconds:02d}")
+        
+        if self.time_remaining <= 0:
+            self.timer.stop()
+            QMessageBox.warning(self, "Time's Up!", "Exam time is over! Submitting automatically.")
+            self.submit_exam()
+    
+    def load_question(self):
+        q = self.questions[self.current_question]
+        self.question_label.setText(f"Q{self.current_question + 1}. {q['question']}")
+        
+        for i, option in enumerate(q['options']):
+            self.option_buttons[i].setText(option)
+            self.option_buttons[i].setChecked(self.user_answers[self.current_question] == i)
+        
+        self.prev_btn.setEnabled(self.current_question > 0)
+        self.progress_bar.setValue(self.current_question + 1)
+        
+        if self.current_question == len(self.questions) - 1:
+            self.next_btn.hide()
+            self.submit_btn.show()
+        else:
+            self.next_btn.show()
+            self.submit_btn.hide()
+    
+    def option_selected(self, index):
+        self.user_answers[self.current_question] = index
+    
+    def next_question(self):
+        if self.current_question < len(self.questions) - 1:
+            self.current_question += 1
+            self.load_question()
+    
+    def previous_question(self):
+        if self.current_question > 0:
+            self.current_question -= 1
+            self.load_question()
+    
+    def submit_exam(self):
+        self.timer.stop()
+        if self.webcam_thread:
+            self.webcam_thread.stop()
+        
+        # Calculate score
+        self.score = 0
+        for i, q in enumerate(self.questions):
+            if self.user_answers[i] == q['answer']:
+                self.score += 1
+        
+        percentage = (self.score / len(self.questions)) * 100
+        time_taken = (datetime.now() - self.start_time).total_seconds()
+        
+        # Submit to server
+        result = ExamServerAPI.submit_exam(
+            self.username,
+            self.student_name,
+            self.score,
+            len(self.questions),
+            percentage,
+            int(time_taken),
+            self.tab_switch_count,
+            self.camera_violation_count
+        )
+        
+        result_msg = f"""
+✅ Exam Completed and Submitted!
+
+Total Questions: {len(self.questions)}
+Correct Answers: {self.score}
+Wrong Answers: {len(self.questions) - self.score}
+Score: {percentage:.1f}%
+
+Security Summary:
+Escape Attempts: {self.tab_switch_count}
+Camera Violations: {self.camera_violation_count}
+
+Server Status: {'✓ Submitted Successfully' if result.get('success') else '✗ Submission Failed'}
+
+All data has been sent to the central server.
+        """
+        
+        QMessageBox.information(self, "Exam Results", result_msg)
+        
+        # Release keyboard and close
+        self.releaseKeyboard()
+        self.close()
+    
+    def closeEvent(self, event):
+        """Handle window close event"""
+        if self.webcam_thread:
+            self.webcam_thread.stop()
+        self.releaseKeyboard()
+        event.accept()
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+def main():
+    app = QApplication(sys.argv)
+    
+    print("\n" + "="*60)
+    print("  SECURE ONLINE EXAMINATION CLIENT")
+    print("="*60)
+    print(f"\n📡 Server: {SERVER_URL}")
+    print(f"🔐 API Token: {API_TOKEN[:20]}...")
+    print("\n⚠️  KIOSK MODE ENABLED - Full screen will be locked")
+    print("="*60 + "\n")
+    
+    login_window = LoginWindow()
+    login_window.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
+
+
+
