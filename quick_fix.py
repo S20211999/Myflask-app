@@ -1,4535 +1,4270 @@
 """
-Central Examination Server
-Run this on a central server accessible over the internet
+===================================================
+ADMIN PANEL - FIXED VERSION with Threading
+Server connections in separate threads
+===================================================
+"""
+
+import sys
+import requests
+import sqlite3
+import hashlib
+from datetime import datetime, timedelta
+from threading import Thread
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
+    QDialog, QLineEdit, QTextEdit, QComboBox, QCheckBox, QDateTimeEdit,
+    QSpinBox, QTabWidget, QListWidget, QListWidgetItem, QScrollArea,
+    QGridLayout, QHeaderView, QFrame, QProgressBar, QStatusBar,
+    QMenuBar, QMenu, QInputDialog
+)
+from PyQt6.QtCore import Qt, QDateTime, QSize, QTimer, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QColor
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+SERVER_URL = "http://localhost:5000"
+API_TOKEN = "secure_token_12345"
+
+# ============================================================================
+# DARK THEME STYLESHEET
+# ============================================================================
+
+DARK_STYLESHEET = """
+    QMainWindow {
+        background-color: #1e1e2e;
+        color: #e0e0e0;
+    }
+
+    QWidget {
+        background-color: #1e1e2e;
+        color: #e0e0e0;
+    }
+
+    QMenuBar {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border-bottom: 1px solid #3d3d54;
+    }
+
+    QMenuBar::item:selected {
+        background-color: #667eea;
+    }
+
+    QMenu {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 1px solid #3d3d54;
+    }
+
+    QMenu::item:selected {
+        background-color: #667eea;
+    }
+
+    QTabWidget::pane {
+        border: 2px solid #3d3d54;
+        background-color: #1e1e2e;
+    }
+
+    QTabBar::tab {
+        background-color: #2d2d44;
+        color: #a0a0b0;
+        padding: 8px 25px;
+        border: 1px solid #3d3d54;
+        border-bottom: none;
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+    }
+
+    QTabBar::tab:selected {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        color: white;
+        border: 1px solid #667eea;
+    }
+
+    QPushButton {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        color: white;
+        padding: 12px 25px;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 12px;
+    }
+
+    QPushButton:hover {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5568d3, stop:1 #6a3f8f);
+    }
+
+    QPushButton:disabled {
+        background-color: #505070;
+        color: #808090;
+    }
+
+    QLineEdit, QTextEdit {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+
+    QLineEdit:focus, QTextEdit:focus {
+        border: 2px solid #667eea;
+        background-color: #252535;
+    }
+
+    QComboBox {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        padding: 6px 12px;
+    }
+
+    QComboBox:focus {
+        border: 2px solid #667eea;
+    }
+
+    QSpinBox, QDateTimeEdit {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        padding: 6px 12px;
+    }
+
+    QCheckBox {
+        color: #e0e0e0;
+        spacing: 8px;
+    }
+
+    QTableWidget {
+        background-color: #2d2d44;
+        gridline-color: #3d3d54;
+        border: 1px solid #3d3d54;
+    }
+
+    QTableWidget::item {
+        padding: 5px;
+        border: none;
+    }
+
+    QTableWidget::item:selected {
+        background-color: #667eea;
+    }
+
+    QHeaderView::section {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3d3d54, stop:1 #2d2d44);
+        color: #e0e0e0;
+        padding: 6px;
+        border: none;
+        border-right: 1px solid #2d2d44;
+        border-bottom: 1px solid #3d3d54;
+        font-weight: bold;
+    }
+
+    QListWidget {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+    }
+
+    QListWidget::item:selected {
+        background-color: #667eea;
+    }
+
+    QProgressBar {
+        background-color: #2d2d44;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        text-align: center;
+        color: white;
+        height: 25px;
+    }
+
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        border-radius: 4px;
+    }
+
+    QStatusBar {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border-top: 1px solid #3d3d54;
+    }
+
+    QScrollArea {
+        border: none;
+        background-color: #1e1e2e;
+    }
+
+    QScrollBar:vertical {
+        background-color: #2d2d44;
+        width: 12px;
+    }
+
+    QScrollBar::handle:vertical {
+        background-color: #667eea;
+        border-radius: 6px;
+        min-height: 20px;
+    }
+"""
+
+# ============================================================================
+# THREADING CLASSES
+# ============================================================================
+
+class LoadDataThread(QThread):
+    """Load data from server in background thread"""
+
+    success = pyqtSignal(str, list)  # data_type, data
+    error = pyqtSignal(str, str)  # data_type, error_message
+
+    def __init__(self, endpoint, data_type):
+        super().__init__()
+        self.endpoint = endpoint
+        self.data_type = data_type
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{SERVER_URL}{self.endpoint}",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                data = response.json().get(self.data_type, [])
+                self.success.emit(self.data_type, data)
+            else:
+                self.error.emit(self.data_type, f"Server error: {response.status_code}")
+
+        except Exception as e:
+            self.error.emit(self.data_type, str(e))
+
+class AddDataThread(QThread):
+    """Add data to server in background thread"""
+
+    success = pyqtSignal(str)  # success message
+    error = pyqtSignal(str)  # error message
+
+    def __init__(self, endpoint, data):
+        super().__init__()
+        self.endpoint = endpoint
+        self.data = data
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{SERVER_URL}{self.endpoint}",
+                json=self.data,
+                headers={"Authorization": API_TOKEN},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                msg = response.json().get('message', 'Success')
+                self.success.emit(msg)
+            else:
+                msg = response.json().get('message', 'Failed')
+                self.error.emit(msg)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+class DeleteDataThread(QThread):
+    """Delete data from server in background thread"""
+
+    success = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, endpoint):
+        super().__init__()
+        self.endpoint = endpoint
+
+    def run(self):
+        try:
+            response = requests.delete(
+                f"{SERVER_URL}{self.endpoint}",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                self.success.emit("Deleted successfully")
+            else:
+                self.error.emit("Failed to delete")
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+# ============================================================================
+# DIALOGS
+# ============================================================================
+
+class AddStudentDialog(QDialog):
+    """Add new student dialog"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("➕ Add New Student")
+        self.setGeometry(300, 300, 500, 600)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("Add New Student")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        layout.addWidget(title)
+
+        fields = [
+            ("📝 Full Name", "name"),
+            ("👤 Username", "username"),
+            ("🔒 Password", "password"),
+            ("📧 Email", "email"),
+            ("📌 Roll Number", "roll"),
+            ("👥 Group", "group"),
+        ]
+
+        self.inputs = {}
+
+        for label_text, key in fields:
+            label = QLabel(label_text)
+            label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            layout.addWidget(label)
+
+            input_field = QLineEdit()
+            if key == "password":
+                input_field.setEchoMode(QLineEdit.EchoMode.Password)
+            self.inputs[key] = input_field
+            layout.addWidget(input_field)
+
+        layout.addStretch()
+
+        button_layout = QHBoxLayout()
+
+        save_btn = QPushButton("✓ Save")
+        save_btn.clicked.connect(self.accept)
+        button_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("✕ Cancel")
+        cancel_btn.setStyleSheet("QPushButton { background-color: #505070; }")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def get_data(self):
+        return {
+            "name": self.inputs["name"].text(),
+            "username": self.inputs["username"].text(),
+            "password": self.inputs["password"].text(),
+            "email": self.inputs["email"].text(),
+            "roll_number": self.inputs["roll"].text(),
+            "group_name": self.inputs["group"].text()
+        }
+
+class AddQuestionDialog(QDialog):
+    """Add new question dialog"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("➕ Add New Question")
+        self.setGeometry(300, 300, 600, 700)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title = QLabel("Add New Question")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        layout.addWidget(title)
+
+        q_label = QLabel("❓ Question Text")
+        layout.addWidget(q_label)
+
+        self.question = QTextEdit()
+        self.question.setMinimumHeight(100)
+        layout.addWidget(self.question)
+
+        opt_label = QLabel("🎯 Answer Options")
+        layout.addWidget(opt_label)
+
+        self.options = []
+        for i in range(4):
+            opt = QLineEdit()
+            opt.setPlaceholderText(f"Option {i+1}")
+            self.options.append(opt)
+            layout.addWidget(opt)
+
+        ans_layout = QHBoxLayout()
+        ans_label = QLabel("✓ Correct Answer:")
+        self.correct_answer = QComboBox()
+        self.correct_answer.addItems(["Option 1", "Option 2", "Option 3", "Option 4"])
+        ans_layout.addWidget(ans_label)
+        ans_layout.addWidget(self.correct_answer)
+        ans_layout.addStretch()
+        layout.addLayout(ans_layout)
+
+        meta_layout = QHBoxLayout()
+
+        subject_label = QLabel("📚 Subject:")
+        self.subject = QLineEdit()
+        meta_layout.addWidget(subject_label)
+        meta_layout.addWidget(self.subject)
+
+        marks_label = QLabel("⭐ Marks:")
+        self.marks = QSpinBox()
+        self.marks.setValue(1)
+        meta_layout.addWidget(marks_label)
+        meta_layout.addWidget(self.marks)
+
+        layout.addLayout(meta_layout)
+        layout.addStretch()
+
+        button_layout = QHBoxLayout()
+
+        save_btn = QPushButton("✓ Save")
+        save_btn.clicked.connect(self.accept)
+        button_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("✕ Cancel")
+        cancel_btn.setStyleSheet("QPushButton { background-color: #505070; }")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def get_data(self):
+        return {
+            "question": self.question.toPlainText(),
+            "option1": self.options[0].text(),
+            "option2": self.options[1].text(),
+            "option3": self.options[2].text(),
+            "option4": self.options[3].text(),
+            "correct_answer": self.correct_answer.currentIndex(),
+            "subject": self.subject.text(),
+            "marks": self.marks.value()
+        }
+
+# FIXED CreateExamDialog - use corrected code from [code_file:16]
+# (Paste the complete dialog from CREATEEXAMDIALOG_COMPLETE_FIXED.txt)
+
+# ============================================================================
+# ADMIN LOGIN WINDOW
+# ============================================================================
+
+class AdminLoginWindow(QMainWindow):
+    """Admin login window"""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("🔐 Admin Login")
+        self.setFixedSize(600, 500)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(60, 60, 60, 60)
+        layout.setSpacing(30)
+
+        emoji = QLabel("🔑")
+        emoji.setFont(QFont("Segoe UI Emoji", 80))
+        emoji.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(emoji)
+
+        title = QLabel("Admin Dashboard")
+        title.setFont(QFont("Segoe UI", 32, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        layout.addSpacing(20)
+
+        user_label = QLabel("👤 Username")
+        user_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        layout.addWidget(user_label)
+
+        self.username = QLineEdit()
+        self.username.setPlaceholderText("admin")
+        self.username.setMinimumHeight(50)
+        layout.addWidget(self.username)
+
+        pass_label = QLabel("🔒 Password")
+        pass_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        layout.addWidget(pass_label)
+
+        self.password = QLineEdit()
+        self.password.setPlaceholderText("admin123")
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setMinimumHeight(50)
+        self.password.returnPressed.connect(self.login)
+        layout.addWidget(self.password)
+
+        layout.addSpacing(10)
+
+        login_btn = QPushButton("🚀 Login")
+        login_btn.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        login_btn.setMinimumHeight(60)
+        login_btn.clicked.connect(self.login)
+        layout.addWidget(login_btn)
+
+        info = QLabel("Default: admin / admin123")
+        info.setFont(QFont("Segoe UI", 10))
+        info.setStyleSheet("color: #a0a0b0;")
+        info.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(info)
+
+        layout.addStretch()
+
+        central_widget.setLayout(layout)
+
+    def login(self):
+        username = self.username.text()
+        password = self.password.text()
+
+        if not username or not password:
+            QMessageBox.warning(self, "Error", "Enter credentials")
+            return
+
+        if username == "admin" and password == "admin123":
+            self.admin_panel = AdminPanel(username)
+            self.admin_panel.show()
+            self.close()
+        else:
+            QMessageBox.warning(self, "Error", "Invalid credentials")
+            self.password.clear()
+
+# ============================================================================
+# ADMIN PANEL
+# ============================================================================
+
+class AdminPanel(QMainWindow):
+    """Main admin panel"""
+
+    def __init__(self, admin_username):
+        super().__init__()
+        self.admin_username = admin_username
+        self.setWindowTitle(f"Admin Dashboard - {admin_username}")
+        self.setGeometry(50, 50, 1600, 900)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        self.init_ui()
+        self.load_data()
+
+    def init_ui(self):
+        """Initialize UI"""
+        # Menu bar
+        menubar = self.menuBar()
+        file_menu = menubar.addMenu("📁 File")
+        refresh_action = file_menu.addAction("🔄 Refresh")
+        refresh_action.triggered.connect(self.load_data)
+        file_menu.addSeparator()
+        exit_action = file_menu.addAction("🚪 Exit")
+        exit_action.triggered.connect(self.close)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout()
+
+        # Header
+        header = QFrame()
+        header.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                padding: 20px;
+            }
+        """)
+        header_layout = QHBoxLayout()
+
+        title = QLabel(f"👤 Welcome, {self.admin_username}!")
+        title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        title.setStyleSheet("color: white;")
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+
+        header.setLayout(header_layout)
+        main_layout.addWidget(header)
+
+        # Tabs
+        self.tabs = QTabWidget()
+
+        self.students_widget = self.create_students_tab()
+        self.tabs.addTab(self.students_widget, "👥 Students")
+
+        self.questions_widget = self.create_questions_tab()
+        self.tabs.addTab(self.questions_widget, "❓ Questions")
+
+        self.exams_widget = self.create_exams_tab()
+        self.tabs.addTab(self.exams_widget, "📝 Exams")
+
+        self.results_widget = self.create_results_tab()
+        self.tabs.addTab(self.results_widget, "📊 Results")
+
+        main_layout.addWidget(self.tabs, 1)
+
+        # Status bar
+        self.status_bar = self.statusBar()
+        self.status_bar.showMessage("Ready | Connecting to server...")
+
+        central_widget.setLayout(main_layout)
+
+    def create_students_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("➕ Add Student")
+        add_btn.setMinimumHeight(45)
+        add_btn.clicked.connect(self.add_student)
+        btn_layout.addWidget(add_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        self.students_table = QTableWidget()
+        self.students_table.setColumnCount(7)
+        self.students_table.setHorizontalHeaderLabels([
+            "ID", "Name", "Username", "Email", "Roll #", "Group", "Action"
+        ])
+        self.students_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.students_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_questions_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("➕ Add Question")
+        add_btn.setMinimumHeight(45)
+        add_btn.clicked.connect(self.add_question)
+        btn_layout.addWidget(add_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        self.questions_table = QTableWidget()
+        self.questions_table.setColumnCount(7)
+        self.questions_table.setHorizontalHeaderLabels([
+            "ID", "Question", "Subject", "Marks", "Ans", "Opt1", "Action"
+        ])
+        self.questions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.questions_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_exams_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("➕ Create Exam")
+        add_btn.setMinimumHeight(45)
+        add_btn.clicked.connect(self.create_exam)
+        btn_layout.addWidget(add_btn)
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        self.exams_table = QTableWidget()
+        self.exams_table.setColumnCount(7)
+        self.exams_table.setHorizontalHeaderLabels([
+            "ID", "Exam Name", "Start", "Duration", "Students", "Questions", "Action"
+        ])
+        self.exams_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        layout.addWidget(self.exams_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_results_tab(self):
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(9)
+        self.results_table.setHorizontalHeaderLabels([
+            "ID", "Student", "Exam", "Score", "Total", "Percentage", "Time", "Date", "Action"
+        ])
+        layout.addWidget(self.results_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def load_data(self):
+        """Load all data in background threads"""
+        self.status_bar.showMessage("Loading students...")
+        self.load_thread_students = LoadDataThread("/api/students", "students")
+        self.load_thread_students.success.connect(self.on_students_loaded)
+        self.load_thread_students.error.connect(self.on_load_error)
+        self.load_thread_students.start()
+
+        self.load_thread_questions = LoadDataThread("/api/questions", "questions")
+        self.load_thread_questions.success.connect(self.on_questions_loaded)
+        self.load_thread_questions.error.connect(self.on_load_error)
+        self.load_thread_questions.start()
+
+        self.load_thread_exams = LoadDataThread("/api/exams", "exams")
+        self.load_thread_exams.success.connect(self.on_exams_loaded)
+        self.load_thread_exams.error.connect(self.on_load_error)
+        self.load_thread_exams.start()
+
+        self.load_thread_results = LoadDataThread("/api/results", "results")
+        self.load_thread_results.success.connect(self.on_results_loaded)
+        self.load_thread_results.error.connect(self.on_load_error)
+        self.load_thread_results.start()
+
+    def on_students_loaded(self, data_type, data):
+        """Handle students loaded"""
+        self.students_table.setRowCount(len(data))
+        for i, student in enumerate(data):
+            self.students_table.setItem(i, 0, QTableWidgetItem(str(student.get('id', ''))))
+            self.students_table.setItem(i, 1, QTableWidgetItem(student.get('name', '')))
+            self.students_table.setItem(i, 2, QTableWidgetItem(student.get('username', '')))
+            self.students_table.setItem(i, 3, QTableWidgetItem(student.get('email', '')))
+            self.students_table.setItem(i, 4, QTableWidgetItem(student.get('roll_number', '')))
+            self.students_table.setItem(i, 5, QTableWidgetItem(student.get('group_name', '')))
+
+        self.status_bar.showMessage(f"✓ Loaded {len(data)} students")
+
+    def on_questions_loaded(self, data_type, data):
+        """Handle questions loaded"""
+        self.questions_table.setRowCount(len(data))
+        for i, q in enumerate(data):
+            self.questions_table.setItem(i, 0, QTableWidgetItem(str(q.get('id', ''))))
+            q_text = q.get('question', '')[:50]
+            self.questions_table.setItem(i, 1, QTableWidgetItem(q_text))
+            self.questions_table.setItem(i, 2, QTableWidgetItem(q.get('subject', '')))
+            self.questions_table.setItem(i, 3, QTableWidgetItem(str(q.get('marks', ''))))
+            self.questions_table.setItem(i, 4, QTableWidgetItem(str(q.get('correct_answer', ''))))
+            self.questions_table.setItem(i, 5, QTableWidgetItem(q.get('option1', '')[:20]))
+
+        self.status_bar.showMessage(f"✓ Loaded {len(data)} questions")
+
+    def on_exams_loaded(self, data_type, data):
+        """Handle exams loaded"""
+        self.exams_table.setRowCount(len(data))
+        for i, exam in enumerate(data):
+            self.exams_table.setItem(i, 0, QTableWidgetItem(str(exam.get('id', ''))))
+            self.exams_table.setItem(i, 1, QTableWidgetItem(exam.get('exam_name', '')))
+            self.exams_table.setItem(i, 2, QTableWidgetItem(exam.get('start_datetime', '')[:16]))
+            self.exams_table.setItem(i, 3, QTableWidgetItem(str(exam.get('duration_minutes', ''))))
+
+        self.status_bar.showMessage(f"✓ Loaded {len(data)} exams")
+
+    def on_results_loaded(self, data_type, data):
+        """Handle results loaded"""
+        self.results_table.setRowCount(len(data))
+        for i, result in enumerate(data):
+            self.results_table.setItem(i, 0, QTableWidgetItem(str(result.get('id', ''))))
+            self.results_table.setItem(i, 1, QTableWidgetItem(result.get('name', '')))
+            self.results_table.setItem(i, 2, QTableWidgetItem(result.get('exam_name', '')))
+            self.results_table.setItem(i, 3, QTableWidgetItem(str(result.get('score', ''))))
+            self.results_table.setItem(i, 4, QTableWidgetItem(str(result.get('total_marks', ''))))
+            pct = result.get('percentage', 0)
+            self.results_table.setItem(i, 5, QTableWidgetItem(f"{pct:.1f}%"))
+            self.results_table.setItem(i, 6, QTableWidgetItem(result.get('time_taken', '')))
+
+        self.status_bar.showMessage(f"✓ Loaded {len(data)} results")
+
+    def on_load_error(self, data_type, error):
+        """Handle load error"""
+        self.status_bar.showMessage(f"⚠️ Error loading {data_type}: {error}")
+
+    def add_student(self):
+        """Add new student"""
+        dialog = AddStudentDialog(self)
+        if dialog.exec():
+            data = dialog.get_data()
+            self.status_bar.showMessage("Adding student...")
+
+            thread = AddDataThread("/api/admin/add-student", data)
+            thread.success.connect(lambda msg: self.on_add_success("student", msg))
+            thread.error.connect(lambda err: self.on_add_error("student", err))
+            thread.start()
+
+    def add_question(self):
+        """Add new question"""
+        dialog = AddQuestionDialog(self)
+        if dialog.exec():
+            data = dialog.get_data()
+            self.status_bar.showMessage("Adding question...")
+
+            thread = AddDataThread("/api/admin/add-question", data)
+            thread.success.connect(lambda msg: self.on_add_success("question", msg))
+            thread.error.connect(lambda err: self.on_add_error("question", err))
+            thread.start()
+
+    def create_exam(self):
+        """Create new exam"""
+        # Use fixed CreateExamDialog from code_file:16
+        QMessageBox.information(self, "Info", "Add CreateExamDialog from code_file:16")
+
+    def on_add_success(self, item_type, msg):
+        """Handle add success"""
+        QMessageBox.information(self, "Success", f"{item_type.capitalize()} added successfully!")
+        self.load_data()
+
+    def on_add_error(self, item_type, err):
+        """Handle add error"""
+        QMessageBox.warning(self, "Error", f"Failed to add {item_type}: {err}")
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+def main():
+    app = QApplication(sys.argv)
+    login = AdminLoginWindow()
+    login.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+"""
+===================================================
+ADMIN PANEL - FIXED VERSION with Threading
+Server connections in separate threads
+===================================================
+"""
+
+import sys
+import requests
+import sqlite3
+import hashlib
+from datetime import datetime, timedelta
+from threading import Thread
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem, QMessageBox,
+    QDialog, QLineEdit, QTextEdit, QComboBox, QCheckBox, QDateTimeEdit,
+    QSpinBox, QTabWidget, QListWidget, QListWidgetItem, QScrollArea,
+    QGridLayout, QHeaderView, QFrame, QProgressBar, QStatusBar,
+    QMenuBar, QMenu, QInputDialog
+)
+from PyQt6.QtCore import Qt, QDateTime, QSize, QTimer, pyqtSignal, QThread
+from PyQt6.QtGui import QFont, QColor
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+SERVER_URL = "http://localhost:5000"  # Change to your server IP
+API_TOKEN = "secure_token_12345"
+LOCAL_DB = "admin_local.db"
+
+# ============================================================================
+# STYLES
+# ============================================================================
+
+DARK_STYLESHEET = """
+    QMainWindow {
+        background-color: #1e1e2e;
+        color: #e0e0e0;
+    }
+
+    QWidget {
+        background-color: #1e1e2e;
+        color: #e0e0e0;
+    }
+
+    QMenuBar {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border-bottom: 1px solid #3d3d54;
+    }
+
+    QMenuBar::item:selected {
+        background-color: #667eea;
+    }
+
+    QMenu {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 1px solid #3d3d54;
+    }
+
+    QMenu::item:selected {
+        background-color: #667eea;
+    }
+
+    QTabWidget::pane {
+        border: 2px solid #3d3d54;
+        background-color: #1e1e2e;
+    }
+
+    QTabBar::tab {
+        background-color: #2d2d44;
+        color: #a0a0b0;
+        padding: 8px 25px;
+        border: 1px solid #3d3d54;
+        border-bottom: none;
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+    }
+
+    QTabBar::tab:selected {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        color: white;
+        border: 1px solid #667eea;
+    }
+
+    QTabBar::tab:hover {
+        background-color: #3d3d54;
+    }
+
+    QPushButton {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        color: white;
+        padding: 12px 25px;
+        border: none;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 12px;
+    }
+
+    QPushButton:hover {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5568d3, stop:1 #6a3f8f);
+    }
+
+    QPushButton:pressed {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4655b8, stop:1 #5a3380);
+    }
+
+    QPushButton:disabled {
+        background-color: #505070;
+        color: #808090;
+    }
+
+    QLineEdit, QTextEdit {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        padding: 8px 12px;
+        font-size: 11px;
+    }
+
+    QLineEdit:focus, QTextEdit:focus {
+        border: 2px solid #667eea;
+        background-color: #252535;
+    }
+
+    QComboBox {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        padding: 6px 12px;
+    }
+
+    QComboBox:focus {
+        border: 2px solid #667eea;
+    }
+
+    QComboBox::drop-down {
+        border: none;
+    }
+
+    QSpinBox, QDateTimeEdit {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        padding: 6px 12px;
+    }
+
+    QSpinBox:focus, QDateTimeEdit:focus {
+        border: 2px solid #667eea;
+    }
+
+    QCheckBox {
+        color: #e0e0e0;
+        spacing: 8px;
+    }
+
+    QCheckBox::indicator {
+        width: 18px;
+        height: 18px;
+        background-color: #2d2d44;
+        border: 2px solid #3d3d54;
+        border-radius: 4px;
+    }
+
+    QCheckBox::indicator:checked {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        border: 2px solid #667eea;
+    }
+
+    QTableWidget {
+        background-color: #2d2d44;
+        gridline-color: #3d3d54;
+        border: 1px solid #3d3d54;
+    }
+
+    QTableWidget::item {
+        padding: 5px;
+        border: none;
+    }
+
+    QTableWidget::item:selected {
+        background-color: #667eea;
+    }
+
+    QHeaderView::section {
+        background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #3d3d54, stop:1 #2d2d44);
+        color: #e0e0e0;
+        padding: 6px;
+        border: none;
+        border-right: 1px solid #2d2d44;
+        border-bottom: 1px solid #3d3d54;
+        font-weight: bold;
+    }
+
+    QProgressBar {
+        background-color: #2d2d44;
+        border: 2px solid #3d3d54;
+        border-radius: 6px;
+        text-align: center;
+        color: white;
+        height: 25px;
+    }
+
+    QProgressBar::chunk {
+        background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+        border-radius: 4px;
+    }
+
+    QScrollBar:vertical {
+        background-color: #2d2d44;
+        width: 12px;
+        border: none;
+    }
+
+    QScrollBar::handle:vertical {
+        background-color: #667eea;
+        border-radius: 6px;
+        min-height: 20px;
+    }
+
+    QScrollBar::handle:vertical:hover {
+        background-color: #764ba2;
+    }
+
+    QFrame {
+        background-color: #1e1e2e;
+        border: none;
+    }
+
+    QStatusBar {
+        background-color: #2d2d44;
+        color: #e0e0e0;
+        border-top: 1px solid #3d3d54;
+    }
+
+    QDialogButtonBox {
+        button-layout: 2;
+    }
+"""
+
+
+# ============================================================================
+# THREADING CLASSES
+# ============================================================================
+
+class LoadDataThread(QThread):
+    """Load data from server in background thread"""
+
+    success = pyqtSignal(str, list)  # data_type, data
+    error = pyqtSignal(str, str)  # data_type, error_message
+
+    def __init__(self, endpoint, data_type):
+        super().__init__()
+        self.endpoint = endpoint
+        self.data_type = data_type
+
+    def run(self):
+        try:
+            response = requests.get(
+                f"{SERVER_URL}{self.endpoint}",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                data = response.json().get(self.data_type, [])
+                self.success.emit(self.data_type, data)
+            else:
+                self.error.emit(self.data_type, f"Server error: {response.status_code}")
+
+        except Exception as e:
+            self.error.emit(self.data_type, str(e))
+
+class AddDataThread(QThread):
+    """Add data to server in background thread"""
+
+    success = pyqtSignal(str)  # success message
+    error = pyqtSignal(str)  # error message
+
+    def __init__(self, endpoint, data):
+        super().__init__()
+        self.endpoint = endpoint
+        self.data = data
+
+    def run(self):
+        try:
+            response = requests.post(
+                f"{SERVER_URL}{self.endpoint}",
+                json=self.data,
+                headers={"Authorization": API_TOKEN},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                msg = response.json().get('message', 'Success')
+                self.success.emit(msg)
+            else:
+                msg = response.json().get('message', 'Failed')
+                self.error.emit(msg)
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+class DeleteDataThread(QThread):
+    """Delete data from server in background thread"""
+
+    success = pyqtSignal(str)
+    error = pyqtSignal(str)
+
+    def __init__(self, endpoint):
+        super().__init__()
+        self.endpoint = endpoint
+
+    def run(self):
+        try:
+            response = requests.delete(
+                f"{SERVER_URL}{self.endpoint}",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                self.success.emit("Deleted successfully")
+            else:
+                self.error.emit("Failed to delete")
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+
+# ============================================================================
+# SERVER CONNECTION THREAD
+# ============================================================================
+
+class ServerSyncThread(QThread):
+    """Background thread for syncing with server"""
+
+    sync_completed = pyqtSignal(bool, str)
+    progress_updated = pyqtSignal(int, str)
+
+    def __init__(self, action, data):
+        super().__init__()
+        self.action = action
+        self.data = data
+
+    def run(self):
+        try:
+            if self.action == "add_student":
+                self.progress_updated.emit(25, "Validating student...")
+                response = requests.post(
+                    f"{SERVER_URL}/api/admin/add-student",
+                    json=self.data,
+                    headers={"Authorization": API_TOKEN},
+                    timeout=10
+                )
+                self.progress_updated.emit(75, "Saving to server...")
+
+            elif self.action == "add_question":
+                self.progress_updated.emit(25, "Validating question...")
+                response = requests.post(
+                    f"{SERVER_URL}/api/admin/add-question",
+                    json=self.data,
+                    headers={"Authorization": API_TOKEN},
+                    timeout=10
+                )
+                self.progress_updated.emit(75, "Saving to server...")
+
+            elif self.action == "add_exam":
+                self.progress_updated.emit(25, "Creating exam...")
+                response = requests.post(
+                    f"{SERVER_URL}/api/admin/add-exam",
+                    json=self.data,
+                    headers={"Authorization": API_TOKEN},
+                    timeout=10
+                )
+                self.progress_updated.emit(75, "Finalizing...")
+
+            if response.status_code == 200:
+                self.progress_updated.emit(100, "Completed")
+                self.sync_completed.emit(True, response.json().get('message', 'Success'))
+            else:
+                self.sync_completed.emit(False, response.json().get('message', 'Error'))
+
+        except Exception as e:
+            self.sync_completed.emit(False, str(e))
+
+# ============================================================================
+# DIALOGS
+# ============================================================================
+
+class AddStudentDialog(QDialog):
+    """Add new student dialog"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("➕ Add New Student")
+        self.setGeometry(300, 300, 500, 600)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Title
+        title = QLabel("Add New Student")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        layout.addWidget(title)
+
+        # Form fields
+        self.name_input = self.create_input_field("📝 Full Name", "John Doe")
+        layout.addLayout(self.name_input[1])
+
+        self.username_input = self.create_input_field("👤 Username", "johndoe")
+        layout.addLayout(self.username_input[1])
+
+        self.password_input = self.create_input_field("🔒 Password", "password")
+        self.password_input[0].setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addLayout(self.password_input[1])
+
+        self.email_input = self.create_input_field("📧 Email", "john@example.com")
+        layout.addLayout(self.email_input[1])
+
+        self.roll_input = self.create_input_field("📌 Roll Number", "001")
+        layout.addLayout(self.roll_input[1])
+
+        self.group_input = self.create_input_field("👥 Group", "A")
+        layout.addLayout(self.group_input[1])
+
+        layout.addStretch()
+
+        # Buttons
+        button_layout = QHBoxLayout()
+
+        save_btn = QPushButton("✓ Save Student")
+        save_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        save_btn.clicked.connect(self.accept)
+        button_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("✕ Cancel")
+        cancel_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #505070;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #606080;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def create_input_field(self, label_text, placeholder):
+        """Create labeled input field"""
+        layout = QVBoxLayout()
+        layout.setSpacing(8)
+
+        label = QLabel(label_text)
+        label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        label.setStyleSheet("color: #e0e0e0;")
+        layout.addWidget(label)
+
+        input_field = QLineEdit()
+        input_field.setPlaceholderText(placeholder)
+        input_field.setMinimumHeight(40)
+        layout.addWidget(input_field)
+
+        return (input_field, layout)
+
+    def get_data(self):
+        """Get form data"""
+        return {
+            "name": self.name_input[0].text(),
+            "username": self.username_input[0].text(),
+            "password": self.password_input[0].text(),
+            "email": self.email_input[0].text(),
+            "roll_number": self.roll_input[0].text(),
+            "group_name": self.group_input[0].text()
+        }
+
+class AddQuestionDialog(QDialog):
+    """Add new question dialog"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("➕ Add New Question")
+        self.setGeometry(300, 300, 600, 700)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        # Title
+        title = QLabel("Add New Question")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        layout.addWidget(title)
+
+        # Question
+        q_label = QLabel("❓ Question Text")
+        q_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        layout.addWidget(q_label)
+
+        self.question_input = QTextEdit()
+        self.question_input.setPlaceholderText("Enter the question...")
+        self.question_input.setMinimumHeight(100)
+        layout.addWidget(self.question_input)
+
+        # Options
+        opt_label = QLabel("🎯 Answer Options")
+        opt_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        layout.addWidget(opt_label)
+
+        self.options = []
+        for i in range(4):
+            opt = QLineEdit()
+            opt.setPlaceholderText(f"Option {i+1}")
+            opt.setMinimumHeight(40)
+            self.options.append(opt)
+            layout.addWidget(opt)
+
+        # Correct answer
+        ans_layout = QHBoxLayout()
+        ans_label = QLabel("✓ Correct Answer:")
+        ans_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        ans_layout.addWidget(ans_label)
+
+        self.correct_answer = QComboBox()
+        self.correct_answer.addItems(["Option 1", "Option 2", "Option 3", "Option 4"])
+        ans_layout.addWidget(self.correct_answer)
+        ans_layout.addStretch()
+        layout.addLayout(ans_layout)
+
+        # Subject and marks
+        meta_layout = QHBoxLayout()
+        meta_layout.setSpacing(15)
+
+        subject_label = QLabel("📚 Subject:")
+        self.subject_input = QLineEdit()
+        self.subject_input.setPlaceholderText("e.g., Math")
+        meta_layout.addWidget(subject_label)
+        meta_layout.addWidget(self.subject_input)
+
+        marks_label = QLabel("⭐ Marks:")
+        self.marks_input = QSpinBox()
+        self.marks_input.setValue(1)
+        self.marks_input.setMinimum(1)
+        meta_layout.addWidget(marks_label)
+        meta_layout.addWidget(self.marks_input)
+
+        layout.addLayout(meta_layout)
+        layout.addStretch()
+
+        # Buttons
+        button_layout = QHBoxLayout()
+
+        save_btn = QPushButton("✓ Save Question")
+        save_btn.clicked.connect(self.accept)
+        button_layout.addWidget(save_btn)
+
+        cancel_btn = QPushButton("✕ Cancel")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #505070;
+                color: white;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def get_data(self):
+        """Get form data"""
+        return {
+            "question": self.question_input.toPlainText(),
+            "option1": self.options[0].text(),
+            "option2": self.options[1].text(),
+            "option3": self.options[2].text(),
+            "option4": self.options[3].text(),
+            "correct_answer": self.correct_answer.currentIndex(),
+            "subject": self.subject_input.text(),
+            "marks": self.marks_input.value()
+        }
+
+# ============================================================================
+# IMPROVED CreateExamDialog with Group Filter & Assign Students
+# ============================================================================
+
+class CreateExamDialog(QDialog):
+    """Create new exam dialog with student & question assignment"""
+
+    def __init__(self, parent=None, students=None, questions=None):
+        super().__init__(parent)
+        self.students = students or []
+        self.questions = questions or []
+        self.init_ui()
+
+    def init_ui(self):
+        self.setWindowTitle("📝 Create New Exam")
+        self.setFixedSize(900, 800)
+        self.setStyleSheet(DARK_STYLESHEET)
+
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Title
+        title = QLabel("Create New Exam")
+        title.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        main_layout.addWidget(title)
+
+        # ===== BASIC INFO SECTION =====
+        basic_label = QLabel("📝 Basic Information")
+        basic_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        basic_label.setStyleSheet("color: #667eea;")
+        main_layout.addWidget(basic_label)
+
+        basic_layout = QVBoxLayout()
+        basic_layout.setSpacing(10)
+
+        name_label = QLabel("Exam Name:")
+        name_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.exam_name = QLineEdit()
+        self.exam_name.setPlaceholderText("e.g., Physics Final Exam")
+        self.exam_name.setMinimumHeight(40)
+        basic_layout.addWidget(name_label)
+        basic_layout.addWidget(self.exam_name)
+
+        desc_label = QLabel("Description:")
+        desc_label.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.description = QTextEdit()
+        self.description.setPlaceholderText("Enter exam description...")
+        self.description.setMinimumHeight(80)
+        basic_layout.addWidget(desc_label)
+        basic_layout.addWidget(self.description)
+
+        main_layout.addLayout(basic_layout)
+        main_layout.addSpacing(10)
+
+        # ===== EXAM SETTINGS SECTION =====
+        settings_label = QLabel("⚙️ Exam Settings")
+        settings_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        settings_label.setStyleSheet("color: #667eea;")
+        main_layout.addWidget(settings_label)
+
+        settings_layout = QGridLayout()
+        settings_layout.setSpacing(15)
+
+        # Row 1: DateTime & Duration
+        start_label = QLabel("Start DateTime:")
+        self.start_datetime = QDateTimeEdit()
+        self.start_datetime.setDateTime(QDateTime.currentDateTime())
+        self.start_datetime.setMinimumHeight(40)
+        settings_layout.addWidget(start_label, 0, 0)
+        settings_layout.addWidget(self.start_datetime, 0, 1)
+
+        duration_label = QLabel("Duration (min):")
+        self.duration = QSpinBox()
+        self.duration.setValue(60)
+        self.duration.setMinimum(10)
+        self.duration.setMaximum(600)
+        self.duration.setMinimumHeight(40)
+        settings_layout.addWidget(duration_label, 0, 2)
+        settings_layout.addWidget(self.duration, 0, 3)
+
+        # Row 2: Passing & Total Marks
+        passing_label = QLabel("Passing %:")
+        self.passing = QSpinBox()
+        self.passing.setValue(40)
+        self.passing.setMinimum(0)
+        self.passing.setMaximum(100)
+        self.passing.setMinimumHeight(40)
+        settings_layout.addWidget(passing_label, 1, 0)
+        settings_layout.addWidget(self.passing, 1, 1)
+
+        marks_label = QLabel("Total Marks:")
+        self.total_marks = QSpinBox()
+        self.total_marks.setValue(100)
+        self.total_marks.setMinimum(1)
+        self.total_marks.setMaximum(1000)
+        self.total_marks.setMinimumHeight(40)
+        settings_layout.addWidget(marks_label, 1, 2)
+        settings_layout.addWidget(self.total_marks, 1, 3)
+
+        # Row 3: Tab Switch & Camera
+        tab_label = QLabel("Tab Switch Limit:")
+        self.tab_limit = QSpinBox()
+        self.tab_limit.setValue(3)
+        self.tab_limit.setMinimum(0)
+        self.tab_limit.setMinimumHeight(40)
+        settings_layout.addWidget(tab_label, 2, 0)
+        settings_layout.addWidget(self.tab_limit, 2, 1)
+
+        self.camera_required = QCheckBox("📷 Require Webcam")
+        self.camera_required.setChecked(True)
+        settings_layout.addWidget(self.camera_required, 2, 2)
+
+        main_layout.addLayout(settings_layout)
+        main_layout.addSpacing(10)
+
+        # ===== STUDENTS & QUESTIONS SECTION =====
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(15)
+
+        # LEFT: STUDENTS
+        students_label = QLabel("👥 Assign Students")
+        students_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        students_label.setStyleSheet("color: #667eea;")
+
+        students_container = QWidget()
+        students_layout = QVBoxLayout()
+        students_layout.setContentsMargins(0, 0, 0, 0)
+        students_layout.setSpacing(10)
+        students_layout.addWidget(students_label)
+
+        # Group Filter
+        group_layout = QHBoxLayout()
+        group_filter_label = QLabel("Filter by Group:")
+        self.group_filter = QComboBox()
+        self.group_filter.addItem("All Groups")
+        groups = sorted(set([s.get('group_name', 'Unknown') for s in self.students]))
+        self.group_filter.addItems(groups)
+        self.group_filter.currentTextChanged.connect(self.update_students_list)
+        group_layout.addWidget(group_filter_label)
+        group_layout.addWidget(self.group_filter)
+        group_layout.addStretch()
+        students_layout.addLayout(group_layout)
+
+        # Students List
+        students_list_label = QLabel("Select Students:")
+        self.students_list = QListWidget()
+        self.students_list.setMinimumHeight(200)
+        self.students_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        students_layout.addWidget(students_list_label)
+        students_layout.addWidget(self.students_list)
+
+        select_all_students_btn = QPushButton("✓ Select All Students")
+        select_all_students_btn.setMinimumHeight(35)
+        select_all_students_btn.clicked.connect(self.select_all_students)
+        students_layout.addWidget(select_all_students_btn)
+
+        students_container.setLayout(students_layout)
+        content_layout.addWidget(students_container)
+
+        # RIGHT: QUESTIONS
+        questions_label = QLabel("❓ Select Questions")
+        questions_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        questions_label.setStyleSheet("color: #667eea;")
+
+        questions_container = QWidget()
+        questions_layout = QVBoxLayout()
+        questions_layout.setContentsMargins(0, 0, 0, 0)
+        questions_layout.setSpacing(10)
+        questions_layout.addWidget(questions_label)
+
+        # Subject Filter
+        subject_layout = QHBoxLayout()
+        subject_filter_label = QLabel("Filter by Subject:")
+        self.subject_filter = QComboBox()
+        self.subject_filter.addItem("All Subjects")
+        subjects = sorted(set([q.get('subject', 'General') for q in self.questions]))
+        self.subject_filter.addItems(subjects)
+        self.subject_filter.currentTextChanged.connect(self.update_questions_list)
+        subject_layout.addWidget(subject_filter_label)
+        subject_layout.addWidget(self.subject_filter)
+        subject_layout.addStretch()
+        questions_layout.addLayout(subject_layout)
+
+        # Questions List
+        questions_list_label = QLabel("Select Questions:")
+        self.questions_list = QListWidget()
+        self.questions_list.setMinimumHeight(200)
+        self.questions_list.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        questions_layout.addWidget(questions_list_label)
+        questions_layout.addWidget(self.questions_list)
+
+        select_all_questions_btn = QPushButton("✓ Select All Questions")
+        select_all_questions_btn.setMinimumHeight(35)
+        select_all_questions_btn.clicked.connect(self.select_all_questions)
+        questions_layout.addWidget(select_all_questions_btn)
+
+        questions_container.setLayout(questions_layout)
+        content_layout.addWidget(questions_container)
+
+        main_layout.addLayout(content_layout, 1)
+        main_layout.addSpacing(15)
+
+        # ===== BUTTONS =====
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(15)
+
+        create_btn = QPushButton("✓ Create Exam")
+        create_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        create_btn.setMinimumHeight(50)
+        create_btn.clicked.connect(self.accept)
+        button_layout.addWidget(create_btn)
+
+        cancel_btn = QPushButton("✕ Cancel")
+        cancel_btn.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        cancel_btn.setMinimumHeight(50)
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #505070;
+                color: white;
+            }
+            QPushButton:hover {
+                background-color: #606080;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        main_layout.addLayout(button_layout)
+
+        self.setLayout(main_layout)
+
+        # Populate lists
+        self.update_students_list()
+        self.update_questions_list()
+
+    def update_students_list(self):
+        """Update students list based on group filter"""
+        self.students_list.clear()
+        selected_group = self.group_filter.currentText()
+
+        for student in self.students:
+            if selected_group == "All Groups" or student.get('group_name') == selected_group:
+                student_name = student.get('name', '')
+                student_username = student.get('username', '')
+                student_group = student.get('group_name', '')
+                item_text = f"{student_name} ({student_username}) - {student_group}"
+
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.ItemDataRole.UserRole, student.get('id'))
+                self.students_list.addItem(item)
+
+    def update_questions_list(self):
+        """Update questions list based on subject filter"""
+        self.questions_list.clear()
+        selected_subject = self.subject_filter.currentText()
+
+        for question in self.questions:
+            if selected_subject == "All Subjects" or question.get('subject') == selected_subject:
+                q_text = question.get('question', '')[:50]
+                subject = question.get('subject', 'N/A')
+                marks = question.get('marks', 1)
+
+                item_text = f"{q_text}... [{subject}] - {marks}M"
+
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.ItemDataRole.UserRole, question.get('id'))
+                self.questions_list.addItem(item)
+
+    def select_all_students(self):
+        """Select all students in list"""
+        for i in range(self.students_list.count()):
+            self.students_list.item(i).setSelected(True)
+
+    def select_all_questions(self):
+        """Select all questions in list"""
+        for i in range(self.questions_list.count()):
+            self.questions_list.item(i).setSelected(True)
+
+    def get_data(self):
+        """Get form data with selected students and questions"""
+        # Get selected students
+        selected_students = []
+        for item in self.students_list.selectedItems():
+            sid = item.data(Qt.ItemDataRole.UserRole)
+            if sid:
+                selected_students.append(sid)
+
+        # Get selected questions
+        selected_questions = []
+        for item in self.questions_list.selectedItems():
+            qid = item.data(Qt.ItemDataRole.UserRole)
+            if qid:
+                selected_questions.append(qid)
+
+        # Validation
+        if not self.exam_name.text().strip():
+            QMessageBox.warning(self, "Error", "❌ Please enter exam name")
+            return None
+
+        if not self.start_datetime.dateTime():
+            QMessageBox.warning(self, "Error", "❌ Please set start datetime")
+            return None
+
+        if not selected_students:
+            QMessageBox.warning(self, "Error", "❌ Please select at least one student")
+            return None
+
+        if not selected_questions:
+            QMessageBox.warning(self, "Error", "❌ Please select at least one question")
+            return None
+
+        return {
+            "exam_name": self.exam_name.text().strip(),
+            "description": self.description.toPlainText().strip(),
+            "start_datetime": self.start_datetime.dateTime().toString("yyyy-MM-dd HH:mm"),
+            "duration_minutes": self.duration.value(),
+            "passing_percentage": self.passing.value(),
+            "camera_required": 1 if self.camera_required.isChecked() else 0,
+            "tab_switch_limit": self.tab_limit.value(),
+            "total_marks": self.total_marks.value(),
+            "question_ids": selected_questions,
+            "student_ids": selected_students
+        }
+    
+# ============================================================================
+# ADMIN LOGIN WINDOW
+# ============================================================================
+
+class AdminLoginWindow(QMainWindow):
+    """Admin login window"""
+
+    def __init__(self):
+        super().__init__()
+        self.init_ui()
+        self.setStyleSheet(DARK_STYLESHEET)
+
+    def init_ui(self):
+        self.setWindowTitle("🔐 Admin Login")
+        self.setFixedSize(600, 500)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(60, 60, 60, 60)
+        layout.setSpacing(30)
+
+        # Logo
+        emoji = QLabel("🔑")
+        emoji.setFont(QFont("Segoe UI Emoji", 80))
+        emoji.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(emoji)
+
+        # Title
+        title = QLabel("Admin Dashboard")
+        title.setFont(QFont("Segoe UI", 32, QFont.Weight.Bold))
+        title.setStyleSheet("color: #667eea;")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title)
+
+        layout.addSpacing(20)
+
+        # Username
+        user_label = QLabel("👤 Username")
+        user_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        layout.addWidget(user_label)
+
+        self.username = QLineEdit()
+        self.username.setPlaceholderText("Enter admin username")
+        self.username.setMinimumHeight(50)
+        layout.addWidget(self.username)
+
+        # Password
+        pass_label = QLabel("🔒 Password")
+        pass_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        layout.addWidget(pass_label)
+
+        self.password = QLineEdit()
+        self.password.setPlaceholderText("Enter password")
+        self.password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password.setMinimumHeight(50)
+        self.password.returnPressed.connect(self.login)
+        layout.addWidget(self.password)
+
+        layout.addSpacing(10)
+
+        # Login button
+        login_btn = QPushButton("🚀 Login")
+        login_btn.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        login_btn.setMinimumHeight(60)
+        login_btn.clicked.connect(self.login)
+        layout.addWidget(login_btn)
+
+        # Status
+        self.status = QLabel("Default: admin / admin123")
+        self.status.setFont(QFont("Segoe UI", 10))
+        self.status.setStyleSheet("color: #a0a0b0;")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self.status)
+
+        layout.addStretch()
+
+        central_widget.setLayout(layout)
+
+    def login(self):
+        """Login to admin panel"""
+        username = self.username.text().strip()
+        password = self.password.text().strip()
+
+        if not username or not password:
+            QMessageBox.warning(self, "Error", "Enter username and password")
+            return
+
+        # Default credentials for testing
+        if username == "admin" and password == "admin123":
+            self.admin_panel = AdminPanel(username)
+            self.admin_panel.show()
+            self.close()
+        else:
+            QMessageBox.warning(self, "Error", "Invalid credentials")
+            self.password.clear()
+
+# ============================================================================
+# ADMIN PANEL - MAIN WINDOW
+# ============================================================================
+
+class AdminPanel(QMainWindow):
+    """Main admin panel"""
+
+    def __init__(self, admin_username):
+        super().__init__()
+        self.admin_username = admin_username
+        self.students = []
+        self.questions = []
+        self.exams = []
+        self.results = []
+
+        self.init_ui()
+        self.setStyleSheet(DARK_STYLESHEET)
+        self.load_all_data()
+
+    def init_ui(self):
+        """Initialize admin panel UI"""
+        self.setWindowTitle(f"Admin Dashboard - {self.admin_username}")
+        self.setGeometry(50, 50, 1600, 900)
+
+        # Create menu bar
+        self.create_menu_bar()
+
+        # Central widget
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Header
+        header = self.create_header()
+        main_layout.addWidget(header)
+
+        # Tab widget
+        self.tabs = QTabWidget()
+        self.tabs.setFont(QFont("Segoe UI", 11))
+
+        # Students tab
+        students_widget = self.create_students_tab()
+        self.tabs.addTab(students_widget, "👥 Students")
+
+        # Questions tab
+        questions_widget = self.create_questions_tab()
+        self.tabs.addTab(questions_widget, "❓ Questions")
+
+        # Exams tab
+        exams_widget = self.create_exams_tab()
+        self.tabs.addTab(exams_widget, "📝 Exams")
+
+        # Results tab
+        results_widget = self.create_results_tab()
+        self.tabs.addTab(results_widget, "📊 Results")
+
+        # Security tab
+        security_widget = self.create_security_tab()
+        self.tabs.addTab(security_widget, "🔒 Security")
+
+        main_layout.addWidget(self.tabs, 1)
+
+        # Status bar
+        self.status_bar = self.statusBar()
+        self.status_bar.setStyleSheet("color: #e0e0e0;")
+        self.status_bar.showMessage(f"Ready | Server: {SERVER_URL}")
+
+        central_widget.setLayout(main_layout)
+
+    def create_menu_bar(self):
+        """Create menu bar"""
+        menubar = self.menuBar()
+        menubar.setStyleSheet(DARK_STYLESHEET)
+
+        # File menu
+        file_menu = menubar.addMenu("📁 File")
+
+        refresh_action = file_menu.addAction("🔄 Refresh")
+        refresh_action.triggered.connect(self.load_all_data)
+
+        file_menu.addSeparator()
+
+        exit_action = file_menu.addAction("🚪 Exit")
+        exit_action.triggered.connect(self.close)
+
+        # Tools menu
+        tools_menu = menubar.addMenu("⚙️ Tools")
+
+        sync_action = tools_menu.addAction("☁️ Sync with Server")
+        sync_action.triggered.connect(self.sync_with_server)
+
+        # Help menu
+        help_menu = menubar.addMenu("❓ Help")
+
+        about_action = help_menu.addAction("ℹ️ About")
+        about_action.triggered.connect(self.show_about)
+
+    def create_header(self):
+        """Create header with stats"""
+        header = QFrame()
+        header.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                padding: 20px;
+            }
+        """)
+
+        layout = QHBoxLayout()
+
+        # Title
+        title = QLabel(f"👤 Welcome, {self.admin_username}!")
+        title.setFont(QFont("Segoe UI", 20, QFont.Weight.Bold))
+        title.setStyleSheet("color: white;")
+        layout.addWidget(title)
+
+        layout.addStretch()
+
+        # Stats
+        stats_layout = QHBoxLayout()
+        stats_layout.setSpacing(30)
+
+        self.students_stat = self.create_stat_widget("👥 Students", "0")
+        stats_layout.addWidget(self.students_stat)
+
+        self.questions_stat = self.create_stat_widget("❓ Questions", "0")
+        stats_layout.addWidget(self.questions_stat)
+
+        self.exams_stat = self.create_stat_widget("📝 Exams", "0")
+        stats_layout.addWidget(self.exams_stat)
+
+        self.results_stat = self.create_stat_widget("📊 Results", "0")
+        stats_layout.addWidget(self.results_stat)
+
+        layout.addLayout(stats_layout)
+
+        header.setLayout(layout)
+        return header
+
+    def create_stat_widget(self, label, value):
+        """Create stat widget"""
+        widget = QFrame()
+        widget.setStyleSheet("""
+            QFrame {
+                background-color: rgba(255, 255, 255, 0.1);
+                border-radius: 10px;
+                padding: 15px;
+            }
+        """)
+
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+
+        label_text = QLabel(label)
+        label_text.setFont(QFont("Segoe UI", 10))
+        label_text.setStyleSheet("color: rgba(255,255,255,0.8);")
+        layout.addWidget(label_text)
+
+        value_text = QLabel(value)
+        value_text.setFont(QFont("Segoe UI", 18, QFont.Weight.Bold))
+        value_text.setStyleSheet("color: white;")
+        layout.addWidget(value_text)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_students_tab(self):
+        """Create students tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        add_btn = QPushButton("➕ Add Student")
+        add_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        add_btn.setMinimumHeight(45)
+        add_btn.clicked.connect(self.add_student)
+        btn_layout.addWidget(add_btn)
+
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        refresh_btn.setMinimumHeight(45)
+        refresh_btn.clicked.connect(self.load_students)
+        btn_layout.addWidget(refresh_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Table
+        self.students_table = QTableWidget()
+        self.students_table.setColumnCount(7)
+        self.students_table.setHorizontalHeaderLabels([
+            "ID", "Name", "Username", "Email", "Roll #", "Group", "Action"
+        ])
+        self.students_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.students_table.setAlternatingRowColors(True)
+        self.students_table.setMinimumHeight(500)
+        layout.addWidget(self.students_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_questions_tab(self):
+        """Create questions tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        add_btn = QPushButton("➕ Add Question")
+        add_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        add_btn.setMinimumHeight(45)
+        add_btn.clicked.connect(self.add_question)
+        btn_layout.addWidget(add_btn)
+
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        refresh_btn.setMinimumHeight(45)
+        refresh_btn.clicked.connect(self.load_questions)
+        btn_layout.addWidget(refresh_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Table
+        self.questions_table = QTableWidget()
+        self.questions_table.setColumnCount(7)
+        self.questions_table.setHorizontalHeaderLabels([
+            "ID", "Question", "Subject", "Marks", "Ans", "Opt1", "Action"
+        ])
+        self.questions_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.questions_table.setAlternatingRowColors(True)
+        self.questions_table.setMinimumHeight(500)
+        layout.addWidget(self.questions_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_exams_tab(self):
+        """Create exams tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        add_btn = QPushButton("➕ Create Exam")
+        add_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        add_btn.setMinimumHeight(45)
+        add_btn.clicked.connect(self.create_exam)
+        btn_layout.addWidget(add_btn)
+
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        refresh_btn.setMinimumHeight(45)
+        refresh_btn.clicked.connect(self.load_exams)
+        btn_layout.addWidget(refresh_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Table
+        self.exams_table = QTableWidget()
+        self.exams_table.setColumnCount(7)
+        self.exams_table.setHorizontalHeaderLabels([
+            "ID", "Exam Name", "Start", "Duration", "Students", "Questions", "Action"
+        ])
+        self.exams_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.exams_table.setAlternatingRowColors(True)
+        self.exams_table.setMinimumHeight(500)
+        layout.addWidget(self.exams_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_results_tab(self):
+        """Create results tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        refresh_btn.setMinimumHeight(45)
+        refresh_btn.clicked.connect(self.load_results)
+        btn_layout.addWidget(refresh_btn)
+
+        export_btn = QPushButton("📥 Export Results")
+        export_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        export_btn.setMinimumHeight(45)
+        btn_layout.addWidget(export_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Table
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(9)
+        self.results_table.setHorizontalHeaderLabels([
+            "ID", "Student", "Exam", "Score", "Total", "Percentage", "Time", "Date", "Action"
+        ])
+        self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.results_table.setAlternatingRowColors(True)
+        self.results_table.setMinimumHeight(500)
+        layout.addWidget(self.results_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def create_security_tab(self):
+        """Create security tab"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(15)
+
+        # Info
+        info = QLabel("🔒 Security Logs & Violations")
+        info.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        info.setStyleSheet("color: #667eea;")
+        layout.addWidget(info)
+
+        # Buttons
+        btn_layout = QHBoxLayout()
+
+        refresh_btn = QPushButton("🔄 Refresh Logs")
+        refresh_btn.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+        refresh_btn.setMinimumHeight(45)
+        btn_layout.addWidget(refresh_btn)
+
+        btn_layout.addStretch()
+        layout.addLayout(btn_layout)
+
+        # Table
+        self.security_table = QTableWidget()
+        self.security_table.setColumnCount(6)
+        self.security_table.setHorizontalHeaderLabels([
+            "ID", "Student", "Exam", "Violation Type", "Details", "Time"
+        ])
+        self.security_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.security_table.setAlternatingRowColors(True)
+        self.security_table.setMinimumHeight(500)
+        layout.addWidget(self.security_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def load_all_data(self):
+        """Load all data in background threads"""
+        self.status_bar.showMessage("Loading students...")
+        self.load_thread_students = LoadDataThread("/api/students", "students")
+        self.load_thread_students.success.connect(self.on_students_loaded)
+        self.load_thread_students.error.connect(self.on_load_error)
+        self.load_thread_students.start()
+
+        self.load_thread_questions = LoadDataThread("/api/questions", "questions")
+        self.load_thread_questions.success.connect(self.on_questions_loaded)
+        self.load_thread_questions.error.connect(self.on_load_error)
+        self.load_thread_questions.start()
+
+        self.load_thread_exams = LoadDataThread("/api/exams", "exams")
+        self.load_thread_exams.success.connect(self.on_exams_loaded)
+        self.load_thread_exams.error.connect(self.on_load_error)
+        self.load_thread_exams.start()
+
+        self.load_thread_results = LoadDataThread("/api/results", "results")
+        self.load_thread_results.success.connect(self.on_results_loaded)
+        self.load_thread_results.error.connect(self.on_load_error)
+        self.load_thread_results.start()
+        
+    def load_students(self):
+        """Load students from server"""
+        try:
+            response = requests.get(
+                f"{SERVER_URL}/api/students",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                self.students = response.json().get('students', [])
+                self.students_table.setRowCount(len(self.students))
+
+                for i, student in enumerate(self.students):
+                    self.students_table.setItem(i, 0, QTableWidgetItem(str(student.get('id', ''))))
+                    self.students_table.setItem(i, 1, QTableWidgetItem(student.get('name', '')))
+                    self.students_table.setItem(i, 2, QTableWidgetItem(student.get('username', '')))
+                    self.students_table.setItem(i, 3, QTableWidgetItem(student.get('email', '')))
+                    self.students_table.setItem(i, 4, QTableWidgetItem(student.get('roll_number', '')))
+                    self.students_table.setItem(i, 5, QTableWidgetItem(student.get('group_name', '')))
+
+                    delete_btn = QPushButton("🗑️")
+                    delete_btn.clicked.connect(lambda checked, sid=student.get('id'): self.delete_student(sid))
+                    self.students_table.setCellWidget(i, 6, delete_btn)
+
+                self.students_stat.findChild(QLabel, text=str(len(self.students))).setText(str(len(self.students)))
+                self.status_bar.showMessage(f"Loaded {len(self.students)} students")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load students: {str(e)}")
+
+    def load_questions(self):
+        """Load questions from server"""
+        try:
+            response = requests.get(
+                f"{SERVER_URL}/api/questions",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                self.questions = response.json().get('questions', [])
+                self.questions_table.setRowCount(len(self.questions))
+
+                for i, question in enumerate(self.questions):
+                    self.questions_table.setItem(i, 0, QTableWidgetItem(str(question.get('id', ''))))
+                    q_text = question.get('question', '')[:50]
+                    self.questions_table.setItem(i, 1, QTableWidgetItem(q_text))
+                    self.questions_table.setItem(i, 2, QTableWidgetItem(question.get('subject', '')))
+                    self.questions_table.setItem(i, 3, QTableWidgetItem(str(question.get('marks', ''))))
+                    self.questions_table.setItem(i, 4, QTableWidgetItem(str(question.get('correct_answer', ''))))
+                    self.questions_table.setItem(i, 5, QTableWidgetItem(question.get('option1', '')[:20]))
+
+                    delete_btn = QPushButton("🗑️")
+                    delete_btn.clicked.connect(lambda checked, qid=question.get('id'): self.delete_question(qid))
+                    self.questions_table.setCellWidget(i, 6, delete_btn)
+
+                self.status_bar.showMessage(f"Loaded {len(self.questions)} questions")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load questions: {str(e)}")
+
+    def load_exams(self):
+        """Load exams from server"""
+        try:
+            response = requests.get(
+                f"{SERVER_URL}/api/exams",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                self.exams = response.json().get('exams', [])
+                self.exams_table.setRowCount(len(self.exams))
+
+                for i, exam in enumerate(self.exams):
+                    self.exams_table.setItem(i, 0, QTableWidgetItem(str(exam.get('id', ''))))
+                    self.exams_table.setItem(i, 1, QTableWidgetItem(exam.get('exam_name', '')))
+                    self.exams_table.setItem(i, 2, QTableWidgetItem(exam.get('start_datetime', '')[:16]))
+                    self.exams_table.setItem(i, 3, QTableWidgetItem(str(exam.get('duration_minutes', ''))))
+                    self.exams_table.setItem(i, 4, QTableWidgetItem("0"))
+                    self.exams_table.setItem(i, 5, QTableWidgetItem("0"))
+
+                    delete_btn = QPushButton("🗑️")
+                    delete_btn.clicked.connect(lambda checked, eid=exam.get('id'): self.delete_exam(eid))
+                    self.exams_table.setCellWidget(i, 6, delete_btn)
+
+                self.status_bar.showMessage(f"Loaded {len(self.exams)} exams")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load exams: {str(e)}")
+
+    def load_results(self):
+        """Load results from server"""
+        try:
+            response = requests.get(
+                f"{SERVER_URL}/api/results",
+                headers={"Authorization": API_TOKEN},
+                timeout=5
+            )
+
+            if response.status_code == 200:
+                self.results = response.json().get('results', [])
+                self.results_table.setRowCount(len(self.results))
+
+                for i, result in enumerate(self.results):
+                    self.results_table.setItem(i, 0, QTableWidgetItem(str(result.get('id', ''))))
+                    self.results_table.setItem(i, 1, QTableWidgetItem(result.get('name', '')))
+                    self.results_table.setItem(i, 2, QTableWidgetItem(result.get('exam_name', '')))
+                    self.results_table.setItem(i, 3, QTableWidgetItem(str(result.get('score', ''))))
+                    self.results_table.setItem(i, 4, QTableWidgetItem(str(result.get('total_marks', ''))))
+                    percentage = result.get('percentage', 0)
+                    self.results_table.setItem(i, 5, QTableWidgetItem(f"{percentage:.1f}%"))
+                    self.results_table.setItem(i, 6, QTableWidgetItem(result.get('time_taken', '')))
+                    self.results_table.setItem(i, 7, QTableWidgetItem(result.get('submission_time', '')[:10]))
+
+                self.status_bar.showMessage(f"Loaded {len(self.results)} results")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to load results: {str(e)}")
+
+    def add_student(self):
+        """Add new student"""
+        dialog = AddStudentDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+
+            if not data['name'] or not data['username'] or not data['password']:
+                QMessageBox.warning(self, "Error", "Please fill all required fields")
+                return
+
+            try:
+                response = requests.post(
+                    f"{SERVER_URL}/api/admin/add-student",
+                    json=data,
+                    headers={"Authorization": API_TOKEN},
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Success", "Student added successfully")
+                    self.load_students()
+                else:
+                    msg = response.json().get('message', 'Failed to add student')
+                    QMessageBox.warning(self, "Error", msg)
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def add_question(self):
+        """Add new question"""
+        dialog = AddQuestionDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+
+            if not data['question'] or not all([data['option1'], data['option2'], data['option3'], data['option4']]):
+                QMessageBox.warning(self, "Error", "Please fill all required fields")
+                return
+
+            try:
+                response = requests.post(
+                    f"{SERVER_URL}/api/admin/add-question",
+                    json=data,
+                    headers={"Authorization": API_TOKEN},
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Success", "Question added successfully")
+                    self.load_questions()
+                else:
+                    msg = response.json().get('message', 'Failed to add question')
+                    QMessageBox.warning(self, "Error", msg)
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def create_exam(self):
+        """Create new exam"""
+        dialog = CreateExamDialog(self, self.students, self.questions)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            data = dialog.get_data()
+            
+            if data is None:  # Validation failed
+                return
+            
+            if not data['exam_name'] or not data['start_datetime']:
+                QMessageBox.warning(self, "Error", "Please fill all required fields")
+                return
+            
+            try:
+                response = requests.post(
+                    f"{SERVER_URL}/api/admin/add-exam",
+                    json=data,
+                    headers={"Authorization": API_TOKEN},
+                    timeout=10
+                )
+                
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Success", "Exam created successfully!")
+                    self.load_exams()
+                else:
+                    msg = response.json().get('message', 'Failed to create exam')
+                    QMessageBox.warning(self, "Error", msg)
+            
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def delete_student(self, student_id):
+        """Delete student"""
+        reply = QMessageBox.question(
+            self, "Confirm",
+            f"Delete student ID {student_id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                response = requests.delete(
+                    f"{SERVER_URL}/api/admin/delete-student/{student_id}",
+                    headers={"Authorization": API_TOKEN},
+                    timeout=5
+                )
+
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Success", "Student deleted")
+                    self.load_students()
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to delete student")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def delete_question(self, question_id):
+        """Delete question"""
+        reply = QMessageBox.question(
+            self, "Confirm",
+            f"Delete question ID {question_id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                response = requests.delete(
+                    f"{SERVER_URL}/api/admin/delete-question/{question_id}",
+                    headers={"Authorization": API_TOKEN},
+                    timeout=5
+                )
+
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Success", "Question deleted")
+                    self.load_questions()
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to delete question")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def delete_exam(self, exam_id):
+        """Delete exam"""
+        reply = QMessageBox.question(
+            self, "Confirm",
+            f"Delete exam ID {exam_id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                response = requests.delete(
+                    f"{SERVER_URL}/api/admin/delete-exam/{exam_id}",
+                    headers={"Authorization": API_TOKEN},
+                    timeout=5
+                )
+
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Success", "Exam deleted")
+                    self.load_exams()
+                else:
+                    QMessageBox.warning(self, "Error", "Failed to delete exam")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", str(e))
+
+    def sync_with_server(self):
+        """Sync data with server"""
+        QMessageBox.information(self, "Sync", "Syncing with server...")
+        self.load_all_data()
+
+    def show_about(self):
+        """Show about dialog"""
+        QMessageBox.information(
+            self,
+            "About",
+            "Admin Dashboard v1.0\n\n"
+            "Central Examination System\n"
+            "Server-based with SQLite Database\n\n"
+            "© 2025 All Rights Reserved"
+        )
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+def main():
+    """Application entry point"""
+    app = QApplication(sys.argv)
+
+    login_window = AdminLoginWindow()
+    login_window.show()
+
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
+
+
+
+
+
+
+
+
+
+"""
+STUDENT EXAM PORTAL - Complete Version (No Default Login)
+Modern exam taking application with server-based authentication
+Students MUST login with credentials added by admin
+"""
+
+import sys
+import requests
+import hashlib
+import json
+from datetime import datetime, timedelta
+import cv2
+import numpy as np
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QRadioButton, QMessageBox, QButtonGroup,
+    QProgressBar, QDialog, QLineEdit, QFrame, QComboBox, QSpinBox,
+    QTextEdit, QTableWidget, QTableWidgetItem, QTabWidget, QScrollArea
+)
+from PyQt6.QtCore import Qt, QTimer, QDateTime, QDate, pyqtSignal, QObject, QThread
+from PyQt6.QtGui import QFont, QColor, QPixmap
+from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PyQt6.QtMultimediaWidgets import QVideoWidget
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+SERVER_URL = "http://localhost:5000"  # Change to your server IP
+API_TOKEN = "secure_token_12345"  # Must match server.py
+EXAM_DB = "student_exam.db"
+
+# ============================================================================
+# MAIN WINDOW - STUDENT LOGIN
+# ============================================================================
+
+class StudentLoginWindow(QMainWindow):
+    """
+    Modern student login interface
+    NO default login - students must be added by admin first
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.student_data = None
+        self.server_online = False
+        self.init_ui()
+        self.check_server()
+
+    def init_ui(self):
+        """Initialize the login UI"""
+        self.setWindowTitle("Student Exam Portal - Login")
+        self.setFixedSize(900, 700)
+
+        # Main stylesheet
+        self.setStyleSheet("""
+            QMainWindow {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #667eea, stop:1 #764ba2
+                );
+            }
+        """)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(60, 40, 60, 40)
+        main_layout.setSpacing(30)
+
+        # Logo/Icon
+        logo_label = QLabel("🎓")
+        logo_label.setFont(QFont("Segoe UI Emoji", 80))
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(logo_label)
+
+        # Title
+        title = QLabel("Student Exam Portal")
+        title.setFont(QFont("Segoe UI", 32, QFont.Weight.Bold))
+        title.setStyleSheet("color: white; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(title)
+
+        # Subtitle
+        subtitle = QLabel("Secure Online Examination System")
+        subtitle.setFont(QFont("Segoe UI", 14))
+        subtitle.setStyleSheet("color: rgba(255, 255, 255, 0.95);")
+        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(subtitle)
+
+        # Server status
+        self.server_status = QLabel("🟡 Checking server...")
+        self.server_status.setFont(QFont("Segoe UI", 11))
+        self.server_status.setStyleSheet("color: rgba(255, 255, 255, 0.85); padding: 8px;")
+        self.server_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.server_status)
+
+        main_layout.addSpacing(15)
+
+        # Form Frame
+        form_frame = QFrame()
+        form_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-radius: 25px;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            }
+        """)
+        form_frame.setMinimumWidth(350)
+
+        form_layout = QVBoxLayout()
+        form_layout.setContentsMargins(50, 50, 50, 50)
+        form_layout.setSpacing(25)
+
+        # Username Field
+        username_label = QLabel("👤 Username")
+        username_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        username_label.setStyleSheet("color: #2c3e50;")
+        form_layout.addWidget(username_label)
+
+        self.username_input = QLineEdit()
+        self.username_input.setPlaceholderText("Enter your username (provided by admin)")
+        self.username_input.setFont(QFont("Segoe UI", 12))
+        self.username_input.setMinimumHeight(50)
+        self.username_input.setStyleSheet("""
+            QLineEdit {
+                padding: 14px 16px;
+                border: 2px solid #e0e0e0;
+                border-radius: 12px;
+                background-color: #f5f7fa;
+                color: #2c3e50;
+                font-size: 12px;
+                selection-background-color: #667eea;
+            }
+            QLineEdit:focus {
+                border: 2px solid #667eea;
+                background-color: #ffffff;
+            }
+            QLineEdit:hover {
+                border: 2px solid #667eea;
+            }
+        """)
+        form_layout.addWidget(self.username_input)
+
+        # Password Field
+        password_label = QLabel("🔒 Password")
+        password_label.setFont(QFont("Segoe UI", 12, QFont.Weight.Bold))
+        password_label.setStyleSheet("color: #2c3e50;")
+        form_layout.addWidget(password_label)
+
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("Enter your password")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setFont(QFont("Segoe UI", 12))
+        self.password_input.setMinimumHeight(50)
+        self.password_input.setStyleSheet("""
+            QLineEdit {
+                padding: 14px 16px;
+                border: 2px solid #e0e0e0;
+                border-radius: 12px;
+                background-color: #f5f7fa;
+                color: #2c3e50;
+                font-size: 12px;
+                selection-background-color: #667eea;
+            }
+            QLineEdit:focus {
+                border: 2px solid #667eea;
+                background-color: #ffffff;
+            }
+            QLineEdit:hover {
+                border: 2px solid #667eea;
+            }
+        """)
+        self.password_input.returnPressed.connect(self.login)
+        form_layout.addWidget(self.password_input)
+
+        form_layout.addSpacing(10)
+
+        # Remember Me Checkbox
+        remember_label = QLabel("💡 Credentials provided by your administrator")
+        remember_label.setFont(QFont("Segoe UI", 10))
+        remember_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        form_layout.addWidget(remember_label)
+
+        form_layout.addSpacing(15)
+
+        # Login Button
+        login_btn = QPushButton("🚀 Login to Exam")
+        login_btn.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        login_btn.setMinimumHeight(60)
+        login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        login_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #667eea, stop:1 #764ba2
+                );
+                color: white;
+                padding: 16px 30px;
+                border: none;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #5568d3, stop:1 #6a3f8f
+                );
+            }
+            QPushButton:pressed {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #4458b3, stop:1 #5a2f7f
+                );
+            }
+        """)
+        login_btn.clicked.connect(self.login)
+        form_layout.addWidget(login_btn)
+
+        form_frame.setLayout(form_layout)
+        main_layout.addWidget(form_frame, 0, Qt.AlignmentFlag.AlignCenter)
+
+        main_layout.addStretch()
+
+        # Footer
+        footer = QLabel("ℹ️ If you don't have login credentials, contact your administrator")
+        footer.setFont(QFont("Segoe UI", 10))
+        footer.setStyleSheet("color: rgba(255, 255, 255, 0.8);")
+        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(footer)
+
+        central_widget.setLayout(main_layout)
+
+    def check_server(self):
+        """Check if server is online"""
+        try:
+            response = requests.get(
+                f"{SERVER_URL}/api/health",
+                timeout=3
+            )
+            if response.status_code == 200:
+                self.server_online = True
+                self.server_status.setText("🟢 Server Online - Ready to login")
+                self.server_status.setStyleSheet("color: #2ecc71; padding: 8px; font-weight: bold;")
+            else:
+                self.server_online = False
+                self.server_status.setText("🔴 Server Offline")
+                self.server_status.setStyleSheet("color: #e74c3c; padding: 8px;")
+        except:
+            self.server_online = False
+            self.server_status.setText("🔴 Cannot reach server")
+            self.server_status.setStyleSheet("color: #e74c3c; padding: 8px;")
+
+    def login(self):
+        """
+        Authenticate student with central server
+        NO default login - must be added by admin
+        """
+        username = self.username_input.text().strip()
+        password = self.password_input.text().strip()
+
+        # Validation
+        if not username:
+            QMessageBox.warning(self, "Input Error", "Please enter your username")
+            self.username_input.setFocus()
+            return
+
+        if not password:
+            QMessageBox.warning(self, "Input Error", "Please enter your password")
+            self.password_input.setFocus()
+            return
+
+        if not self.server_online:
+            QMessageBox.critical(
+                self,
+                "Connection Error",
+                f"Cannot connect to server at {SERVER_URL}\n\n"
+                "Please check:\n"
+                "1. Server is running\n"
+                "2. Correct IP address in configuration\n"
+                "3. Network connectivity"
+            )
+            return
+
+        # Show loading message
+        self.username_input.setEnabled(False)
+        self.password_input.setEnabled(False)
+
+        try:
+            # Authenticate with server
+            response = requests.post(
+                f"{SERVER_URL}/api/login",
+                json={
+                    "username": username,
+                    "password": password
+                },
+                headers={"Authorization": API_TOKEN},
+                timeout=10
+            )
+
+            self.username_input.setEnabled(True)
+            self.password_input.setEnabled(True)
+
+            # Handle response
+            if response.status_code == 401:
+                QMessageBox.warning(
+                    self,
+                    "Authentication Failed",
+                    "Invalid username or password.\n\n"
+                    "Please check your credentials and try again.\n"
+                    "If you don't have an account, contact your administrator."
+                )
+                self.password_input.clear()
+                self.password_input.setFocus()
+                return
+
+            if response.status_code != 200:
+                QMessageBox.critical(
+                    self,
+                    "Server Error",
+                    f"Server error: {response.status_code}\n{response.text}"
+                )
+                return
+
+            # Parse response
+            data = response.json()
+
+            if not data.get('success'):
+                QMessageBox.warning(
+                    self,
+                    "Login Failed",
+                    data.get('message', 'Authentication failed')
+                )
+                self.password_input.clear()
+                self.password_input.setFocus()
+                return
+
+            # Get student data
+            student_data = data.get('student', {})
+            exams = data.get('exams', [])
+
+            # Check if exam is scheduled
+            if not exams:
+                QMessageBox.information(
+                    self,
+                    "No Exam Scheduled",
+                    f"Hello {student_data.get('name')}!\n\n"
+                    "No exam is currently scheduled for you.\n"
+                    "Please check back later or contact your administrator."
+                )
+                self.password_input.clear()
+                return
+
+            # Launch exam window
+            self.launch_exam(student_data, exams[0])
+
+        except requests.exceptions.Timeout:
+            self.username_input.setEnabled(True)
+            self.password_input.setEnabled(True)
+            QMessageBox.critical(
+                self,
+                "Connection Timeout",
+                f"Server not responding.\n\nURL: {SERVER_URL}"
+            )
+        except requests.exceptions.ConnectionError:
+            self.username_input.setEnabled(True)
+            self.password_input.setEnabled(True)
+            QMessageBox.critical(
+                self,
+                "Connection Error",
+                f"Cannot connect to server.\n\nURL: {SERVER_URL}\n\n"
+                "Make sure:\n"
+                "1. Server is running (python server.py)\n"
+                "2. Correct IP address is configured\n"
+                "3. Firewall allows port 5000"
+            )
+        except Exception as e:
+            self.username_input.setEnabled(True)
+            self.password_input.setEnabled(True)
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Login error: {str(e)}"
+            )
+
+    def launch_exam(self, student_data, exam_data):
+        """Launch exam window after successful login"""
+        try:
+            self.exam_window = ExamWindow(student_data, exam_data)
+            self.exam_window.show()
+            self.hide()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to start exam: {str(e)}")
+
+# ============================================================================
+# EXAM WINDOW
+# ============================================================================
+
+class ExamWindow(QMainWindow):
+    """Complete exam taking interface"""
+
+    def __init__(self, student_data, exam_data):
+        super().__init__()
+        self.student_data = student_data
+        self.exam_data = exam_data
+
+        # Store exam details
+        self.student_id = student_data.get('id')
+        self.student_name = student_data.get('name')
+        self.exam_id = exam_data.get('exam_id')
+        self.exam_name = exam_data.get('exam_name')
+
+        # Question tracking
+        self.questions = []
+        self.current_question_index = 0
+        self.answers = {}
+
+        # Security tracking
+        self.tab_switch_count = 0
+        self.camera_violations = 0
+
+        # Timer
+        self.start_time = datetime.now()
+        self.duration_minutes = exam_data.get('duration_minutes', 60)
+        self.time_limit = self.duration_minutes * 60
+        self.time_remaining = self.time_limit
+
+        self.init_ui()
+        self.load_questions()
+        self.start_timer()
+        self.display_question()
+
+        # Set fullscreen
+        self.showFullScreen()
+
+    def init_ui(self):
+        """Initialize exam interface"""
+        self.setWindowTitle(f"Exam: {self.exam_name}")
+
+        self.setStyleSheet("""
+            QMainWindow {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f8f9fa, stop:1 #e9ecef);
+            }
+        """)
+
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(40, 30, 40, 30)
+        main_layout.setSpacing(20)
+
+        # ===== HEADER =====
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 20px;
+                padding: 25px;
+            }
+        """)
+        header_layout = QHBoxLayout()
+
+        # Exam name
+        title = QLabel(f"📝 {self.exam_name}")
+        title.setFont(QFont("Segoe UI", 24, QFont.Weight.Bold))
+        title.setStyleSheet("color: white;")
+        header_layout.addWidget(title)
+
+        header_layout.addStretch()
+
+        # Timer
+        self.timer_label = QLabel(f"{self.duration_minutes:02d}:00")
+        self.timer_label.setFont(QFont("Segoe UI", 32, QFont.Weight.Bold))
+        self.timer_label.setStyleSheet("color: white;")
+        self.timer_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        header_layout.addWidget(self.timer_label)
+
+        header_layout.addSpacing(20)
+
+        # Student info
+        student_label = QLabel(f"Student: {self.student_name}")
+        student_label.setFont(QFont("Segoe UI", 12))
+        student_label.setStyleSheet("color: rgba(255,255,255,0.9);")
+        header_layout.addWidget(student_label, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+
+        header_frame.setLayout(header_layout)
+        main_layout.addWidget(header_frame)
+
+        # ===== PROGRESS BAR =====
+        progress_frame = QFrame()
+        progress_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-radius: 15px;
+                padding: 20px;
+            }
+        """)
+        progress_layout = QVBoxLayout()
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setMinimum(0)
+        self.progress_bar.setMaximum(100)
+        self.progress_bar.setValue(0)
+        self.progress_bar.setStyleSheet("""
+            QProgressBar {
+                border: none;
+                border-radius: 10px;
+                background-color: #e9ecef;
+                height: 24px;
+            }
+            QProgressBar::chunk {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                border-radius: 10px;
+            }
+        """)
+        progress_layout.addWidget(self.progress_bar)
+
+        self.status_label = QLabel("Question 0 of 0")
+        self.status_label.setFont(QFont("Segoe UI", 10, QFont.Weight.DemiBold))
+        self.status_label.setStyleSheet("color: #6c757d;")
+        progress_layout.addWidget(self.status_label)
+
+        progress_frame.setLayout(progress_layout)
+        main_layout.addWidget(progress_frame)
+
+        # ===== QUESTION CONTAINER =====
+        question_frame = QFrame()
+        question_frame.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border-radius: 20px;
+                padding: 40px;
+            }
+        """)
+        question_layout = QVBoxLayout()
+        question_layout.setSpacing(20)
+
+        # Question text
+        self.question_label = QLabel("Loading question...")
+        self.question_label.setFont(QFont("Segoe UI", 16, QFont.Weight.DemiBold))
+        self.question_label.setStyleSheet("color: #2c3e50; line-height: 1.6;")
+        self.question_label.setWordWrap(True)
+        question_layout.addWidget(self.question_label)
+
+        question_layout.addSpacing(15)
+
+        # Options
+        self.options_group = QButtonGroup()
+        self.option_buttons = []
+
+        for i in range(4):
+            option = QRadioButton()
+            option.setFont(QFont("Segoe UI", 14))
+            option.setStyleSheet("""
+                QRadioButton {
+                    color: #495057;
+                    padding: 15px;
+                    spacing: 15px;
+                }
+                QRadioButton:hover {
+                    color: #667eea;
+                }
+            """)
+            self.options_group.addButton(option, i)
+            self.option_buttons.append(option)
+            question_layout.addWidget(option)
+
+        question_frame.setLayout(question_layout)
+        main_layout.addWidget(question_frame, 1)
+
+        # ===== NAVIGATION BUTTONS =====
+        nav_frame = QFrame()
+        nav_frame.setStyleSheet("QFrame { background-color: transparent; }")
+        nav_layout = QHBoxLayout()
+        nav_layout.setSpacing(15)
+
+        # Previous button
+        self.prev_btn = QPushButton("⬅ Previous")
+        self.prev_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self.prev_btn.setMinimumHeight(55)
+        self.prev_btn.setStyleSheet("""
+            QPushButton {
+                background-color: white;
+                color: #667eea;
+                padding: 12px 25px;
+                border: 2px solid #667eea;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #667eea;
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #5568d3;
+            }
+            QPushButton:disabled {
+                color: #bdc3c7;
+                border: 2px solid #bdc3c7;
+                background-color: white;
+            }
+        """)
+        self.prev_btn.clicked.connect(self.previous_question)
+        nav_layout.addWidget(self.prev_btn)
+
+        nav_layout.addStretch()
+
+        # Next button
+        self.next_btn = QPushButton("Next ➜")
+        self.next_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self.next_btn.setMinimumHeight(55)
+        self.next_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #667eea, stop:1 #764ba2);
+                color: white;
+                padding: 12px 25px;
+                border: none;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #5568d3, stop:1 #6a3f8f);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4458b3, stop:1 #5a2f7f);
+            }
+        """)
+        self.next_btn.clicked.connect(self.next_question)
+        nav_layout.addWidget(self.next_btn)
+
+        # Submit button
+        self.submit_btn = QPushButton("✓ Submit Exam")
+        self.submit_btn.setFont(QFont("Segoe UI", 13, QFont.Weight.Bold))
+        self.submit_btn.setMinimumHeight(55)
+        self.submit_btn.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #11998e, stop:1 #38ef7d);
+                color: white;
+                padding: 12px 25px;
+                border: none;
+                border-radius: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0d7a70, stop:1 #2dc76a);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0a5d59, stop:1 #219852);
+            }
+        """)
+        self.submit_btn.clicked.connect(self.submit_exam)
+        self.submit_btn.hide()
+        nav_layout.addWidget(self.submit_btn)
+
+        nav_frame.setLayout(nav_layout)
+        main_layout.addWidget(nav_frame)
+
+        central_widget.setLayout(main_layout)
+
+    def load_questions(self):
+        """Fetch exam questions from server"""
+        try:
+            response = requests.get(
+                f"{SERVER_URL}/api/exam/{self.exam_id}",
+                headers={"Authorization": API_TOKEN},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                self.questions = data.get('questions', [])
+
+                if not self.questions:
+                    QMessageBox.critical(
+                        self,
+                        "Error",
+                        "No questions available for this exam. Please contact administrator."
+                    )
+                    self.close()
+                    return
+
+                # Initialize answer tracking
+                for i in range(len(self.questions)):
+                    self.answers[i] = None
+
+                self.update_progress()
+            else:
+                QMessageBox.critical(self, "Error", f"Server error: {response.status_code}")
+                self.close()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load questions: {str(e)}")
+            self.close()
+
+    def start_timer(self):
+        """Start exam countdown timer"""
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_timer)
+        self.timer.start(1000)
+
+    def update_timer(self):
+        """Update countdown timer"""
+        self.time_remaining -= 1
+
+        # Update display
+        minutes = self.time_remaining // 60
+        seconds = self.time_remaining % 60
+        self.timer_label.setText(f"{minutes:02d}:{seconds:02d}")
+
+        # Change color when time is running out
+        if self.time_remaining <= 300:  # Last 5 minutes
+            self.timer_label.setStyleSheet("color: #e74c3c; font-weight: bold;")
+
+        if self.time_remaining <= 0:
+            self.timer.stop()
+            QMessageBox.warning(
+                self,
+                "Time Expired",
+                "Time is up! Your exam will be submitted automatically."
+            )
+            self.submit_exam()
+
+    def display_question(self):
+        """Display current question"""
+        if self.current_question_index >= len(self.questions):
+            return
+
+        question = self.questions[self.current_question_index]
+
+        # Display question text
+        question_num = self.current_question_index + 1
+        question_text = question.get('question', 'No question text')
+        self.question_label.setText(f"Q{question_num}. {question_text}")
+
+        # Display options
+        options = [
+            question.get('option1', ''),
+            question.get('option2', ''),
+            question.get('option3', ''),
+            question.get('option4', '')
+        ]
+
+        for i, option in enumerate(options):
+            if i < len(self.option_buttons):
+                self.option_buttons[i].setText(option)
+
+        # Restore saved answer if exists
+        saved_answer = self.answers.get(self.current_question_index)
+        if saved_answer is not None and saved_answer < len(self.option_buttons):
+            self.option_buttons[saved_answer].setChecked(True)
+        else:
+            # Uncheck all
+            self.options_group.setExclusive(False)
+            for btn in self.option_buttons:
+                btn.setChecked(False)
+            self.options_group.setExclusive(True)
+
+        # Update navigation buttons
+        self.prev_btn.setEnabled(self.current_question_index > 0)
+
+        is_last_question = self.current_question_index == len(self.questions) - 1
+        self.next_btn.setVisible(not is_last_question)
+        self.submit_btn.setVisible(is_last_question)
+
+        self.update_progress()
+
+    def save_current_answer(self):
+        """Save currently selected answer"""
+        selected = self.options_group.checkedId()
+        if selected != -1:
+            self.answers[self.current_question_index] = selected
+
+    def next_question(self):
+        """Move to next question"""
+        self.save_current_answer()
+        if self.current_question_index < len(self.questions) - 1:
+            self.current_question_index += 1
+            self.display_question()
+
+    def previous_question(self):
+        """Move to previous question"""
+        self.save_current_answer()
+        if self.current_question_index > 0:
+            self.current_question_index -= 1
+            self.display_question()
+
+    def update_progress(self):
+        """Update progress bar and status"""
+        answered = sum(1 for ans in self.answers.values() if ans is not None)
+        total = len(self.questions)
+
+        progress_percent = int((answered / total * 100)) if total > 0 else 0
+        self.progress_bar.setValue(progress_percent)
+
+        self.status_label.setText(
+            f"Question {self.current_question_index + 1} of {total} | "
+            f"Answered: {answered}/{total} | Progress: {progress_percent}%"
+        )
+
+    def submit_exam(self):
+        """Submit exam to server"""
+        # Save last answer
+        self.save_current_answer()
+
+        # Check for unanswered questions
+        unanswered = sum(1 for ans in self.answers.values() if ans is None)
+
+        if unanswered > 0:
+            reply = QMessageBox.question(
+                self,
+                "Incomplete Exam",
+                f"You have {unanswered} unanswered question(s).\n\nAre you sure you want to submit?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # Stop timer
+        self.timer.stop()
+
+        # Calculate results
+        correct_count = 0
+        answers_data = []
+
+        for i, question in enumerate(self.questions):
+            student_answer = self.answers.get(i)
+            correct_answer = question.get('correct_answer', 0)
+            is_correct = (student_answer == correct_answer)
+
+            if is_correct:
+                correct_count += 1
+
+            answers_data.append({
+                'question_id': question.get('id'),
+                'selected_answer': student_answer,
+                'is_correct': 1 if is_correct else 0
+            })
+
+        # Calculate score
+        total_marks = self.exam_data.get('total_marks', len(self.questions))
+        percentage = (correct_count / total_marks * 100) if total_marks > 0 else 0
+
+        # Calculate time taken
+        time_taken_seconds = self.time_limit - self.time_remaining
+        time_taken = f"{time_taken_seconds // 60}m {time_taken_seconds % 60}s"
+
+        # Submit to server
+        try:
+            response = requests.post(
+                f"{SERVER_URL}/api/submit-exam",
+                json={
+                    "exam_id": self.exam_id,
+                    "student_id": self.student_id,
+                    "score": correct_count,
+                    "total_marks": total_marks,
+                    "percentage": percentage,
+                    "time_taken": time_taken,
+                    "tab_switches": self.tab_switch_count,
+                    "answers": answers_data
+                },
+                headers={"Authorization": API_TOKEN},
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                # Show result
+                passing_percentage = self.exam_data.get('passing_percentage', 40)
+                passed = percentage >= passing_percentage
+
+                result_message = (
+                    f"Exam Submitted Successfully!\n\n"
+                    f"Your Score: {correct_count}/{total_marks}\n"
+                    f"Percentage: {percentage:.1f}%\n"
+                    f"Time Taken: {time_taken}\n"
+                    f"Status: {'✓ PASSED' if passed else '✗ FAILED'}\n"
+                    f"Passing Score: {passing_percentage}%"
+                )
+
+                QMessageBox.information(self, "Exam Submitted", result_message)
+
+                # Close application
+                QApplication.quit()
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Submission Error",
+                    f"Failed to submit exam: {response.status_code}"
+                )
+
+        except requests.exceptions.Timeout:
+            QMessageBox.critical(
+                self,
+                "Connection Error",
+                "Server not responding. Please try again."
+            )
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"Failed to submit exam: {str(e)}"
+            )
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+if __name__ == "__main__":
+    print("\n" + "="*70)
+    print(" STUDENT EXAM PORTAL")
+    print("="*70)
+    print("\n✓ Server URL: " + SERVER_URL)
+    print("✓ NO default login - credentials must be provided by administrator")
+    print("\n" + "="*70 + "\n")
+
+    app = QApplication(sys.argv)
+
+    # Check for command line server URL override
+    if len(sys.argv) > 1:
+        SERVER_URL = sys.argv[1]
+        print(f"Using server URL: {SERVER_URL}")
+
+    login_window = StudentLoginWindow()
+    login_window.show()
+
+    sys.exit(app.exec())
+
+
+
+
+
+"""
+===================================================
+CENTRAL EXAMINATION SERVER - Complete Fixed Version
+SQLite Database Backend
+===================================================
 """
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import json
+import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
+from functools import wraps
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for cross-origin requests
+CORS(app)
 
-# File paths
-QUESTIONS_FILE = "server_questions.json"
-STUDENTS_FILE = "server_students.json"
-SECURITY_LOGS_FILE = "server_security_logs.json"
-RESULTS_FILE = "server_results.json"
-SERVER_CONFIG_FILE = "server_config.json"
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
 
-# Simple authentication token (in production, use proper JWT tokens)
-def verify_token(token):
-    """Verify authentication token"""
-    try:
-        with open(SERVER_CONFIG_FILE, 'r') as f:
-            config = json.load(f)
-            return token == config.get('api_token', 'secure_token_12345')
-    except:
-        return token == 'secure_token_12345'
+DATABASE = "exam_system_server.db"
+API_TOKEN = "secure_token_12345"
 
-def generate_api_token():
-    """Generate a secure API token"""
-    return hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()
+# ============================================================================
+# DATABASE FUNCTIONS
+# ============================================================================
 
-# Initialize server files
-def init_server_files():
-    """Initialize server data files"""
-    if not os.path.exists(SERVER_CONFIG_FILE):
-        config = {
-            'api_token': 'secure_token_12345',  # Change this in production
-            'server_name': 'Central Examination Server',
-            'version': '1.0'
-        }
-        with open(SERVER_CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=4)
-    
-    if not os.path.exists(QUESTIONS_FILE):
-        default_questions = [
-            {
-                "question": "What does HTML stand for?",
-                "options": ["Hyper Text Markup Language", "High Tech Modern Language", 
-                           "Home Tool Markup Language", "Hyperlinks and Text Markup Language"],
-                "answer": 0
-            },
-            {
-                "question": "Which programming language is known as the 'language of the web'?",
-                "options": ["Python", "Java", "JavaScript", "C++"],
-                "answer": 2
-            }
-        ]
-        with open(QUESTIONS_FILE, 'w') as f:
-            json.dump(default_questions, f, indent=4)
-    
-    if not os.path.exists(STUDENTS_FILE):
-        default_students = [
-            {
-                "name": "Demo Student",
-                "email": "student@example.com",
-                "username": "student",
-                "password": "exam123",
-                "student_id": "STU001"
-            }
-        ]
-        with open(STUDENTS_FILE, 'w') as f:
-            json.dump(default_students, f, indent=4)
-    
-    if not os.path.exists(SECURITY_LOGS_FILE):
-        with open(SECURITY_LOGS_FILE, 'w') as f:
-            json.dump([], f)
-    
-    if not os.path.exists(RESULTS_FILE):
-        with open(RESULTS_FILE, 'w') as f:
-            json.dump([], f)
+def get_db():
+    """Get database connection"""
+    conn = sqlite3.connect(DATABASE)
+    conn.row_factory = sqlite3.Row
+    return conn
 
-init_server_files()
+def init_database():
+    """Initialize server database with all required tables"""
+    conn = get_db()
+    cursor = conn.cursor()
 
-# API Endpoints
+    print("📊 Creating database tables...")
+
+    # Admins table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS admins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    print("✓ Admins table created")
+
+    # Students table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT,
+            roll_number TEXT,
+            group_name TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    print("✓ Students table created")
+
+    # Questions table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            question TEXT NOT NULL,
+            option1 TEXT NOT NULL,
+            option2 TEXT NOT NULL,
+            option3 TEXT NOT NULL,
+            option4 TEXT NOT NULL,
+            correct_answer INTEGER NOT NULL,
+            subject TEXT,
+            marks INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    print("✓ Questions table created")
+
+    # Exams table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS exams (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_name TEXT NOT NULL,
+            description TEXT,
+            start_datetime TIMESTAMP NOT NULL,
+            duration_minutes INTEGER NOT NULL,
+            passing_percentage INTEGER DEFAULT 40,
+            camera_required INTEGER DEFAULT 1,
+            tab_switch_limit INTEGER DEFAULT 3,
+            total_marks INTEGER DEFAULT 100,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    print("✓ Exams table created")
+
+    # Exam questions mapping
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS exam_questions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_id INTEGER NOT NULL,
+            question_id INTEGER NOT NULL,
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        )
+    """)
+    print("✓ Exam questions table created")
+
+    # Exam students mapping
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS exam_students (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_id INTEGER NOT NULL,
+            student_id INTEGER NOT NULL,
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+            FOREIGN KEY (student_id) REFERENCES students(id)
+        )
+    """)
+    print("✓ Exam students table created")
+
+    # Results table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            exam_id INTEGER NOT NULL,
+            student_id INTEGER NOT NULL,
+            score INTEGER NOT NULL,
+            total_marks INTEGER NOT NULL,
+            percentage REAL NOT NULL,
+            time_taken TEXT,
+            tab_switches INTEGER DEFAULT 0,
+            camera_violations INTEGER DEFAULT 0,
+            submission_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (exam_id) REFERENCES exams(id),
+            FOREIGN KEY (student_id) REFERENCES students(id)
+        )
+    """)
+    print("✓ Results table created")
+
+    # Student answers table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS student_answers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            result_id INTEGER NOT NULL,
+            question_id INTEGER NOT NULL,
+            selected_answer INTEGER,
+            is_correct INTEGER DEFAULT 0,
+            FOREIGN KEY (result_id) REFERENCES results(id),
+            FOREIGN KEY (question_id) REFERENCES questions(id)
+        )
+    """)
+    print("✓ Student answers table created")
+
+    # Security logs table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS security_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            student_id INTEGER NOT NULL,
+            exam_id INTEGER NOT NULL,
+            alert_type TEXT NOT NULL,
+            details TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (student_id) REFERENCES students(id),
+            FOREIGN KEY (exam_id) REFERENCES exams(id)
+        )
+    """)
+    print("✓ Security logs table created")
+
+    conn.commit()
+    conn.close()
+    print("\n✅ Database initialization complete!\n")
+
+# ============================================================================
+# AUTHENTICATION DECORATOR
+# ============================================================================
+
+def require_token(f):
+    """Decorator to verify API token"""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        token = request.headers.get('Authorization')
+        if token != API_TOKEN:
+            return jsonify({'success': False, 'message': 'Invalid API token'}), 401
+        return f(*args, **kwargs)
+    return decorated_function
+
+# ============================================================================
+# HEALTH CHECK & INIT
+# ============================================================================
 
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Health check endpoint"""
+    """Health check endpoint - NO token required"""
     return jsonify({
         'status': 'online',
         'message': 'Central Examination Server is running',
         'timestamp': datetime.now().isoformat()
     })
 
+# ============================================================================
+# AUTHENTICATION ENDPOINTS
+# ============================================================================
+
 @app.route('/api/login', methods=['POST'])
-def login():
+@require_token
+def student_login():
     """Student login endpoint"""
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(STUDENTS_FILE, 'r') as f:
-            students = json.load(f)
-        
-        for student in students:
-            if student['username'] == username and student['password'] == password:
-                return jsonify({
-                    'success': True,
-                    'student': {
-                        'name': student['name'],
-                        'email': student['email'],
-                        'username': student['username'],
-                        'student_id': student.get('student_id', 'N/A')
-                    }
-                })
-        
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/questions', methods=['GET'])
-def get_questions():
-    """Get exam questions"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(QUESTIONS_FILE, 'r') as f:
-            questions = json.load(f)
-        return jsonify({'success': True, 'questions': questions})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/security-log', methods=['POST'])
-def log_security_violation():
-    """Log security violations from clients"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
     try:
         data = request.json
-        log_entry = {
-            'username': data.get('username'),
-            'student_name': data.get('student_name'),
-            'violation_type': data.get('violation_type'),
-            'details': data.get('details'),
-            'timestamp': datetime.now().isoformat(),
-            'client_ip': request.remote_addr
-        }
-        
-        logs = []
-        if os.path.exists(SECURITY_LOGS_FILE):
-            with open(SECURITY_LOGS_FILE, 'r') as f:
-                logs = json.load(f)
-        
-        logs.append(log_entry)
-        
-        with open(SECURITY_LOGS_FILE, 'w') as f:
-            json.dump(logs, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Violation logged'})
+        username = data.get('username')
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'success': False, 'message': 'Missing credentials'}), 400
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Find student
+        cursor.execute(
+            "SELECT id, name, username, email, roll_number, group_name FROM students WHERE username = ? AND password = ?",
+            (username, password)
+        )
+        student = cursor.fetchone()
+
+        if not student:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+        student_id = student['id']
+
+        # Get scheduled exams
+        cursor.execute("""
+            SELECT DISTINCT e.id, e.exam_name, e.description, e.start_datetime,
+                   e.duration_minutes, e.passing_percentage, e.camera_required,
+                   e.tab_switch_limit, e.total_marks
+            FROM exams e
+            INNER JOIN exam_students es ON e.id = es.exam_id
+            WHERE es.student_id = ?
+            ORDER BY e.start_datetime DESC
+        """, (student_id,))
+
+        exams = cursor.fetchall()
+        scheduled_exams = [dict(exam) for exam in exams]
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'student': dict(student),
+            'exams': scheduled_exams,
+            'has_scheduled_exam': len(scheduled_exams) > 0
+        })
+
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-@app.route('/api/security-logs', methods=['GET'])
-def get_security_logs():
-    """Get all security logs (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(SECURITY_LOGS_FILE, 'r') as f:
-            logs = json.load(f)
-        return jsonify({'success': True, 'logs': logs})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/submit-exam', methods=['POST'])
-def submit_exam():
-    """Submit exam results"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
+@app.route('/api/admin/login', methods=['POST'])
+@require_token
+def admin_login():
+    """Admin login endpoint"""
     try:
         data = request.json
-        result_entry = {
-            'username': data.get('username'),
-            'student_name': data.get('student_name'),
-            'score': data.get('score'),
-            'total_questions': data.get('total_questions'),
-            'percentage': data.get('percentage'),
-            'time_taken': data.get('time_taken'),
-            'tab_switch_count': data.get('tab_switch_count'),
-            'camera_violation_count': data.get('camera_violation_count'),
-            'timestamp': datetime.now().isoformat(),
-            'client_ip': request.remote_addr
-        }
-        
-        results = []
-        if os.path.exists(RESULTS_FILE):
-            with open(RESULTS_FILE, 'r') as f:
-                results = json.load(f)
-        
-        results.append(result_entry)
-        
-        with open(RESULTS_FILE, 'w') as f:
-            json.dump(results, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Exam submitted successfully'})
+        username = data.get('username')
+        password = data.get('password')
+
+        if not username or not password:
+            return jsonify({'success': False, 'message': 'Missing credentials'}), 400
+
+        password_hash = hashlib.sha256(password.encode()).hexdigest()
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, username, email FROM admins WHERE username = ? AND password = ?",
+            (username, password_hash)
+        )
+        admin = cursor.fetchone()
+        conn.close()
+
+        if not admin:
+            return jsonify({'success': False, 'message': 'Invalid admin credentials'}), 401
+
+        return jsonify({
+            'success': True,
+            'admin': dict(admin)
+        })
+
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
-@app.route('/api/results', methods=['GET'])
-def get_results():
-    """Get all exam results (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(RESULTS_FILE, 'r') as f:
-            results = json.load(f)
-        return jsonify({'success': True, 'results': results})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+# ============================================================================
+# STUDENT ENDPOINTS
+# ============================================================================
 
 @app.route('/api/students', methods=['GET'])
+@require_token
 def get_students():
-    """Get all students (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
+    """Get all students"""
     try:
-        with open(STUDENTS_FILE, 'r') as f:
-            students = json.load(f)
-        # Remove passwords from response
-        safe_students = [{'name': s['name'], 'email': s['email'], 
-                         'username': s['username'], 'student_id': s.get('student_id', 'N/A')} 
-                        for s in students]
-        return jsonify({'success': True, 'students': safe_students})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        conn = get_db()
+        cursor = conn.cursor()
 
-@app.route('/api/admin/add-question', methods=['POST'])
-def add_question():
-    """Add a new question (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        data = request.json
-        
-        with open(QUESTIONS_FILE, 'r') as f:
-            questions = json.load(f)
-        
-        questions.append(data)
-        
-        with open(QUESTIONS_FILE, 'w') as f:
-            json.dump(questions, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Question added successfully'})
+        cursor.execute("SELECT id, name, username, email, roll_number, group_name, created_at FROM students ORDER BY created_at DESC")
+        students = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        return jsonify({'success': True, 'students': students})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
 @app.route('/api/admin/add-student', methods=['POST'])
+@require_token
 def add_student():
-    """Add a new student (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
+    """Add new student"""
     try:
         data = request.json
-        
-        with open(STUDENTS_FILE, 'r') as f:
-            students = json.load(f)
-        
-        # Check for duplicate username
-        if any(s['username'] == data.get('username') for s in students):
+        name = data.get('name')
+        username = data.get('username')
+        password = data.get('password')
+        email = data.get('email')
+        roll_number = data.get('roll_number')
+        group_name = data.get('group_name')
+
+        if not all([name, username, password]):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        try:
+            cursor.execute(
+                """INSERT INTO students (name, username, password, email, roll_number, group_name)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (name, username, password, email, roll_number, group_name)
+            )
+            conn.commit()
+            conn.close()
+
+            return jsonify({'success': True, 'message': 'Student added successfully'})
+        except sqlite3.IntegrityError:
+            conn.close()
             return jsonify({'success': False, 'message': 'Username already exists'}), 400
-        
-        students.append(data)
-        
-        with open(STUDENTS_FILE, 'w') as f:
-            json.dump(students, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Student added successfully'})
+
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@app.route('/api/admin/delete-student/<int:student_id>', methods=['DELETE'])
+@require_token
+def delete_student(student_id):
+    """Delete student"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM students WHERE id = ?", (student_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Student deleted'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# QUESTION ENDPOINTS
+# ============================================================================
+
+@app.route('/api/questions', methods=['GET'])
+@require_token
+def get_questions():
+    """Get all questions"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, question, option1, option2, option3, option4,
+                   correct_answer, subject, marks FROM questions ORDER BY created_at DESC
+        """)
+        questions = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        return jsonify({'success': True, 'questions': questions})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/admin/add-question', methods=['POST'])
+@require_token
+def add_question():
+    """Add new question"""
+    try:
+        data = request.json
+        question = data.get('question')
+        option1 = data.get('option1')
+        option2 = data.get('option2')
+        option3 = data.get('option3')
+        option4 = data.get('option4')
+        correct_answer = data.get('correct_answer')
+        subject = data.get('subject')
+        marks = data.get('marks', 1)
+
+        if not all([question, option1, option2, option3, option4, correct_answer is not None]):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """INSERT INTO questions (question, option1, option2, option3, option4, 
+                                       correct_answer, subject, marks)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (question, option1, option2, option3, option4, correct_answer, subject, marks)
+        )
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True, 'message': 'Question added successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/admin/delete-question/<int:question_id>', methods=['DELETE'])
+@require_token
+def delete_question(question_id):
+    """Delete question"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM questions WHERE id = ?", (question_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Question deleted'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# EXAM ENDPOINTS
+# ============================================================================
+
+@app.route('/api/exams', methods=['GET'])
+@require_token
+def get_exams():
+    """Get all exams"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT id, exam_name, description, start_datetime, duration_minutes,
+                   passing_percentage, camera_required, tab_switch_limit, total_marks 
+            FROM exams ORDER BY start_datetime DESC
+        """)
+        exams = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        return jsonify({'success': True, 'exams': exams})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/admin/add-exam', methods=['POST'])
+@require_token
+def add_exam():
+    """Add new exam"""
+    try:
+        data = request.json
+        exam_name = data.get('exam_name')
+        description = data.get('description')
+        start_datetime = data.get('start_datetime')
+        duration_minutes = data.get('duration_minutes')
+        passing_percentage = data.get('passing_percentage', 40)
+        camera_required = data.get('camera_required', 1)
+        tab_switch_limit = data.get('tab_switch_limit', 3)
+        total_marks = data.get('total_marks', 100)
+        question_ids = data.get('question_ids', [])
+        student_ids = data.get('student_ids', [])
+
+        if not all([exam_name, start_datetime, duration_minutes]):
+            return jsonify({'success': False, 'message': 'Missing required fields'}), 400
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Insert exam
+        cursor.execute(
+            """INSERT INTO exams (exam_name, description, start_datetime, duration_minutes,
+                                   passing_percentage, camera_required, tab_switch_limit, total_marks)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (exam_name, description, start_datetime, duration_minutes,
+             passing_percentage, camera_required, tab_switch_limit, total_marks)
+        )
+        exam_id = cursor.lastrowid
+
+        # Add questions
+        for question_id in question_ids:
+            cursor.execute(
+                "INSERT INTO exam_questions (exam_id, question_id) VALUES (?, ?)",
+                (exam_id, question_id)
+            )
+
+        # Add students
+        for student_id in student_ids:
+            cursor.execute(
+                "INSERT INTO exam_students (exam_id, student_id) VALUES (?, ?)",
+                (exam_id, student_id)
+            )
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True, 'message': 'Exam created successfully', 'exam_id': exam_id})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/exam/<int:exam_id>', methods=['GET'])
+@require_token
+def get_exam_detail(exam_id):
+    """Get exam with questions"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Get exam
+        cursor.execute("""
+            SELECT id, exam_name, description, start_datetime, duration_minutes,
+                   passing_percentage, camera_required, tab_switch_limit, total_marks FROM exams
+            WHERE id = ?
+        """, (exam_id,))
+        exam = cursor.fetchone()
+
+        if not exam:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Exam not found'}), 404
+
+        # Get questions
+        cursor.execute("""
+            SELECT q.id, q.question, q.option1, q.option2, q.option3, q.option4,
+                   q.correct_answer, q.subject, q.marks
+            FROM questions q
+            INNER JOIN exam_questions eq ON q.id = eq.question_id
+            WHERE eq.exam_id = ?
+        """, (exam_id,))
+        questions = [dict(row) for row in cursor.fetchall()]
+
+        conn.close()
+
+        return jsonify({
+            'success': True,
+            'exam': dict(exam),
+            'questions': questions
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/admin/delete-exam/<int:exam_id>', methods=['DELETE'])
+@require_token
+def delete_exam(exam_id):
+    """Delete exam"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM exams WHERE id = ?", (exam_id,))
+        conn.commit()
+        conn.close()
+        return jsonify({'success': True, 'message': 'Exam deleted'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# RESULTS ENDPOINTS
+# ============================================================================
+
+@app.route('/api/results', methods=['GET'])
+@require_token
+def get_results():
+    """Get all exam results"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT r.id, e.exam_name, s.name, r.score, r.total_marks, r.percentage,
+                   r.time_taken, r.tab_switches, r.submission_time
+            FROM results r
+            INNER JOIN exams e ON r.exam_id = e.id
+            INNER JOIN students s ON r.student_id = s.id
+            ORDER BY r.submission_time DESC
+        """)
+        results = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        return jsonify({'success': True, 'results': results})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/submit-exam', methods=['POST'])
+@require_token
+def submit_exam():
+    """Submit exam results"""
+    try:
+        data = request.json
+        exam_id = data.get('exam_id')
+        student_id = data.get('student_id')
+        score = data.get('score')
+        total_marks = data.get('total_marks')
+        percentage = data.get('percentage')
+        time_taken = data.get('time_taken')
+        tab_switches = data.get('tab_switches', 0)
+        answers_data = data.get('answers', [])
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        # Insert result
+        cursor.execute(
+            """INSERT INTO results (exam_id, student_id, score, total_marks, percentage, time_taken, tab_switches)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (exam_id, student_id, score, total_marks, percentage, time_taken, tab_switches)
+        )
+        result_id = cursor.lastrowid
+
+        # Insert answers
+        for answer in answers_data:
+            cursor.execute(
+                """INSERT INTO student_answers (result_id, question_id, selected_answer, is_correct)
+                   VALUES (?, ?, ?, ?)""",
+                (result_id, answer.get('question_id'), answer.get('selected_answer'), answer.get('is_correct'))
+            )
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True, 'message': 'Exam submitted successfully'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# SECURITY ENDPOINTS
+# ============================================================================
+
+@app.route('/api/security-logs', methods=['GET'])
+@require_token
+def get_security_logs():
+    """Get security logs"""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT sl.id, s.name, e.exam_name, sl.alert_type, sl.details, sl.timestamp
+            FROM security_logs sl
+            INNER JOIN students s ON sl.student_id = s.id
+            INNER JOIN exams e ON sl.exam_id = e.id
+            ORDER BY sl.timestamp DESC
+        """)
+        logs = [dict(row) for row in cursor.fetchall()]
+        conn.close()
+
+        return jsonify({'success': True, 'logs': logs})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+@app.route('/api/security-log', methods=['POST'])
+@require_token
+def log_security_violation():
+    """Log security violation"""
+    try:
+        data = request.json
+        student_id = data.get('student_id')
+        exam_id = data.get('exam_id')
+        alert_type = data.get('alert_type')
+        details = data.get('details')
+
+        conn = get_db()
+        cursor = conn.cursor()
+
+        cursor.execute(
+            """INSERT INTO security_logs (student_id, exam_id, alert_type, details)
+               VALUES (?, ?, ?, ?)""",
+            (student_id, exam_id, alert_type, details)
+        )
+
+        conn.commit()
+        conn.close()
+
+        return jsonify({'success': True, 'message': 'Security violation logged'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+# ============================================================================
+# ERROR HANDLERS
+# ============================================================================
+
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({'success': False, 'message': 'Endpoint not found'}), 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({'success': False, 'message': 'Method not allowed'}), 405
+
+@app.errorhandler(500)
+def internal_error(error):
+    return jsonify({'success': False, 'message': 'Internal server error'}), 500
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
 if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("  CENTRAL EXAMINATION SERVER")
-    print("="*60)
-    print("\n📡 Server starting...")
-    print("🔐 API Token: secure_token_12345 (Change in server_config.json)")
-    print("🌐 Server will be accessible at: http://YOUR_IP:5000")
-    print("\nTo access from other computers:")
-    print("  1. Find your IP address (ipconfig/ifconfig)")
-    print("  2. Update client applications with your IP")
-    print("  3. Ensure port 5000 is open in firewall")
-    print("\n" + "="*60 + "\n")
-    
-    # Run on all interfaces to be accessible from network
+    print("\n" + "="*70)
+    print(" 🚀 CENTRAL EXAMINATION SERVER - Database Version")
+    print("="*70)
+
+    print("\n📡 Initializing database...")
+    init_database()
+
+    print("🔐 API Token: secure_token_12345")
+    print("🌐 Server starting on: http://0.0.0.0:5000")
+    print("\n📝 Endpoints Available:")
+    print("  ✓ /api/health - Health check (no auth needed)")
+    print("  ✓ /api/login - Student login")
+    print("  ✓ /api/admin/login - Admin login")
+    print("  ✓ /api/students - Get all students")
+    print("  ✓ /api/admin/add-student - Add student")
+    print("  ✓ /api/questions - Get all questions")
+    print("  ✓ /api/admin/add-question - Add question")
+    print("  ✓ /api/exams - Get all exams")
+    print("  ✓ /api/admin/add-exam - Create exam")
+    print("  ✓ /api/exam/<id> - Get exam details")
+    print("  ✓ /api/results - Get all results")
+    print("  ✓ /api/submit-exam - Submit exam")
+    print("  ✓ /api/security-logs - View security logs")
+    print("\n⚠️  To access from other computers:")
+    print("   Change http://localhost:5000 to http://<YOUR_IP>:5000")
+    print("\n" + "="*70 + "\n")
+
     app.run(host='0.0.0.0', port=5000, debug=True)
-
-"""
-Enhanced Admin Panel with Test Scheduling and Email Notifications
-Features: Schedule tests, set marks per question, email notifications (SMTP & Power Automate), time-based access
-"""
-
-import sys
-import json
-import os
-import smtplib
-import requests
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QTabWidget,
-                             QTableWidget, QTableWidgetItem, QMessageBox,
-                             QDialog, QLineEdit, QTextEdit, QComboBox,
-                             QScrollArea, QFrame, QSpinBox, QCheckBox,
-                             QListWidget, QListWidgetItem, QGroupBox,
-                             QDateTimeEdit, QDoubleSpinBox, QProgressDialog,
-                             QRadioButton, QButtonGroup)
-from PyQt6.QtWidgets import QLabel, QHBoxLayout
-from PyQt6.QtSvgWidgets import QSvgWidget
-from PyQt6.QtCore import Qt, QTimer, QDateTime
-from PyQt6.QtGui import QFont, QColor
-
-# File paths
-STUDENTS_FILE = "students.json"
-QUESTIONS_FILE = "questions.json"
-RESULTS_FILE = "results.json"
-SECURITY_LOGS_FILE = "security_logs.json"
-EXAM_CONFIG_FILE = "exam_config.json"
-RULES_FILE = "rules.json"
-CHEATING_ALERTS_FILE = "cheating_alerts.json"
-SCHEDULED_EXAMS_FILE = "scheduled_exams.json"
-EMAIL_CONFIG_FILE = "email_config.json"
-
-
-class EmailConfigDialog(QDialog):
-    """Configure email settings for notifications (SMTP & Power Automate)"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.init_ui()
-        self.load_config()
     
-    def init_ui(self):
-        self.setWindowTitle("Email Configuration")
-        self.setGeometry(200, 200, 550, 600)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        title = QLabel("📧 Email Configuration")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(title)
-        
-        # Email Method Selection
-        method_group = QGroupBox("Select Email Method")
-        method_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #3498db;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-            }
-        """)
-        method_layout = QVBoxLayout()
-        
-        self.button_group = QButtonGroup()
-        
-        self.smtp_radio = QRadioButton("📨 SMTP (Gmail, Outlook, etc.)")
-        self.smtp_radio.setChecked(True)
-        self.smtp_radio.toggled.connect(self.toggle_email_method)
-        self.button_group.addButton(self.smtp_radio)
-        method_layout.addWidget(self.smtp_radio)
-        
-        self.power_automate_radio = QRadioButton("⚡ Microsoft Power Automate")
-        self.power_automate_radio.toggled.connect(self.toggle_email_method)
-        self.button_group.addButton(self.power_automate_radio)
-        method_layout.addWidget(self.power_automate_radio)
-        
-        method_group.setLayout(method_layout)
-        layout.addWidget(method_group)
-        
-        # SMTP Configuration
-        self.smtp_group = QGroupBox("📨 SMTP Configuration")
-        self.smtp_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #27ae60;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-            }
-        """)
-        smtp_layout = QVBoxLayout()
-        
-        smtp_layout.addWidget(QLabel("SMTP Server:"))
-        self.smtp_input = QLineEdit()
-        self.smtp_input.setPlaceholderText("smtp.gmail.com")
-        self.smtp_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        smtp_layout.addWidget(self.smtp_input)
-        
-        smtp_layout.addWidget(QLabel("SMTP Port:"))
-        self.port_input = QSpinBox()
-        self.port_input.setRange(1, 65535)
-        self.port_input.setValue(587)
-        self.port_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        smtp_layout.addWidget(self.port_input)
-        
-        smtp_layout.addWidget(QLabel("Admin Email:"))
-        self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("admin@example.com")
-        self.email_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        smtp_layout.addWidget(self.email_input)
-        
-        smtp_layout.addWidget(QLabel("Email Password:"))
-        self.password_input = QLineEdit()
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setPlaceholderText("App password for Gmail")
-        self.password_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        smtp_layout.addWidget(self.password_input)
-        
-        smtp_info = QLabel("ℹ️ For Gmail: Enable 2FA and use App Password\nGo to: Google Account → Security → App Passwords")
-        smtp_info.setStyleSheet("color: #7f8c8d; background-color: #f8f9fa; padding: 10px; border-radius: 5px;")
-        smtp_info.setWordWrap(True)
-        smtp_layout.addWidget(smtp_info)
-        
-        self.smtp_group.setLayout(smtp_layout)
-        layout.addWidget(self.smtp_group)
-        
-        # Power Automate Configuration
-        self.power_automate_group = QGroupBox("⚡ Microsoft Power Automate Configuration")
-        self.power_automate_group.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #9b59b6;
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-            }
-        """)
-        pa_layout = QVBoxLayout()
-        
-        pa_layout.addWidget(QLabel("Power Automate Webhook URL:"))
-        self.webhook_input = QLineEdit()
-        self.webhook_input.setPlaceholderText("https://prod-xx.xx.logic.azure.com:443/workflows/...")
-        self.webhook_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        pa_layout.addWidget(self.webhook_input)
-        
-        pa_info = QLabel("""ℹ️ Setup Instructions:
-1. Go to Power Automate (flow.microsoft.com)
-2. Create a new flow → "Instant cloud flow"
-3. Choose trigger: "When an HTTP request is received"
-4. Add action: "Send an email (V2)" from Office 365 Outlook
-5. Configure email template with dynamic content
-6. Save and copy the HTTP POST URL
-7. Paste the URL above""")
-        pa_info.setStyleSheet("color: #7f8c8d; background-color: #f8f9fa; padding: 10px; border-radius: 5px;")
-        pa_info.setWordWrap(True)
-        pa_layout.addWidget(pa_info)
-        
-        self.power_automate_group.setLayout(pa_layout)
-        layout.addWidget(self.power_automate_group)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        
-        save_btn = QPushButton("💾 Save Configuration")
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 12px;
-                border: none;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        save_btn.clicked.connect(self.save_config)
-        btn_layout.addWidget(save_btn)
-        
-        test_btn = QPushButton("🔧 Test Email")
-        test_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 12px;
-                border: none;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        test_btn.clicked.connect(self.test_email)
-        btn_layout.addWidget(test_btn)
-        
-        layout.addLayout(btn_layout)
-        self.setLayout(layout)
-        
-        # Initial toggle
-        self.toggle_email_method()
-    
-    def toggle_email_method(self):
-        """Toggle between SMTP and Power Automate"""
-        if self.smtp_radio.isChecked():
-            self.smtp_group.setVisible(True)
-            self.power_automate_group.setVisible(False)
-        else:
-            self.smtp_group.setVisible(False)
-            self.power_automate_group.setVisible(True)
-    
-    def load_config(self):
-        """Load existing email config"""
-        try:
-            if os.path.exists(EMAIL_CONFIG_FILE):
-                with open(EMAIL_CONFIG_FILE, 'r') as f:
-                    config = json.load(f)
-                
-                method = config.get('method', 'smtp')
-                if method == 'power_automate':
-                    self.power_automate_radio.setChecked(True)
-                    self.webhook_input.setText(config.get('webhook_url', ''))
-                else:
-                    self.smtp_radio.setChecked(True)
-                    self.smtp_input.setText(config.get('smtp_server', 'smtp.gmail.com'))
-                    self.port_input.setValue(config.get('smtp_port', 587))
-                    self.email_input.setText(config.get('admin_email', ''))
-                    self.password_input.setText(config.get('email_password', ''))
-                
-                self.toggle_email_method()
-        except:
-            pass
-    
-    def save_config(self):
-        """Save email configuration"""
-        try:
-            config = {}
-            
-            if self.smtp_radio.isChecked():
-                config = {
-                    'method': 'smtp',
-                    'smtp_server': self.smtp_input.text().strip(),
-                    'smtp_port': self.port_input.value(),
-                    'admin_email': self.email_input.text().strip(),
-                    'email_password': self.password_input.text().strip()
-                }
-                
-                if not all([config['smtp_server'], config['admin_email'], config['email_password']]):
-                    QMessageBox.warning(self, "Error", "All SMTP fields are required!")
-                    return
-            else:
-                config = {
-                    'method': 'power_automate',
-                    'webhook_url': self.webhook_input.text().strip()
-                }
-                
-                if not config['webhook_url']:
-                    QMessageBox.warning(self, "Error", "Webhook URL is required!")
-                    return
-                
-                if not config['webhook_url'].startswith('http'):
-                    QMessageBox.warning(self, "Error", "Please enter a valid webhook URL!")
-                    return
-            
-            with open(EMAIL_CONFIG_FILE, 'w') as f:
-                json.dump(config, f, indent=4)
-            
-            QMessageBox.information(self, "Success", "Email configuration saved successfully!")
-            self.accept()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save: {str(e)}")
-    
-    def test_email(self):
-        """Test email configuration"""
-        try:
-            if self.smtp_radio.isChecked():
-                self.test_smtp_email()
-            else:
-                self.test_power_automate()
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to send test email:\n{str(e)}")
-    
-    def test_smtp_email(self):
-        """Test SMTP email"""
-        config = {
-            'smtp_server': self.smtp_input.text().strip(),
-            'smtp_port': self.port_input.value(),
-            'admin_email': self.email_input.text().strip(),
-            'email_password': self.password_input.text().strip()
-        }
-        
-        # Try to send test email
-        msg = MIMEMultipart()
-        msg['From'] = config['admin_email']
-        msg['To'] = config['admin_email']
-        msg['Subject'] = "Test Email - Exam System"
-        
-        body = "This is a test email from the Examination Management System using SMTP."
-        msg.attach(MIMEText(body, 'plain'))
-        
-        with smtplib.SMTP(config['smtp_server'], config['smtp_port']) as server:
-            server.starttls()
-            server.login(config['admin_email'], config['email_password'])
-            server.send_message(msg)
-        
-        QMessageBox.information(self, "Success", "Test SMTP email sent successfully!")
-    
-    def test_power_automate(self):
-        """Test Power Automate webhook"""
-        webhook_url = self.webhook_input.text().strip()
-        
-        if not webhook_url:
-            QMessageBox.warning(self, "Error", "Please enter webhook URL!")
-            return
-        
-        # Send test payload
-        payload = {
-            "student_name": "Test Student",
-            "student_email": "test@example.com",
-            "student_username": "test_user",
-            "student_password": "test_pass",
-            "exam_name": "Test Exam",
-            "exam_description": "This is a test exam notification",
-            "start_datetime": datetime.now().strftime('%Y-%m-%d %I:%M %p'),
-            "duration_minutes": 60,
-            "total_questions": 10,
-            "total_marks": 10,
-            "passing_percentage": 40,
-            "camera_required": True
-        }
-        
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            headers={'Content-Type': 'application/json'},
-            timeout=30
-        )
-        
-        if response.status_code in [200, 202]:
-            QMessageBox.information(self, "Success", 
-                f"Test notification sent successfully!\n\n"
-                f"Status Code: {response.status_code}\n"
-                f"Check your email inbox for the test email.")
-        else:
-            QMessageBox.warning(self, "Warning", 
-                f"Request sent but received status code: {response.status_code}\n"
-                f"Response: {response.text[:200]}")
-
-
-class ScheduleExamDialog(QDialog):
-    """Dialog to schedule a new exam"""
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.selected_questions = []
-        self.init_ui()
-    
-    def init_ui(self):
-        self.setWindowTitle("Schedule New Exam")
-        self.setGeometry(100, 100, 800, 700)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(15)
-        
-        # Scroll area
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setStyleSheet("border: none;")
-        
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout()
-        scroll_layout.setSpacing(20)
-        
-        # Title
-        title = QLabel("📅 Schedule New Exam")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        scroll_layout.addWidget(title)
-        
-        # Exam Name
-        name_group = QGroupBox("📝 Exam Details")
-        name_group.setStyleSheet(self.get_group_style("#3498db"))
-        name_layout = QVBoxLayout()
-        
-        name_layout.addWidget(QLabel("Exam Name/Title:"))
-        self.exam_name_input = QLineEdit()
-        self.exam_name_input.setPlaceholderText("e.g., Mid-Term Mathematics Exam")
-        self.exam_name_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        name_layout.addWidget(self.exam_name_input)
-        
-        name_layout.addWidget(QLabel("Exam Description:"))
-        self.exam_desc_input = QTextEdit()
-        self.exam_desc_input.setPlaceholderText("Brief description of the exam")
-        self.exam_desc_input.setMaximumHeight(80)
-        self.exam_desc_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        name_layout.addWidget(self.exam_desc_input)
-        
-        name_group.setLayout(name_layout)
-        scroll_layout.addWidget(name_group)
-        
-        # Student Group Selection
-        group_box = QGroupBox("👥 Select Student Group")
-        group_box.setStyleSheet(self.get_group_style("#27ae60"))
-        group_layout = QVBoxLayout()
-        
-        self.group_combo = QComboBox()
-        self.group_combo.addItems(["Group A", "Group B", "Group C", "All Students"])
-        self.group_combo.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        group_layout.addWidget(self.group_combo)
-        
-        # Show student count
-        self.student_count_label = QLabel("Students in this group: Calculating...")
-        self.student_count_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
-        group_layout.addWidget(self.student_count_label)
-        self.group_combo.currentTextChanged.connect(self.update_student_count)
-        
-        group_box.setLayout(group_layout)
-        scroll_layout.addWidget(group_box)
-        
-        # Date and Time
-        datetime_group = QGroupBox("⏰ Schedule Date & Time")
-        datetime_group.setStyleSheet(self.get_group_style("#e67e22"))
-        datetime_layout = QVBoxLayout()
-        
-        datetime_layout.addWidget(QLabel("Start Date & Time:"))
-        self.start_datetime = QDateTimeEdit()
-        self.start_datetime.setCalendarPopup(True)
-        self.start_datetime.setDateTime(QDateTime.currentDateTime().addDays(1))
-        self.start_datetime.setDisplayFormat("yyyy-MM-dd hh:mm AP")
-        self.start_datetime.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        datetime_layout.addWidget(self.start_datetime)
-        
-        datetime_layout.addWidget(QLabel("Duration (minutes):"))
-        self.duration_spin = QSpinBox()
-        self.duration_spin.setRange(10, 300)
-        self.duration_spin.setValue(60)
-        self.duration_spin.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        datetime_layout.addWidget(self.duration_spin)
-        
-        # Calculate end time
-        self.end_time_label = QLabel("End Time: (will be calculated)")
-        self.end_time_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
-        datetime_layout.addWidget(self.end_time_label)
-        self.duration_spin.valueChanged.connect(self.update_end_time)
-        self.start_datetime.dateTimeChanged.connect(self.update_end_time)
-        
-        datetime_group.setLayout(datetime_layout)
-        scroll_layout.addWidget(datetime_group)
-        
-        # Question Selection
-        questions_group = QGroupBox("❓ Select Questions")
-        questions_group.setStyleSheet(self.get_group_style("#9b59b6"))
-        questions_layout = QVBoxLayout()
-        
-        # Load questions button
-        load_questions_btn = QPushButton("📋 Load & Select Questions")
-        load_questions_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 10px;
-                border: none;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        load_questions_btn.clicked.connect(self.select_questions)
-        questions_layout.addWidget(load_questions_btn)
-        
-        self.selected_questions_label = QLabel("Selected Questions: 0")
-        self.selected_questions_label.setStyleSheet("color: #7f8c8d; padding: 5px; font-weight: bold;")
-        questions_layout.addWidget(self.selected_questions_label)
-        
-        questions_group.setLayout(questions_layout)
-        scroll_layout.addWidget(questions_group)
-        
-        # Marks Configuration
-        marks_group = QGroupBox("📊 Marks Configuration")
-        marks_group.setStyleSheet(self.get_group_style("#e74c3c"))
-        marks_layout = QVBoxLayout()
-        
-        marks_layout.addWidget(QLabel("Marks per Question:"))
-        self.marks_per_question = QDoubleSpinBox()
-        self.marks_per_question.setRange(0.5, 100)
-        self.marks_per_question.setValue(1.0)
-        self.marks_per_question.setSingleStep(0.5)
-        self.marks_per_question.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        marks_layout.addWidget(self.marks_per_question)
-        
-        self.total_marks_label = QLabel("Total Marks: 0")
-        self.total_marks_label.setStyleSheet("color: #e74c3c; font-weight: bold; padding: 5px;")
-        marks_layout.addWidget(self.total_marks_label)
-        self.marks_per_question.valueChanged.connect(self.update_total_marks)
-        
-        marks_group.setLayout(marks_layout)
-        scroll_layout.addWidget(marks_group)
-        
-        # Additional Settings
-        settings_group = QGroupBox("⚙️ Additional Settings")
-        settings_group.setStyleSheet(self.get_group_style("#34495e"))
-        settings_layout = QVBoxLayout()
-        
-        self.camera_check = QCheckBox("Enable Camera Monitoring")
-        self.camera_check.setChecked(True)
-        settings_layout.addWidget(self.camera_check)
-        
-        self.shuffle_check = QCheckBox("Shuffle Questions")
-        settings_layout.addWidget(self.shuffle_check)
-        
-        self.email_notification_check = QCheckBox("Send Email Notifications to Students")
-        self.email_notification_check.setChecked(True)
-        settings_layout.addWidget(self.email_notification_check)
-        
-        self.passing_marks_layout = QHBoxLayout()
-        self.passing_marks_layout.addWidget(QLabel("Passing Percentage:"))
-        self.passing_percent = QSpinBox()
-        self.passing_percent.setRange(0, 100)
-        self.passing_percent.setValue(40)
-        self.passing_percent.setSuffix("%")
-        self.passing_percent.setStyleSheet("padding: 5px;")
-        self.passing_marks_layout.addWidget(self.passing_percent)
-        settings_layout.addLayout(self.passing_marks_layout)
-        
-        settings_group.setLayout(settings_layout)
-        scroll_layout.addWidget(settings_group)
-        
-        scroll_layout.addStretch()
-        scroll_widget.setLayout(scroll_layout)
-        scroll.setWidget(scroll_widget)
-        layout.addWidget(scroll)
-        
-        # Bottom buttons
-        btn_layout = QHBoxLayout()
-        
-        schedule_btn = QPushButton("📅 Schedule Exam & Send Notifications")
-        schedule_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        schedule_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 15px;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        schedule_btn.clicked.connect(self.schedule_exam)
-        btn_layout.addWidget(schedule_btn)
-        
-        cancel_btn = QPushButton("✖ Cancel")
-        cancel_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 15px;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-        
-        layout.addLayout(btn_layout)
-        self.setLayout(layout)
-        
-        # Initial updates
-        self.update_student_count()
-        self.update_end_time()
-    
-    def get_group_style(self, color):
-        return f"""
-            QGroupBox {{
-                font-weight: bold;
-                border: 2px solid {color};
-                border-radius: 8px;
-                margin-top: 10px;
-                padding: 15px;
-            }}
-            QGroupBox::title {{
-                color: {color};
-            }}
-        """
-    
-    def update_student_count(self):
-        """Update student count for selected group"""
-        try:
-            if os.path.exists(STUDENTS_FILE):
-                with open(STUDENTS_FILE, 'r') as f:
-                    students = json.load(f)
-                
-                group = self.group_combo.currentText()
-                if group == "All Students":
-                    count = len(students)
-                else:
-                    count = sum(1 for s in students if s.get('group') == group)
-                
-                self.student_count_label.setText(f"Students in this group: {count}")
-        except:
-            self.student_count_label.setText("Students in this group: 0")
-    
-    def update_end_time(self):
-        """Update end time based on start time and duration"""
-        start = self.start_datetime.dateTime().toPyDateTime()
-        duration = self.duration_spin.value()
-        end = start + timedelta(minutes=duration)
-        self.end_time_label.setText(f"End Time: {end.strftime('%Y-%m-%d %I:%M %p')}")
-    
-    def update_total_marks(self):
-        """Update total marks"""
-        total = len(self.selected_questions) * self.marks_per_question.value()
-        self.total_marks_label.setText(f"Total Marks: {total}")
-    
-    def select_questions(self):
-        """Open question selection dialog"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Select Questions for Exam")
-        dialog.setGeometry(150, 150, 700, 600)
-        dialog.setStyleSheet("background-color: #ecf0f1;")
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        title = QLabel("Select Questions for This Exam")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        layout.addWidget(title)
-        
-        # Question list with checkboxes
-        questions_list = QListWidget()
-        questions_list.setStyleSheet("""
-            QListWidget {
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        
-        try:
-            if os.path.exists(QUESTIONS_FILE):
-                with open(QUESTIONS_FILE, 'r') as f:
-                    all_questions = json.load(f)
-                
-                for i, q in enumerate(all_questions):
-                    item = QListWidgetItem(f"Q{i+1}: {q['question'][:80]}...")
-                    item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                    item.setCheckState(Qt.CheckState.Unchecked)
-                    item.setData(Qt.ItemDataRole.UserRole, i)
-                    questions_list.addItem(item)
-        except:
-            pass
-        
-        layout.addWidget(questions_list)
-        
-        # Select all / Deselect all
-        select_btn_layout = QHBoxLayout()
-        
-        select_all_btn = QPushButton("✅ Select All")
-        select_all_btn.clicked.connect(lambda: self.toggle_all_questions(questions_list, True))
-        select_btn_layout.addWidget(select_all_btn)
-        
-        deselect_all_btn = QPushButton("❌ Deselect All")
-        deselect_all_btn.clicked.connect(lambda: self.toggle_all_questions(questions_list, False))
-        select_btn_layout.addWidget(deselect_all_btn)
-        
-        layout.addLayout(select_btn_layout)
-        
-        # Confirm button
-        confirm_btn = QPushButton("✅ Confirm Selection")
-        confirm_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 12px;
-                border: none;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-        """)
-        
-        def confirm_selection():
-            self.selected_questions = []
-            for i in range(questions_list.count()):
-                item = questions_list.item(i)
-                if item.checkState() == Qt.CheckState.Checked:
-                    self.selected_questions.append(item.data(Qt.ItemDataRole.UserRole))
-            
-            self.selected_questions_label.setText(f"Selected Questions: {len(self.selected_questions)}")
-            self.update_total_marks()
-            dialog.accept()
-        
-        confirm_btn.clicked.connect(confirm_selection)
-        layout.addWidget(confirm_btn)
-        
-        dialog.setLayout(layout)
-        dialog.exec()
-    
-    def toggle_all_questions(self, questions_list, checked):
-        """Toggle all questions selection"""
-        state = Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked
-        for i in range(questions_list.count()):
-            questions_list.item(i).setCheckState(state)
-    
-    def schedule_exam(self):
-        """Schedule the exam"""
-        exam_name = self.exam_name_input.text().strip()
-        exam_desc = self.exam_desc_input.toPlainText().strip()
-        group = self.group_combo.currentText()
-        
-        if not exam_name:
-            QMessageBox.warning(self, "Error", "Exam name is required!")
-            return
-        
-        if not self.selected_questions:
-            QMessageBox.warning(self, "Error", "Please select at least one question!")
-            return
-        
-        try:
-            # Create exam data
-            exam_data = {
-                'exam_id': f"EXAM_{datetime.now().strftime('%Y%m%d%H%M%S')}",
-                'exam_name': exam_name,
-                'description': exam_desc,
-                'group': group if group != "All Students" else None,
-                'start_datetime': self.start_datetime.dateTime().toString("yyyy-MM-dd hh:mm:ss"),
-                'duration_minutes': self.duration_spin.value(),
-                'end_datetime': (self.start_datetime.dateTime().toPyDateTime() + 
-                               timedelta(minutes=self.duration_spin.value())).strftime("%Y-%m-%d %H:%M:%S"),
-                'question_indices': self.selected_questions,
-                'marks_per_question': self.marks_per_question.value(),
-                'total_marks': len(self.selected_questions) * self.marks_per_question.value(),
-                'passing_percentage': self.passing_percent.value(),
-                'camera_required': self.camera_check.isChecked(),
-                'shuffle_questions': self.shuffle_check.isChecked(),
-                'created_by': 'admin',
-                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'status': 'scheduled',
-                'send_email': self.email_notification_check.isChecked()
-            }
-            
-            # Save to scheduled exams
-            scheduled_exams = []
-            if os.path.exists(SCHEDULED_EXAMS_FILE):
-                with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                    scheduled_exams = json.load(f)
-            
-            scheduled_exams.append(exam_data)
-            
-            with open(SCHEDULED_EXAMS_FILE, 'w') as f:
-                json.dump(scheduled_exams, f, indent=4)
-            
-            # Send email notifications if enabled
-            if self.email_notification_check.isChecked():
-                self.send_notifications(exam_data)
-            
-            QMessageBox.information(self, "Success", 
-                                  f"Exam '{exam_name}' scheduled successfully!\n\n"
-                                  f"Start: {exam_data['start_datetime']}\n"
-                                  f"Duration: {exam_data['duration_minutes']} minutes\n"
-                                  f"Questions: {len(self.selected_questions)}\n"
-                                  f"Total Marks: {exam_data['total_marks']}")
-            
-            self.accept()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to schedule exam:\n{str(e)}")
-    
-    def send_notifications(self, exam_data):
-        """Send email notifications to students"""
-        try:
-            # Load email config
-            if not os.path.exists(EMAIL_CONFIG_FILE):
-                QMessageBox.warning(self, "Warning", 
-                                  "Email not configured. Please configure email settings first.")
-                return
-            
-            with open(EMAIL_CONFIG_FILE, 'r') as f:
-                email_config = json.load(f)
-            
-            # Load students
-            if not os.path.exists(STUDENTS_FILE):
-                return
-            
-            with open(STUDENTS_FILE, 'r') as f:
-                all_students = json.load(f)
-            
-            # Filter students by group
-            group = exam_data['group']
-            if group:
-                students = [s for s in all_students if s.get('group') == group]
-            else:
-                students = all_students
-            
-            if not students:
-                return
-            
-            # Progress dialog
-            progress = QProgressDialog("Sending email notifications...", "Cancel", 0, len(students), self)
-            progress.setWindowModality(Qt.WindowModality.WindowModal)
-            progress.show()
-            
-            # Send emails based on method
-            method = email_config.get('method', 'smtp')
-            sent_count = 0
-            failed_count = 0
-            
-            for i, student in enumerate(students):
-                if progress.wasCanceled():
-                    break
-                
-                try:
-                    if method == 'power_automate':
-                        self.send_power_automate_notification(student, exam_data, email_config)
-                    else:
-                        self.send_smtp_notification(student, exam_data, email_config)
-                    sent_count += 1
-                except Exception as e:
-                    failed_count += 1
-                    print(f"Failed to send email to {student.get('email')}: {str(e)}")
-                
-                progress.setValue(i + 1)
-            
-            progress.close()
-            
-            # Show summary
-            if sent_count > 0:
-                message = f"Successfully sent {sent_count} email notification(s)!"
-                if failed_count > 0:
-                    message += f"\n{failed_count} email(s) failed to send."
-                QMessageBox.information(self, "Email Sent", message)
-            elif failed_count > 0:
-                QMessageBox.warning(self, "Email Error", 
-                                  f"Failed to send {failed_count} email(s). Please check your configuration.")
-            
-        except Exception as e:
-            QMessageBox.warning(self, "Email Error", f"Error sending notifications:\n{str(e)}")
-    
-    def send_power_automate_notification(self, student, exam_data, email_config):
-        """Send notification via Power Automate webhook"""
-        webhook_url = email_config.get('webhook_url', '')
-        
-        if not webhook_url:
-            raise Exception("Power Automate webhook URL not configured")
-        
-        # Prepare payload for Power Automate
-        payload = {
-            "student_name": student.get('name', ''),
-            "student_email": student.get('email', ''),
-            "student_username": student.get('username', ''),
-            "student_password": student.get('password', ''),
-            "exam_name": exam_data['exam_name'],
-            "exam_description": exam_data.get('description', 'N/A'),
-            "start_datetime": exam_data['start_datetime'],
-            "duration_minutes": exam_data['duration_minutes'],
-            "total_questions": len(exam_data['question_indices']),
-            "total_marks": exam_data['total_marks'],
-            "passing_percentage": exam_data['passing_percentage'],
-            "camera_required": exam_data['camera_required']
-        }
-        
-        # Send POST request to Power Automate
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            headers={'Content-Type': 'application/json'},
-            timeout=30
-        )
-        
-        # Check response
-        if response.status_code not in [200, 202]:
-            raise Exception(f"Power Automate returned status code: {response.status_code}")
-    
-    def send_smtp_notification(self, student, exam_data, email_config):
-        """Send notification via SMTP"""
-        msg = MIMEMultipart('alternative')
-        msg['From'] = email_config['admin_email']
-        msg['To'] = student.get('email', '')
-        msg['Subject'] = f"Exam Scheduled: {exam_data['exam_name']}"
-        
-        # Create email body
-        html_body = f"""
-        <html>
-        <head>
-            <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-                .header {{ background-color: #3498db; color: white; padding: 20px; text-align: center; border-radius: 8px 8px 0 0; }}
-                .content {{ background-color: #f8f9fa; padding: 20px; border: 1px solid #ddd; }}
-                .credentials {{ background-color: #fff; padding: 15px; margin: 15px 0; border-left: 4px solid #27ae60; }}
-                .info-box {{ background-color: #fff; padding: 15px; margin: 15px 0; border-radius: 5px; }}
-                .warning {{ background-color: #fadbd8; color: #e74c3c; padding: 10px; border-radius: 5px; margin: 15px 0; }}
-                .footer {{ text-align: center; padding: 15px; color: #7f8c8d; font-size: 12px; }}
-                table {{ width: 100%; border-collapse: collapse; }}
-                td {{ padding: 8px; }}
-                .label {{ font-weight: bold; color: #2c3e50; }}
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <h1>📝 Exam Scheduled</h1>
-                </div>
-                <div class="content">
-                    <p>Dear <strong>{student.get('name', 'Student')}</strong>,</p>
-                    
-                    <p>An exam has been scheduled for you. Please find the details below:</p>
-                    
-                    <div class="info-box">
-                        <h3 style="color: #3498db; margin-top: 0;">📋 Exam Details</h3>
-                        <table>
-                            <tr>
-                                <td class="label">Exam Name:</td>
-                                <td>{exam_data['exam_name']}</td>
-                            </tr>
-                            <tr>
-                                <td class="label">Description:</td>
-                                <td>{exam_data.get('description', 'N/A')}</td>
-                            </tr>
-                            <tr>
-                                <td class="label">Start Date & Time:</td>
-                                <td><strong style="color: #e67e22;">{exam_data['start_datetime']}</strong></td>
-                            </tr>
-                            <tr>
-                                <td class="label">Duration:</td>
-                                <td>{exam_data['duration_minutes']} minutes</td>
-                            </tr>
-                            <tr>
-                                <td class="label">Total Questions:</td>
-                                <td>{len(exam_data['question_indices'])}</td>
-                            </tr>
-                            <tr>
-                                <td class="label">Total Marks:</td>
-                                <td>{exam_data['total_marks']}</td>
-                            </tr>
-                            <tr>
-                                <td class="label">Passing Marks:</td>
-                                <td>{exam_data['passing_percentage']}%</td>
-                            </tr>
-                        </table>
-                    </div>
-                    
-                    <div class="credentials">
-                        <h3 style="color: #27ae60; margin-top: 0;">🔐 Your Login Credentials</h3>
-                        <table>
-                            <tr>
-                                <td class="label">Username:</td>
-                                <td><code>{student.get('username', '')}</code></td>
-                            </tr>
-                            <tr>
-                                <td class="label">Password:</td>
-                                <td><code>{student.get('password', '')}</code></td>
-                            </tr>
-                        </table>
-                        <p style="margin-bottom: 0;"><em>Please keep these credentials secure and do not share them.</em></p>
-                    </div>
-                    
-                    <div class="warning">
-                        <strong>⚠️ Important Instructions:</strong>
-                        <ul style="margin: 10px 0;">
-                            <li>Login at least 5 minutes before the scheduled time</li>
-                            <li>The exam will only be accessible during the scheduled time window</li>
-                            {"<li>Camera monitoring is enabled - keep your face visible</li>" if exam_data['camera_required'] else ""}
-                            <li>Do not switch tabs or minimize the exam window</li>
-                            <li>Ensure stable internet connection throughout the exam</li>
-                            <li>The exam will auto-submit when time expires</li>
-                        </ul>
-                    </div>
-                    
-                    <p style="margin-top: 20px;">Good luck with your exam!</p>
-                </div>
-                <div class="footer">
-                    <p>This is an automated email from the Examination Management System.<br>
-                    Please do not reply to this email.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-        """
-        
-        msg.attach(MIMEText(html_body, 'html'))
-        
-        # Send email
-        with smtplib.SMTP(email_config['smtp_server'], email_config['smtp_port']) as server:
-            server.starttls()
-            server.login(email_config['admin_email'], email_config['email_password'])
-            server.send_message(msg)
-
-
-class AdminPanel(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.logged_in_username = "admin"
-        self.init_ui()
-        self.load_data()
-        
-        # Auto-refresh cheating alerts and exam status
-        self.alert_timer = QTimer()
-        self.alert_timer.timeout.connect(self.load_cheating_alerts)
-        self.alert_timer.start(5000)  # Refresh every 5 seconds
-        
-        # Check exam status
-        self.exam_status_timer = QTimer()
-        self.exam_status_timer.timeout.connect(self.update_exam_status)
-        self.exam_status_timer.start(60000)  # Check every minute
-    
-    def init_ui(self):
-        self.setWindowTitle("Admin Panel - Examination Management System")
-        self.setGeometry(50, 50, 1400, 800)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
-        
-        # Header
-        header_layout = QHBoxLayout()
-        
-        svg_path = os.path.join(os.path.dirname(__file__),  "sym.svg")  # <-- your SVG path
-        svg_icon = QSvgWidget(svg_path)
-        svg_icon.setFixedSize(190, 100)  # Adjust size to your liking
-        svg_icon.setStyleSheet("background: transparent; border: none;")  # ✅ Transparent background
-        header_layout.addWidget(svg_icon)
-
-        # --- Title Label ---
-        title = QLabel("Admin Panel")
-        title.setFont(QFont("Arial", 22, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        title.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        header_layout.addWidget(title)        
-        header_layout.addStretch()
-        
-        # Email config button
-        email_config_btn = QPushButton("📧 Email Config")
-        email_config_btn.setFont(QFont("Arial", 10))
-        email_config_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9b59b6;
-                color: white;
-                padding: 8px 15px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #8e44ad;
-            }
-        """)
-        email_config_btn.clicked.connect(self.configure_email)
-        header_layout.addWidget(email_config_btn)
-        
-        # Alert indicator
-        self.alert_indicator = QLabel("🔔 0 New Alerts")
-        
-        self.alert_indicator.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.alert_indicator.setStyleSheet("""
-            color: white;
-            background-color: #27ae60;
-            padding: 5px 5px;
-            border-radius: 6px;
-        """)
-        header_layout.addWidget(self.alert_indicator)
-        
-        user_label = QLabel(f"👤 {self.logged_in_username}")
-        user_label.setFont(QFont("Arial", 12))
-        user_label.setStyleSheet("color: #7f8c8d; padding: 10px;")
-        header_layout.addWidget(user_label)
-        
-        logout_btn = QPushButton("🚪 Logout")
-        logout_btn.setFont(QFont("Arial", 11))
-        logout_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                padding: 8px 15px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-        """)
-        logout_btn.clicked.connect(self.close)
-        header_layout.addWidget(logout_btn)
-        
-        layout.addLayout(header_layout)
-        
-        # Tabs
-        self.tabs = QTabWidget()
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-                background-color: white;
-            }
-            QTabBar::tab {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                margin: 2px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QTabBar::tab:selected {
-                background-color: #3498db;
-            }
-        """)
-        
-        # Create tabs
-        self.create_dashboard_tab()
-        self.create_schedule_exam_tab()
-        self.create_scheduled_exams_tab()
-        self.create_students_tab()
-        self.create_questions_tab()
-        self.create_results_tab()
-        self.create_cheating_alerts_tab()
-        self.create_security_tab()
-        
-        layout.addWidget(self.tabs)
-        central_widget.setLayout(layout)
-    
-    def create_dashboard_tab(self):
-        """Dashboard tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        
-        title = QLabel("📊 System Dashboard")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(title)
-        
-        # Stats cards
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(15)
-        
-        self.students_card_label = self.create_stat_card_with_label("👥 Students", "0", "#3498db", stats_layout)
-        self.questions_card_label = self.create_stat_card_with_label("❓ Questions", "0", "#27ae60", stats_layout)
-        self.scheduled_exams_label = self.create_stat_card_with_label("📅 Scheduled Exams", "0", "#9b59b6", stats_layout)
-        self.results_card_label = self.create_stat_card_with_label("📊 Results", "0", "#e67e22", stats_layout)
-        self.alerts_card_label = self.create_stat_card_with_label("⚠️ Alerts", "0", "#e74c3c", stats_layout)
-        
-        layout.addLayout(stats_layout)
-        
-        # Quick actions
-        actions_label = QLabel("⚡ Quick Actions")
-        actions_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        actions_label.setStyleSheet("color: #2c3e50; margin-top: 20px;")
-        layout.addWidget(actions_label)
-        
-        actions_layout = QHBoxLayout()
-        actions_layout.setSpacing(10)
-        
-        schedule_btn = self.create_action_button("📅 Schedule Exam", "#9b59b6")
-        schedule_btn.clicked.connect(self.open_schedule_dialog)
-        actions_layout.addWidget(schedule_btn)
-        
-        add_student_btn = self.create_action_button("➕ Add Student", "#3498db")
-        add_student_btn.clicked.connect(self.add_student)
-        actions_layout.addWidget(add_student_btn)
-        
-        add_question_btn = self.create_action_button("➕ Add Question", "#27ae60")
-        add_question_btn.clicked.connect(self.add_question)
-        actions_layout.addWidget(add_question_btn)
-        
-        view_alerts_btn = self.create_action_button("🚨 View Alerts", "#e74c3c")
-        view_alerts_btn.clicked.connect(lambda: self.tabs.setCurrentIndex(6))
-        actions_layout.addWidget(view_alerts_btn)
-        
-        layout.addLayout(actions_layout)
-        layout.addStretch()
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "🏠 Dashboard")
-    
-    def create_stat_card_with_label(self, title, count, color, parent_layout):
-        """Create stat card and return label reference"""
-        card = QFrame()
-        card.setStyleSheet(f"""
-            QFrame {{
-                background-color: white;
-                border-left: 5px solid {color};
-                border-radius: 8px;
-                padding: 15px;
-            }}
-        """)
-        
-        layout = QVBoxLayout()
-        
-        title_label = QLabel(title)
-        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        title_label.setStyleSheet(f"color: {color};")
-        layout.addWidget(title_label)
-        
-        count_label = QLabel(count)
-        count_label.setFont(QFont("Arial", 28, QFont.Weight.Bold))
-        count_label.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(count_label)
-        
-        card.setLayout(layout)
-        parent_layout.addWidget(card)
-        return count_label
-    
-    def create_action_button(self, text, color):
-        """Create action button"""
-        btn = QPushButton(text)
-        btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                padding: 15px;
-                border: none;
-                border-radius: 6px;
-            }}
-            QPushButton:hover {{
-                opacity: 0.8;
-            }}
-        """)
-        return btn
-    
-    def create_schedule_exam_tab(self):
-        """Schedule exam tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
-        
-        title = QLabel("📅 Schedule New Exam")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(title)
-        
-        info = QLabel("Click the button below to schedule a new exam for students")
-        info.setStyleSheet("color: #7f8c8d; font-size: 12px;")
-        layout.addWidget(info)
-        
-        schedule_btn = QPushButton("📅 Schedule New Exam")
-        schedule_btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        schedule_btn.setFixedSize(300, 60)
-        schedule_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9b59b6;
-                color: white;
-                border: none;
-                border-radius: 10px;
-            }
-            QPushButton:hover {
-                background-color: #8e44ad;
-            }
-        """)
-        schedule_btn.clicked.connect(self.open_schedule_dialog)
-        
-        btn_container = QHBoxLayout()
-        btn_container.addStretch()
-        btn_container.addWidget(schedule_btn)
-        btn_container.addStretch()
-        
-        layout.addLayout(btn_container)
-        layout.addStretch()
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "📅 Schedule Exam")
-    
-    def create_scheduled_exams_tab(self):
-        """Scheduled exams tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("📋 Scheduled Exams")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet(self.get_button_style("#3498db"))
-        refresh_btn.clicked.connect(self.load_scheduled_exams)
-        header_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(header_layout)
-        
-        self.scheduled_exams_table = QTableWidget()
-        self.scheduled_exams_table.setStyleSheet(self.get_table_style())
-        layout.addWidget(self.scheduled_exams_table)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "📋 Scheduled Exams")
-    
-    def create_students_tab(self):
-        """Students management tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("👥 Student Management")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        add_btn = QPushButton("➕ Add Student")
-        add_btn.setStyleSheet(self.get_button_style("#27ae60"))
-        add_btn.clicked.connect(self.add_student)
-        header_layout.addWidget(add_btn)
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet(self.get_button_style("#3498db"))
-        refresh_btn.clicked.connect(self.load_students)
-        header_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(header_layout)
-        
-        self.students_table = QTableWidget()
-        self.students_table.setStyleSheet(self.get_table_style())
-        layout.addWidget(self.students_table)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "👥 Students")
-    
-    def create_questions_tab(self):
-        """Questions management tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("❓ Question Bank")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        add_btn = QPushButton("➕ Add Question")
-        add_btn.setStyleSheet(self.get_button_style("#27ae60"))
-        add_btn.clicked.connect(self.add_question)
-        header_layout.addWidget(add_btn)
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet(self.get_button_style("#3498db"))
-        refresh_btn.clicked.connect(self.load_questions)
-        header_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(header_layout)
-        
-        self.questions_table = QTableWidget()
-        self.questions_table.setStyleSheet(self.get_table_style())
-        layout.addWidget(self.questions_table)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "❓ Questions")
-    
-    def create_results_tab(self):
-        """Results tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("📊 Exam Results")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet(self.get_button_style("#3498db"))
-        refresh_btn.clicked.connect(self.load_results)
-        header_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(header_layout)
-        
-        self.results_table = QTableWidget()
-        self.results_table.setStyleSheet(self.get_table_style())
-        layout.addWidget(self.results_table)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "📊 Results")
-    
-    def create_cheating_alerts_tab(self):
-        """Cheating alerts tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("🚨 Cheating Alerts (Real-time)")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #e74c3c;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        clear_btn = QPushButton("🗑️ Clear All")
-        clear_btn.setStyleSheet(self.get_button_style("#e74c3c"))
-        clear_btn.clicked.connect(self.clear_cheating_alerts)
-        header_layout.addWidget(clear_btn)
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet(self.get_button_style("#3498db"))
-        refresh_btn.clicked.connect(self.load_cheating_alerts)
-        header_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(header_layout)
-        
-        self.cheating_table = QTableWidget()
-        self.cheating_table.setStyleSheet(self.get_table_style())
-        layout.addWidget(self.cheating_table)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "🚨 Cheating Alerts")
-    
-    def create_security_tab(self):
-        """Security logs tab"""
-        tab = QWidget()
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("🔒 Security Logs")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setStyleSheet(self.get_button_style("#3498db"))
-        refresh_btn.clicked.connect(self.load_security_logs)
-        header_layout.addWidget(refresh_btn)
-        
-        layout.addLayout(header_layout)
-        
-        self.security_table = QTableWidget()
-        self.security_table.setStyleSheet(self.get_table_style())
-        layout.addWidget(self.security_table)
-        
-        tab.setLayout(layout)
-        self.tabs.addTab(tab, "🔒 Security")
-    
-    def get_button_style(self, color):
-        """Get button style"""
-        return f"""
-            QPushButton {{
-                background-color: {color};
-                color: white;
-                padding: 8px 15px;
-                border: none;
-                border-radius: 6px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                opacity: 0.8;
-            }}
-        """
-    
-    def get_table_style(self):
-        """Get table style"""
-        return """
-            QTableWidget {
-                background-color: white;
-                border: 1px solid #bdc3c7;
-                border-radius: 5px;
-            }
-            QHeaderView::section {
-                background-color: #34495e;
-                color: white;
-                padding: 8px;
-                font-weight: bold;
-            }
-        """
-    
-    def configure_email(self):
-        """Open email configuration dialog"""
-        dialog = EmailConfigDialog(self)
-        dialog.exec()
-    
-    def open_schedule_dialog(self):
-        """Open schedule exam dialog"""
-        dialog = ScheduleExamDialog(self)
-        if dialog.exec():
-            self.load_scheduled_exams()
-            self.update_dashboard()
-    
-    def load_data(self):
-        """Load all data"""
-        self.load_students()
-        self.load_questions()
-        self.load_scheduled_exams()
-        self.load_results()
-        self.load_security_logs()
-        self.load_cheating_alerts()
-        self.update_dashboard()
-    
-    def load_students(self):
-        """Load students"""
-        try:
-            students = []
-            if os.path.exists(STUDENTS_FILE):
-                with open(STUDENTS_FILE, 'r') as f:
-                    students = json.load(f)
-            
-            self.students_table.setRowCount(len(students))
-            self.students_table.setColumnCount(6)
-            self.students_table.setHorizontalHeaderLabels(["Name", "Email", "Username", "Password", "Group", "Actions"])
-            
-            for i, student in enumerate(students):
-                self.students_table.setItem(i, 0, QTableWidgetItem(student.get('name', '')))
-                self.students_table.setItem(i, 1, QTableWidgetItem(student.get('email', '')))
-                self.students_table.setItem(i, 2, QTableWidgetItem(student.get('username', '')))
-                self.students_table.setItem(i, 3, QTableWidgetItem(student.get('password', '')))
-                self.students_table.setItem(i, 4, QTableWidgetItem(student.get('group', 'N/A')))
-                
-                delete_btn = QPushButton("🗑️")
-                delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 5px;")
-                delete_btn.clicked.connect(lambda checked, idx=i: self.delete_student(idx))
-                self.students_table.setCellWidget(i, 5, delete_btn)
-            
-            self.students_table.resizeColumnsToContents()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load students: {str(e)}")
-    
-    def load_questions(self):
-        """Load questions"""
-        try:
-            questions = []
-            if os.path.exists(QUESTIONS_FILE):
-                with open(QUESTIONS_FILE, 'r') as f:
-                    questions = json.load(f)
-            
-            self.questions_table.setRowCount(len(questions))
-            self.questions_table.setColumnCount(5)
-            self.questions_table.setHorizontalHeaderLabels(["#", "Question", "Group", "Options", "Actions"])
-            
-            for i, q in enumerate(questions):
-                self.questions_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-                self.questions_table.setItem(i, 1, QTableWidgetItem(q.get('question', '')[:100]))
-                self.questions_table.setItem(i, 2, QTableWidgetItem(q.get('group', 'All')))
-                
-                options = q.get('options', [])
-                answer_idx = q.get('answer', 0)
-                options_text = "\n".join([f"{'✓' if j == answer_idx else '•'} {opt}" 
-                                         for j, opt in enumerate(options)])
-                self.questions_table.setItem(i, 3, QTableWidgetItem(options_text))
-                
-                delete_btn = QPushButton("🗑️")
-                delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 5px;")
-                delete_btn.clicked.connect(lambda checked, idx=i: self.delete_question(idx))
-                self.questions_table.setCellWidget(i, 4, delete_btn)
-            
-            self.questions_table.resizeColumnsToContents()
-            self.questions_table.resizeRowsToContents()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load questions: {str(e)}")
-    
-    def load_scheduled_exams(self):
-        """Load scheduled exams"""
-        try:
-            exams = []
-            if os.path.exists(SCHEDULED_EXAMS_FILE):
-                with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                    exams = json.load(f)
-            
-            self.scheduled_exams_table.setRowCount(len(exams))
-            self.scheduled_exams_table.setColumnCount(9)
-            self.scheduled_exams_table.setHorizontalHeaderLabels(
-                ["Exam Name", "Group", "Start Time", "Duration", "Questions", "Total Marks", "Status", "Actions", "Delete"])
-            
-            for i, exam in enumerate(exams):
-                self.scheduled_exams_table.setItem(i, 0, QTableWidgetItem(exam.get('exam_name', '')))
-                self.scheduled_exams_table.setItem(i, 1, QTableWidgetItem(exam.get('group', 'All')))
-                self.scheduled_exams_table.setItem(i, 2, QTableWidgetItem(exam.get('start_datetime', '')))
-                self.scheduled_exams_table.setItem(i, 3, QTableWidgetItem(f"{exam.get('duration_minutes', 0)} min"))
-                self.scheduled_exams_table.setItem(i, 4, QTableWidgetItem(str(len(exam.get('question_indices', [])))))
-                self.scheduled_exams_table.setItem(i, 5, QTableWidgetItem(str(exam.get('total_marks', 0))))
-                
-                # Status with color
-                status = exam.get('status', 'scheduled')
-                status_item = QTableWidgetItem(status.upper())
-                if status == 'completed':
-                    status_item.setBackground(QColor(46, 204, 113))
-                elif status == 'active':
-                    status_item.setBackground(QColor(52, 152, 219))
-                else:
-                    status_item.setBackground(QColor(241, 196, 15))
-                status_item.setForeground(QColor(255, 255, 255))
-                self.scheduled_exams_table.setItem(i, 6, status_item)
-                
-                # View details button
-                view_btn = QPushButton("👁️ View")
-                view_btn.setStyleSheet("background-color: #3498db; color: white; padding: 5px;")
-                view_btn.clicked.connect(lambda checked, exam_data=exam: self.view_exam_details(exam_data))
-                self.scheduled_exams_table.setCellWidget(i, 7, view_btn)
-                
-                # Delete button
-                delete_btn = QPushButton("🗑️")
-                delete_btn.setStyleSheet("background-color: #e74c3c; color: white; padding: 5px;")
-                delete_btn.clicked.connect(lambda checked, idx=i: self.delete_scheduled_exam(idx))
-                self.scheduled_exams_table.setCellWidget(i, 8, delete_btn)
-            
-            self.scheduled_exams_table.resizeColumnsToContents()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load scheduled exams: {str(e)}")
-    
-    def load_results(self):
-        """Load results"""
-        try:
-            results = []
-            if os.path.exists(RESULTS_FILE):
-                with open(RESULTS_FILE, 'r') as f:
-                    results = json.load(f)
-            
-            self.results_table.setRowCount(len(results))
-            self.results_table.setColumnCount(8)
-            self.results_table.setHorizontalHeaderLabels(
-                ["Student", "Username", "Exam", "Score", "Percentage", "Time", "Camera", "Date"])
-            
-            for i, result in enumerate(results):
-                self.results_table.setItem(i, 0, QTableWidgetItem(result.get('student_name', '')))
-                self.results_table.setItem(i, 1, QTableWidgetItem(result.get('username', '')))
-                self.results_table.setItem(i, 2, QTableWidgetItem(result.get('exam_name', 'N/A')))
-                
-                score = f"{result.get('score', 0)}/{result.get('total_questions', 0)}"
-                self.results_table.setItem(i, 3, QTableWidgetItem(score))
-                
-                percentage = result.get('percentage', 0)
-                percent_item = QTableWidgetItem(f"{percentage:.1f}%")
-                if percentage >= 40:
-                    percent_item.setForeground(QColor(39, 174, 96))
-                else:
-                    percent_item.setForeground(QColor(231, 76, 60))
-                self.results_table.setItem(i, 4, percent_item)
-                
-                self.results_table.setItem(i, 5, QTableWidgetItem(result.get('time_taken', '')))
-                
-                camera = "Yes" if result.get('camera_monitoring', False) else "No"
-                self.results_table.setItem(i, 6, QTableWidgetItem(camera))
-                
-                self.results_table.setItem(i, 7, QTableWidgetItem(result.get('timestamp', '')))
-            
-            self.results_table.resizeColumnsToContents()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load results: {str(e)}")
-    
-    def load_cheating_alerts(self):
-        """Load cheating alerts"""
-        try:
-            alerts = []
-            if os.path.exists(CHEATING_ALERTS_FILE):
-                with open(CHEATING_ALERTS_FILE, 'r') as f:
-                    alerts = json.load(f)
-            
-            # Update dashboard indicator
-            self.alert_indicator.setText(f"🔔 {len(alerts)} New Alerts")
-            if len(alerts) > 0:
-                self.alert_indicator.setStyleSheet("""
-                    color: white;
-                    background-color: #e74c3c;
-                    padding: 8px 15px;
-                    border-radius: 6px;
-                """)
-            else:
-                self.alert_indicator.setStyleSheet("""
-                    color: white;
-                    background-color: #27ae60;
-                    padding: 8px 15px;
-                    border-radius: 6px;
-                """)
-            
-            self.cheating_table.setRowCount(len(alerts))
-            self.cheating_table.setColumnCount(6)
-            self.cheating_table.setHorizontalHeaderLabels(
-                ["Student", "Username", "Alert Type", "Details", "Question #", "Timestamp"])
-            
-            for i, alert in enumerate(alerts):
-                student_item = QTableWidgetItem(alert.get('student_name', ''))
-                student_item.setBackground(QColor(255, 235, 235))
-                self.cheating_table.setItem(i, 0, student_item)
-                
-                username_item = QTableWidgetItem(alert.get('username', ''))
-                username_item.setBackground(QColor(255, 235, 235))
-                self.cheating_table.setItem(i, 1, username_item)
-                
-                alert_type = alert.get('alert_type', '')
-                alert_item = QTableWidgetItem(alert_type)
-                alert_item.setBackground(QColor(255, 235, 235))
-                alert_item.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-                self.cheating_table.setItem(i, 2, alert_item)
-                
-                details_item = QTableWidgetItem(alert.get('details', ''))
-                details_item.setBackground(QColor(255, 235, 235))
-                self.cheating_table.setItem(i, 3, details_item)
-                
-                question_item = QTableWidgetItem(str(alert.get('question_number', 'N/A')))
-                question_item.setBackground(QColor(255, 235, 235))
-                self.cheating_table.setItem(i, 4, question_item)
-                
-                timestamp_item = QTableWidgetItem(alert.get('timestamp', ''))
-                timestamp_item.setBackground(QColor(255, 235, 235))
-                self.cheating_table.setItem(i, 5, timestamp_item)
-            
-            self.cheating_table.resizeColumnsToContents()
-            
-        except Exception as e:
-            pass
-    
-    def load_security_logs(self):
-        """Load security logs"""
-        try:
-            logs = []
-            if os.path.exists(SECURITY_LOGS_FILE):
-                with open(SECURITY_LOGS_FILE, 'r') as f:
-                    logs = json.load(f)
-            
-            self.security_table.setRowCount(len(logs))
-            self.security_table.setColumnCount(5)
-            self.security_table.setHorizontalHeaderLabels(
-                ["Student", "Username", "Violation Type", "Details", "Timestamp"])
-            
-            for i, log in enumerate(logs):
-                self.security_table.setItem(i, 0, QTableWidgetItem(log.get('student_name', '')))
-                self.security_table.setItem(i, 1, QTableWidgetItem(log.get('username', '')))
-                self.security_table.setItem(i, 2, QTableWidgetItem(log.get('violation_type', '')))
-                self.security_table.setItem(i, 3, QTableWidgetItem(log.get('details', '')))
-                self.security_table.setItem(i, 4, QTableWidgetItem(log.get('timestamp', '')))
-            
-            self.security_table.resizeColumnsToContents()
-            
-        except Exception as e:
-            pass
-    
-    def update_dashboard(self):
-        """Update dashboard statistics"""
-        try:
-            # Students count
-            if os.path.exists(STUDENTS_FILE):
-                with open(STUDENTS_FILE, 'r') as f:
-                    students = json.load(f)
-                    self.students_card_label.setText(str(len(students)))
-            
-            # Questions count
-            if os.path.exists(QUESTIONS_FILE):
-                with open(QUESTIONS_FILE, 'r') as f:
-                    questions = json.load(f)
-                    self.questions_card_label.setText(str(len(questions)))
-            
-            # Scheduled exams count
-            if os.path.exists(SCHEDULED_EXAMS_FILE):
-                with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                    exams = json.load(f)
-                    active_exams = sum(1 for e in exams if e.get('status') != 'completed')
-                    self.scheduled_exams_label.setText(str(active_exams))
-            
-            # Results count
-            if os.path.exists(RESULTS_FILE):
-                with open(RESULTS_FILE, 'r') as f:
-                    results = json.load(f)
-                    self.results_card_label.setText(str(len(results)))
-            
-            # Alerts count
-            if os.path.exists(CHEATING_ALERTS_FILE):
-                with open(CHEATING_ALERTS_FILE, 'r') as f:
-                    alerts = json.load(f)
-                    self.alerts_card_label.setText(str(len(alerts)))
-        except:
-            pass
-    
-    def update_exam_status(self):
-        """Update exam status based on current time"""
-        try:
-            if not os.path.exists(SCHEDULED_EXAMS_FILE):
-                return
-            
-            with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                exams = json.load(f)
-            
-            now = datetime.now()
-            updated = False
-            
-            for exam in exams:
-                start_time = datetime.strptime(exam['start_datetime'], '%Y-%m-%d %H:%M:%S')
-                end_time = datetime.strptime(exam['end_datetime'], '%Y-%m-%d %H:%M:%S')
-                
-                if exam['status'] == 'scheduled' and now >= start_time:
-                    exam['status'] = 'active'
-                    updated = True
-                elif exam['status'] == 'active' and now >= end_time:
-                    exam['status'] = 'completed'
-                    updated = True
-            
-            if updated:
-                with open(SCHEDULED_EXAMS_FILE, 'w') as f:
-                    json.dump(exams, f, indent=4)
-                self.load_scheduled_exams()
-                self.update_dashboard()
-                
-        except Exception as e:
-            pass
-    
-    def view_exam_details(self, exam_data):
-        """View detailed exam information"""
-        details = f"""
-        <h2>📋 Exam Details</h2>
-        <table style='width: 100%; border-collapse: collapse;'>
-            <tr><td style='padding: 8px; font-weight: bold;'>Exam Name:</td><td style='padding: 8px;'>{exam_data.get('exam_name', '')}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Description:</td><td style='padding: 8px;'>{exam_data.get('description', 'N/A')}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Group:</td><td style='padding: 8px;'>{exam_data.get('group', 'All Students')}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Start Time:</td><td style='padding: 8px;'>{exam_data.get('start_datetime', '')}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>End Time:</td><td style='padding: 8px;'>{exam_data.get('end_datetime', '')}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Duration:</td><td style='padding: 8px;'>{exam_data.get('duration_minutes', 0)} minutes</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Questions:</td><td style='padding: 8px;'>{len(exam_data.get('question_indices', []))}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Marks per Question:</td><td style='padding: 8px;'>{exam_data.get('marks_per_question', 0)}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Total Marks:</td><td style='padding: 8px;'>{exam_data.get('total_marks', 0)}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Passing Percentage:</td><td style='padding: 8px;'>{exam_data.get('passing_percentage', 0)}%</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Camera Monitoring:</td><td style='padding: 8px;'>{'Yes' if exam_data.get('camera_required', False) else 'No'}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Shuffle Questions:</td><td style='padding: 8px;'>{'Yes' if exam_data.get('shuffle_questions', False) else 'No'}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Status:</td><td style='padding: 8px;'>{exam_data.get('status', 'scheduled').upper()}</td></tr>
-            <tr><td style='padding: 8px; font-weight: bold;'>Created:</td><td style='padding: 8px;'>{exam_data.get('created_at', '')}</td></tr>
-        </table>
-        """
-        
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Exam Details")
-        msg_box.setTextFormat(Qt.TextFormat.RichText)
-        msg_box.setText(details)
-        msg_box.setIcon(QMessageBox.Icon.Information)
-        msg_box.exec()
-    
-    def clear_cheating_alerts(self):
-        """Clear all cheating alerts"""
-        reply = QMessageBox.question(
-            self, 'Clear Alerts',
-            'Are you sure you want to clear all cheating alerts?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                with open(CHEATING_ALERTS_FILE, 'w') as f:
-                    json.dump([], f)
-                
-                self.load_cheating_alerts()
-                self.update_dashboard()
-                QMessageBox.information(self, "Success", "All alerts cleared!")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to clear alerts: {str(e)}")
-    
-    def delete_scheduled_exam(self, index):
-        """Delete scheduled exam"""
-        reply = QMessageBox.question(
-            self, 'Confirm Delete',
-            'Delete this scheduled exam?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                    exams = json.load(f)
-                
-                del exams[index]
-                
-                with open(SCHEDULED_EXAMS_FILE, 'w') as f:
-                    json.dump(exams, f, indent=4)
-                
-                self.load_scheduled_exams()
-                self.update_dashboard()
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed: {str(e)}")
-    
-    def add_student(self):
-        """Add new student"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Add New Student")
-        dialog.setGeometry(200, 200, 450, 500)
-        dialog.setStyleSheet("background-color: #ecf0f1;")
-        
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        title = QLabel("➕ Add New Student")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        layout.addWidget(title)
-        
-        # Name
-        layout.addWidget(QLabel("Full Name:"))
-        name_input = QLineEdit()
-        name_input.setPlaceholderText("Enter student's full name")
-        name_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(name_input)
-        
-        # Email
-        layout.addWidget(QLabel("Email:"))
-        email_input = QLineEdit()
-        email_input.setPlaceholderText("Enter email address")
-        email_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(email_input)
-        
-        # Username
-        layout.addWidget(QLabel("Username:"))
-        username_input = QLineEdit()
-        username_input.setPlaceholderText("Enter username")
-        username_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(username_input)
-        
-        # Password
-        layout.addWidget(QLabel("Password:"))
-        password_input = QLineEdit()
-        password_input.setPlaceholderText("Enter password")
-        password_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(password_input)
-        
-        # Group
-        layout.addWidget(QLabel("Group:"))
-        group_combo = QComboBox()
-        group_combo.addItems(["Group A", "Group B", "Group C"])
-        group_combo.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(group_combo)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        
-        save_btn = QPushButton("💾 Save")
-        save_btn.setStyleSheet(self.get_button_style("#27ae60"))
-        
-        def save_student():
-            name = name_input.text().strip()
-            email = email_input.text().strip()
-            username = username_input.text().strip()
-            password = password_input.text().strip()
-            group = group_combo.currentText()
-            
-            if not all([name, email, username, password]):
-                QMessageBox.warning(dialog, "Error", "All fields are required!")
-                return
-            
-            try:
-                students = []
-                if os.path.exists(STUDENTS_FILE):
-                    with open(STUDENTS_FILE, 'r') as f:
-                        students = json.load(f)
-                
-                if any(s['username'] == username for s in students):
-                    QMessageBox.warning(dialog, "Error", "Username already exists!")
-                    return
-                
-                new_student = {
-                    'name': name,
-                    'email': email,
-                    'username': username,
-                    'password': password,
-                    'group': group,
-                    'student_id': f"STU{len(students) + 1:03d}"
-                }
-                
-                students.append(new_student)
-                
-                with open(STUDENTS_FILE, 'w') as f:
-                    json.dump(students, f, indent=4)
-                
-                QMessageBox.information(dialog, "Success", "Student added successfully!")
-                dialog.accept()
-                self.load_students()
-                self.update_dashboard()
-                
-            except Exception as e:
-                QMessageBox.critical(dialog, "Error", f"Failed: {str(e)}")
-        
-        save_btn.clicked.connect(save_student)
-        btn_layout.addWidget(save_btn)
-        
-        cancel_btn = QPushButton("✖ Cancel")
-        cancel_btn.setStyleSheet(self.get_button_style("#95a5a6"))
-        cancel_btn.clicked.connect(dialog.reject)
-        btn_layout.addWidget(cancel_btn)
-        
-        layout.addLayout(btn_layout)
-        dialog.setLayout(layout)
-        dialog.exec()
-    
-    def add_question(self):
-        """Add new question"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Add New Question")
-        dialog.setGeometry(150, 150, 600, 600)
-        dialog.setStyleSheet("background-color: #ecf0f1;")
-        
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        title = QLabel("➕ Add New Question")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        layout.addWidget(title)
-        
-        # Question
-        layout.addWidget(QLabel("Question:"))
-        question_input = QTextEdit()
-        question_input.setPlaceholderText("Enter question text")
-        question_input.setMaximumHeight(80)
-        question_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(question_input)
-        
-        # Group
-        layout.addWidget(QLabel("Assign to Group:"))
-        group_combo = QComboBox()
-        group_combo.addItems(["All Students", "Group A", "Group B", "Group C"])
-        group_combo.setStyleSheet("padding: 8px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(group_combo)
-        
-        # Options
-        layout.addWidget(QLabel("Options (4 required):"))
-        option_inputs = []
-        for i in range(4):
-            opt_input = QLineEdit()
-            opt_input.setPlaceholderText(f"Option {i + 1}")
-            opt_input.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-            layout.addWidget(opt_input)
-            option_inputs.append(opt_input)
-        
-        # Correct answer
-        layout.addWidget(QLabel("Correct Answer:"))
-        answer_combo = QComboBox()
-        answer_combo.addItems(["Option 1", "Option 2", "Option 3", "Option 4"])
-        answer_combo.setStyleSheet("padding: 10px; border: 2px solid #bdc3c7; border-radius: 6px;")
-        layout.addWidget(answer_combo)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        
-        save_btn = QPushButton("💾 Save")
-        save_btn.setStyleSheet(self.get_button_style("#27ae60"))
-        
-        def save_question():
-            question = question_input.toPlainText().strip()
-            options = [opt.text().strip() for opt in option_inputs]
-            answer_idx = answer_combo.currentIndex()
-            group = group_combo.currentText()
-            
-            if not question:
-                QMessageBox.warning(dialog, "Error", "Question text is required!")
-                return
-            
-            if not all(options):
-                QMessageBox.warning(dialog, "Error", "All 4 options are required!")
-                return
-            
-            try:
-                questions = []
-                if os.path.exists(QUESTIONS_FILE):
-                    with open(QUESTIONS_FILE, 'r') as f:
-                        questions = json.load(f)
-                
-                new_question = {
-                    'question': question,
-                    'options': options,
-                    'answer': answer_idx,
-                    'group': None if group == "All Students" else group
-                }
-                
-                questions.append(new_question)
-                
-                with open(QUESTIONS_FILE, 'w') as f:
-                    json.dump(questions, f, indent=4)
-                
-                QMessageBox.information(dialog, "Success", "Question added successfully!")
-                dialog.accept()
-                self.load_questions()
-                self.update_dashboard()
-                
-            except Exception as e:
-                QMessageBox.critical(dialog, "Error", f"Failed: {str(e)}")
-        
-        save_btn.clicked.connect(save_question)
-        btn_layout.addWidget(save_btn)
-        
-        cancel_btn = QPushButton("✖ Cancel")
-        cancel_btn.setStyleSheet(self.get_button_style("#95a5a6"))
-        cancel_btn.clicked.connect(dialog.reject)
-        btn_layout.addWidget(cancel_btn)
-        
-        layout.addLayout(btn_layout)
-        dialog.setLayout(layout)
-        dialog.exec()
-    
-    def delete_student(self, index):
-        """Delete student"""
-        reply = QMessageBox.question(
-            self, 'Confirm Delete',
-            'Delete this student?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                with open(STUDENTS_FILE, 'r') as f:
-                    students = json.load(f)
-                
-                del students[index]
-                
-                with open(STUDENTS_FILE, 'w') as f:
-                    json.dump(students, f, indent=4)
-                
-                self.load_students()
-                self.update_dashboard()
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed: {str(e)}")
-    
-    def delete_question(self, index):
-        """Delete question"""
-        reply = QMessageBox.question(
-            self, 'Confirm Delete',
-            'Delete this question?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                with open(QUESTIONS_FILE, 'r') as f:
-                    questions = json.load(f)
-                
-                del questions[index]
-                
-                with open(QUESTIONS_FILE, 'w') as f:
-                    json.dump(questions, f, indent=4)
-                
-                self.load_questions()
-                self.update_dashboard()
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed: {str(e)}")
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    panel = AdminPanel()
-    panel.show()
-    sys.exit(app.exec())
 
 
 
-"""
-Admin Account Management System
-Manage multiple administrator accounts
-"""
-
-import sys
-import json
-import os
-import hashlib
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
-                             QHBoxLayout, QLabel, QPushButton, QTableWidget,
-                             QTableWidgetItem, QMessageBox, QDialog, QLineEdit)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-
-ADMIN_CREDENTIALS_FILE = "admin_credentials.json"
-
-class AdminManagementWindow(QMainWindow):
-    def __init__(self, current_admin_username="admin"):
-        super().__init__()
-        self.current_admin = current_admin_username
-        self.init_ui()
-        self.load_admins()
-    
-    def init_ui(self):
-        self.setWindowTitle("Admin Account Management")
-        self.setGeometry(150, 150, 800, 600)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 30, 30, 30)
-        layout.setSpacing(20)
-        
-        # Header
-        header_layout = QHBoxLayout()
-        
-        title = QLabel("👥 Admin Account Management")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        current_user = QLabel(f"Logged in as: {self.current_admin}")
-        current_user.setFont(QFont("Arial", 10))
-        current_user.setStyleSheet("color: #7f8c8d;")
-        header_layout.addWidget(current_user)
-        
-        layout.addLayout(header_layout)
-        
-        # Info box
-        info = QLabel("Manage administrator accounts. Add, remove, or change passwords.")
-        info.setStyleSheet("""
-            background-color: #d6eaf8;
-            color: #2c3e50;
-            padding: 12px;
-            border-radius: 6px;
-            border-left: 4px solid #3498db;
-        """)
-        info.setWordWrap(True)
-        layout.addWidget(info)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        btn_layout.setSpacing(10)
-        
-        add_btn = QPushButton("➕ Add Admin")
-        add_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        add_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        add_btn.clicked.connect(self.add_admin)
-        btn_layout.addWidget(add_btn)
-        
-        refresh_btn = QPushButton("🔄 Refresh")
-        refresh_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        refresh_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        refresh_btn.clicked.connect(self.load_admins)
-        btn_layout.addWidget(refresh_btn)
-        
-        btn_layout.addStretch()
-        
-        close_btn = QPushButton("✗ Close")
-        close_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        close_btn.clicked.connect(self.close)
-        btn_layout.addWidget(close_btn)
-        
-        layout.addLayout(btn_layout)
-        
-        # Admin table
-        self.admin_table = QTableWidget()
-        self.admin_table.setStyleSheet("""
-            QTableWidget {
-                background-color: white;
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-            }
-            QHeaderView::section {
-                background-color: #34495e;
-                color: white;
-                padding: 10px;
-                font-weight: bold;
-                border: none;
-            }
-            QTableWidget::item {
-                padding: 8px;
-            }
-        """)
-        layout.addWidget(self.admin_table)
-        
-        # Warning
-        warning = QLabel("⚠️ Warning: Deleting your own account will log you out immediately!")
-        warning.setFont(QFont("Arial", 9))
-        warning.setStyleSheet("""
-            background-color: #fadbd8;
-            color: #e74c3c;
-            padding: 10px;
-            border-radius: 5px;
-            border-left: 4px solid #e74c3c;
-        """)
-        layout.addWidget(warning)
-        
-        central_widget.setLayout(layout)
-    
-    def load_admins(self):
-        """Load admin accounts"""
-        try:
-            if not os.path.exists(ADMIN_CREDENTIALS_FILE):
-                # Create default admin
-                default_creds = [{
-                    "username": "admin",
-                    "password": hashlib.sha256("admin123".encode()).hexdigest()
-                }]
-                with open(ADMIN_CREDENTIALS_FILE, 'w') as f:
-                    json.dump(default_creds, f, indent=4)
-            
-            with open(ADMIN_CREDENTIALS_FILE, 'r') as f:
-                creds = json.load(f)
-            
-            # Handle both dict and list formats
-            if isinstance(creds, dict):
-                admins = [creds]
-            else:
-                admins = creds
-            
-            # Setup table
-            self.admin_table.setRowCount(len(admins))
-            self.admin_table.setColumnCount(3)
-            self.admin_table.setHorizontalHeaderLabels(["Username", "Status", "Actions"])
-            
-            for i, admin in enumerate(admins):
-                # Username
-                username_item = QTableWidgetItem(admin['username'])
-                username_item.setFont(QFont("Arial", 11))
-                self.admin_table.setItem(i, 0, username_item)
-                
-                # Status
-                is_current = admin['username'] == self.current_admin
-                status = "🟢 Current User" if is_current else "👤 Admin"
-                status_item = QTableWidgetItem(status)
-                status_item.setFont(QFont("Arial", 10))
-                self.admin_table.setItem(i, 1, status_item)
-                
-                # Action buttons
-                action_widget = QWidget()
-                action_layout = QHBoxLayout()
-                action_layout.setContentsMargins(5, 2, 5, 2)
-                action_layout.setSpacing(5)
-                
-                # Change password button
-                change_pwd_btn = QPushButton("🔑 Change Password")
-                change_pwd_btn.setFont(QFont("Arial", 9))
-                change_pwd_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #f39c12;
-                        color: white;
-                        padding: 5px 10px;
-                        border: none;
-                        border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #e67e22;
-                    }
-                """)
-                change_pwd_btn.clicked.connect(lambda checked, idx=i: self.change_password(idx))
-                action_layout.addWidget(change_pwd_btn)
-                
-                # Delete button
-                delete_btn = QPushButton("🗑 Delete")
-                delete_btn.setFont(QFont("Arial", 9))
-                delete_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #e74c3c;
-                        color: white;
-                        padding: 5px 10px;
-                        border: none;
-                        border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #c0392b;
-                    }
-                """)
-                delete_btn.clicked.connect(lambda checked, idx=i: self.delete_admin(idx))
-                action_layout.addWidget(delete_btn)
-                
-                action_widget.setLayout(action_layout)
-                self.admin_table.setCellWidget(i, 2, action_widget)
-            
-            self.admin_table.resizeColumnsToContents()
-            self.admin_table.horizontalHeader().setStretchLastSection(True)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load admins:\n{str(e)}")
-    
-    def add_admin(self):
-        """Add new admin dialog"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Add New Admin")
-        dialog.setGeometry(250, 250, 400, 300)
-        dialog.setStyleSheet("background-color: #ecf0f1;")
-        
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        # Title
-        title = QLabel("➕ Add New Administrator")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(title)
-        
-        # Username
-        username_label = QLabel("Username:")
-        username_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        layout.addWidget(username_label)
-        
-        username_input = QLineEdit()
-        username_input.setPlaceholderText("Enter new admin username")
-        username_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 6px;
-            }
-        """)
-        layout.addWidget(username_input)
-        
-        # Password
-        password_label = QLabel("Password:")
-        password_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        layout.addWidget(password_label)
-        
-        password_input = QLineEdit()
-        password_input.setPlaceholderText("Enter password")
-        password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        password_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 6px;
-            }
-        """)
-        layout.addWidget(password_input)
-        
-        # Confirm password
-        confirm_label = QLabel("Confirm Password:")
-        confirm_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        layout.addWidget(confirm_label)
-        
-        confirm_input = QLineEdit()
-        confirm_input.setPlaceholderText("Confirm password")
-        confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
-        confirm_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 6px;
-            }
-        """)
-        layout.addWidget(confirm_input)
-        
-        # Buttons
-        btn_layout = QHBoxLayout()
-        
-        save_btn = QPushButton("💾 Save")
-        save_btn.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        
-        def save_admin():
-            username = username_input.text().strip()
-            password = password_input.text().strip()
-            confirm = confirm_input.text().strip()
-            
-            if not username or not password:
-                QMessageBox.warning(dialog, "Input Error", "Username and password are required!")
-                return
-            
-            if password != confirm:
-                QMessageBox.warning(dialog, "Password Mismatch", "Passwords do not match!")
-                return
-            
-            if len(password) < 6:
-                QMessageBox.warning(dialog, "Weak Password", "Password must be at least 6 characters!")
-                return
-            
-            try:
-                with open(ADMIN_CREDENTIALS_FILE, 'r') as f:
-                    creds = json.load(f)
-                
-                if isinstance(creds, dict):
-                    admins = [creds]
-                else:
-                    admins = creds
-                
-                # Check duplicate
-                if any(a['username'] == username for a in admins):
-                    QMessageBox.warning(dialog, "Duplicate", "Username already exists!")
-                    return
-                
-                # Add new admin
-                new_admin = {
-                    'username': username,
-                    'password': hashlib.sha256(password.encode()).hexdigest()
-                }
-                
-                admins.append(new_admin)
-                
-                with open(ADMIN_CREDENTIALS_FILE, 'w') as f:
-                    json.dump(admins, f, indent=4)
-                
-                QMessageBox.information(dialog, "Success", "Admin added successfully!")
-                dialog.accept()
-                self.load_admins()
-                
-            except Exception as e:
-                QMessageBox.critical(dialog, "Error", f"Failed to add admin:\n{str(e)}")
-        
-        save_btn.clicked.connect(save_admin)
-        confirm_input.returnPressed.connect(save_admin)
-        
-        cancel_btn = QPushButton("✗ Cancel")
-        cancel_btn.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 6px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        cancel_btn.clicked.connect(dialog.reject)
-        
-        btn_layout.addWidget(save_btn)
-        btn_layout.addWidget(cancel_btn)
-        layout.addLayout(btn_layout)
-        
-        dialog.setLayout(layout)
-        dialog.exec()
-    
-    def change_password(self, index):
-        """Change admin password"""
-        try:
-            with open(ADMIN_CREDENTIALS_FILE, 'r') as f:
-                creds = json.load(f)
-            
-            if isinstance(creds, dict):
-                admins = [creds]
-            else:
-                admins = creds
-            
-            admin = admins[index]
-            username = admin['username']
-            
-            # Create dialog
-            dialog = QDialog(self)
-            dialog.setWindowTitle(f"Change Password - {username}")
-            dialog.setGeometry(250, 250, 400, 250)
-            dialog.setStyleSheet("background-color: #ecf0f1;")
-            
-            layout = QVBoxLayout()
-            layout.setSpacing(15)
-            layout.setContentsMargins(30, 30, 30, 30)
-            
-            title = QLabel(f"🔑 Change Password for: {username}")
-            title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-            title.setStyleSheet("color: #2c3e50;")
-            layout.addWidget(title)
-            
-            # New password
-            new_pwd_label = QLabel("New Password:")
-            new_pwd_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            layout.addWidget(new_pwd_label)
-            
-            new_pwd_input = QLineEdit()
-            new_pwd_input.setPlaceholderText("Enter new password")
-            new_pwd_input.setEchoMode(QLineEdit.EchoMode.Password)
-            new_pwd_input.setStyleSheet("""
-                QLineEdit {
-                    padding: 10px;
-                    border: 2px solid #bdc3c7;
-                    border-radius: 6px;
-                }
-            """)
-            layout.addWidget(new_pwd_input)
-            
-            # Confirm password
-            confirm_label = QLabel("Confirm Password:")
-            confirm_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            layout.addWidget(confirm_label)
-            
-            confirm_input = QLineEdit()
-            confirm_input.setPlaceholderText("Confirm new password")
-            confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
-            confirm_input.setStyleSheet("""
-                QLineEdit {
-                    padding: 10px;
-                    border: 2px solid #bdc3c7;
-                    border-radius: 6px;
-                }
-            """)
-            layout.addWidget(confirm_input)
-            
-            # Buttons
-            btn_layout = QHBoxLayout()
-            
-            update_btn = QPushButton("✓ Update")
-            update_btn.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            update_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #27ae60;
-                    color: white;
-                    padding: 10px 20px;
-                    border: none;
-                    border-radius: 6px;
-                }
-                QPushButton:hover {
-                    background-color: #229954;
-                }
-            """)
-            
-            def update_password():
-                new_pwd = new_pwd_input.text().strip()
-                confirm = confirm_input.text().strip()
-                
-                if not new_pwd:
-                    QMessageBox.warning(dialog, "Input Error", "Password is required!")
-                    return
-                
-                if new_pwd != confirm:
-                    QMessageBox.warning(dialog, "Password Mismatch", "Passwords do not match!")
-                    return
-                
-                if len(new_pwd) < 6:
-                    QMessageBox.warning(dialog, "Weak Password", "Password must be at least 6 characters!")
-                    return
-                
-                try:
-                    admins[index]['password'] = hashlib.sha256(new_pwd.encode()).hexdigest()
-                    
-                    with open(ADMIN_CREDENTIALS_FILE, 'w') as f:
-                        json.dump(admins, f, indent=4)
-                    
-                    QMessageBox.information(dialog, "Success", "Password changed successfully!")
-                    dialog.accept()
-                    
-                except Exception as e:
-                    QMessageBox.critical(dialog, "Error", f"Failed to change password:\n{str(e)}")
-            
-            update_btn.clicked.connect(update_password)
-            confirm_input.returnPressed.connect(update_password)
-            
-            cancel_btn = QPushButton("✗ Cancel")
-            cancel_btn.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-            cancel_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #95a5a6;
-                    color: white;
-                    padding: 10px 20px;
-                    border: none;
-                    border-radius: 6px;
-                }
-                QPushButton:hover {
-                    background-color: #7f8c8d;
-                }
-            """)
-            cancel_btn.clicked.connect(dialog.reject)
-            
-            btn_layout.addWidget(update_btn)
-            btn_layout.addWidget(cancel_btn)
-            layout.addLayout(btn_layout)
-            
-            dialog.setLayout(layout)
-            dialog.exec()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to change password:\n{str(e)}")
-    
-    def delete_admin(self, index):
-        """Delete admin account"""
-        try:
-            with open(ADMIN_CREDENTIALS_FILE, 'r') as f:
-                creds = json.load(f)
-            
-            if isinstance(creds, dict):
-                admins = [creds]
-            else:
-                admins = creds
-            
-            if len(admins) <= 1:
-                QMessageBox.warning(self, "Cannot Delete", 
-                                  "Cannot delete the last admin account!\n\n"
-                                  "At least one admin must exist.")
-                return
-            
-            admin = admins[index]
-            username = admin['username']
-            
-            reply = QMessageBox.question(
-                self,
-                'Confirm Delete',
-                f'Are you sure you want to delete admin "{username}"?\n\n'
-                f'{"⚠️ You will be logged out immediately!" if username == self.current_admin else "This action cannot be undone!"}',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                del admins[index]
-                
-                with open(ADMIN_CREDENTIALS_FILE, 'w') as f:
-                    json.dump(admins, f, indent=4)
-                
-                QMessageBox.information(self, "Success", "Admin deleted successfully!")
-                
-                if username == self.current_admin:
-                    self.close()
-                else:
-                    self.load_admins()
-                    
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to delete admin:\n{str(e)}")
-
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = AdminManagementWindow()
-    window.show()
-    sys.exit(app.exec())
-
-
-"""
-Updated Student Exam Window with Scheduling Support
-Checks scheduled exams, validates access time, shows thank you message
-"""
-
-import sys
-import json
-import os
-import random
-from datetime import datetime
-import cv2
-import numpy as np
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QRadioButton,
-                             QMessageBox, QButtonGroup, QProgressBar, QDialog)
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
-
-# File paths
-QUESTIONS_FILE = "questions.json"
-RESULTS_FILE = "results.json"
-SECURITY_LOGS_FILE = "security_logs.json"
-SCHEDULED_EXAMS_FILE = "scheduled_exams.json"
-CHEATING_ALERTS_FILE = "cheating_alerts.json"
-
-
-class ThankYouDialog(QDialog):
-    """Thank you dialog after exam submission"""
-    def __init__(self, result_data, parent=None):
-        super().__init__(parent)
-        self.result_data = result_data
-        self.init_ui()
-    
-    def init_ui(self):
-        self.setWindowTitle("Exam Submitted")
-        self.setGeometry(200, 200, 600, 500)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint)
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(40, 40, 40, 40)
-        layout.setSpacing(20)
-        
-        # Success icon
-        icon_label = QLabel("✅")
-        icon_label.setFont(QFont("Arial", 80))
-        icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(icon_label)
-        
-        # Thank you message
-        thank_you = QLabel("Thank You!")
-        thank_you.setFont(QFont("Arial", 28, QFont.Weight.Bold))
-        thank_you.setStyleSheet("color: #27ae60;")
-        thank_you.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(thank_you)
-        
-        # Message
-        message = QLabel(f"Dear {self.result_data.get('student_name', 'Student')},\n\n"
-                        "Your exam has been submitted successfully!\n"
-                        "Your responses have been recorded.")
-        message.setFont(QFont("Arial", 13))
-        message.setStyleSheet("color: #2c3e50;")
-        message.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        message.setWordWrap(True)
-        layout.addWidget(message)
-        
-        # Info box
-        info_box = QWidget()
-        info_box.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border: 2px solid #3498db;
-                border-radius: 10px;
-                padding: 20px;
-            }
-        """)
-        info_layout = QVBoxLayout()
-        
-        exam_name = QLabel(f"📝 {self.result_data.get('exam_name', 'Exam')}")
-        exam_name.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        exam_name.setStyleSheet("color: #3498db;")
-        info_layout.addWidget(exam_name)
-        
-        questions_completed = QLabel(f"Questions Completed: {self.result_data.get('questions_answered', 0)}/{self.result_data.get('total_questions', 0)}")
-        questions_completed.setFont(QFont("Arial", 12))
-        info_layout.addWidget(questions_completed)
-        
-        time_taken = QLabel(f"Time Taken: {self.result_data.get('time_taken', 'N/A')}")
-        time_taken.setFont(QFont("Arial", 12))
-        info_layout.addWidget(time_taken)
-        
-        submission_time = QLabel(f"Submitted at: {self.result_data.get('timestamp', '')}")
-        submission_time.setFont(QFont("Arial", 10))
-        submission_time.setStyleSheet("color: #7f8c8d;")
-        info_layout.addWidget(submission_time)
-        
-        info_box.setLayout(info_layout)
-        layout.addWidget(info_box)
-        
-        # Note
-        note = QLabel("📊 Your results will be available soon.\n"
-                     "Please contact your administrator for result inquiries.")
-        note.setFont(QFont("Arial", 11))
-        note.setStyleSheet("color: #7f8c8d; padding: 15px;")
-        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        note.setWordWrap(True)
-        layout.addWidget(note)
-        
-        # Close button
-        close_btn = QPushButton("✓ Close")
-        close_btn.setFont(QFont("Arial", 13, QFont.Weight.Bold))
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 15px;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        close_btn.clicked.connect(self.accept)
-        layout.addWidget(close_btn)
-        
-        self.setLayout(layout)
-
-
-class ExamWindow(QMainWindow):
-    def __init__(self, username, student_name, student_data=None):
-        super().__init__()
-        self.username = username
-        self.student_name = student_name
-        self.student_data = student_data or {}
-        self.current_exam = None
-        self.questions = []
-        self.current_question_index = 0
-        self.answers = {}
-        self.tab_switch_count = 0
-        self.start_time = datetime.now()
-        self.capture = None
-        self.monitoring_timer = None
-        self.face_cascade = None
-        self.no_face_count = 0
-        self.multiple_face_count = 0
-        
-        # Check for scheduled exam
-        if not self.check_scheduled_exam():
-            QMessageBox.critical(self, "No Exam Available", 
-                               "No exam is currently scheduled for you or the exam time has not started yet.")
-            sys.exit(0)
-        
-        self.time_limit = self.current_exam.get('duration_minutes', 60) * 60
-        self.time_remaining = self.time_limit
-        self.camera_required = self.current_exam.get('camera_required', False)
-        
-        # Camera verification if required
-        if self.camera_required:
-            if not self.verify_camera():
-                QMessageBox.critical(self, "Camera Required", 
-                                   "Camera verification is mandatory for this exam.")
-                sys.exit(0)
-        
-        self.init_ui()
-        self.load_questions()
-        self.start_timer()
-        self.display_question()
-        
-        # Start monitoring if camera is required
-        if self.camera_required:
-            self.start_monitoring()
-        
-        # Freeze screen
-        self.freeze_screen()
-    
-    def check_scheduled_exam(self):
-        """Check if there's a scheduled exam available for this student"""
-        try:
-            if not os.path.exists(SCHEDULED_EXAMS_FILE):
-                return False
-            
-            with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                scheduled_exams = json.load(f)
-            
-            student_group = self.student_data.get('group')
-            now = datetime.now()
-            
-            # Find active exam for this student's group
-            for exam in scheduled_exams:
-                exam_group = exam.get('group')
-                start_time = datetime.strptime(exam['start_datetime'], '%Y-%m-%d %H:%M:%S')
-                end_time = datetime.strptime(exam['end_datetime'], '%Y-%m-%d %H:%M:%S')
-                
-                # Check if exam is for this student's group (or all students)
-                if exam_group and exam_group != student_group:
-                    continue
-                
-                # Check if exam is currently active
-                if start_time <= now <= end_time and exam['status'] in ['scheduled', 'active']:
-                    self.current_exam = exam
-                    
-                    # Update exam status to active if needed
-                    if exam['status'] == 'scheduled':
-                        exam['status'] = 'active'
-                        with open(SCHEDULED_EXAMS_FILE, 'w') as f:
-                            json.dump(scheduled_exams, f, indent=4)
-                    
-                    return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"Error checking scheduled exam: {str(e)}")
-            return False
-    
-    def verify_camera(self):
-        """Simple camera verification"""
-        try:
-            capture = cv2.VideoCapture(0)
-            if not capture.isOpened():
-                return False
-            
-            ret, frame = capture.read()
-            capture.release()
-            
-            if not ret:
-                return False
-            
-            # In real implementation, add face detection here
-            return True
-            
-        except:
-            return False
-    
-    def freeze_screen(self):
-        """Freeze screen to exam window"""
-        self.setWindowFlags(Qt.WindowType.Window | 
-                          Qt.WindowType.WindowStaysOnTopHint |
-                          Qt.WindowType.CustomizeWindowHint)
-        self.showFullScreen()
-        self.setWindowState(Qt.WindowState.WindowFullScreen)
-        
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.grabKeyboard()
-    
-    def start_monitoring(self):
-        """Start camera monitoring for cheating detection"""
-        try:
-            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            self.face_cascade = cv2.CascadeClassifier(cascade_path)
-            
-            self.capture = cv2.VideoCapture(0)
-            if not self.capture.isOpened():
-                self.log_security_violation("Camera Error", "Failed to start monitoring camera")
-                return
-            
-            self.monitoring_timer = QTimer()
-            self.monitoring_timer.timeout.connect(self.check_for_cheating)
-            self.monitoring_timer.start(2000)
-            
-        except Exception as e:
-            self.log_security_violation("Monitoring Error", f"Failed to start monitoring: {str(e)}")
-    
-    def check_for_cheating(self):
-        """Check for cheating behavior"""
-        if self.capture is None:
-            return
-        
-        ret, frame = self.capture.read()
-        if not ret:
-            return
-        
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(gray, 1.3, 5)
-        
-        # Check for no face
-        if len(faces) == 0:
-            self.no_face_count += 1
-            if self.no_face_count >= 3:
-                self.send_cheating_alert("No Face Detected", 
-                                        "Student's face not visible in camera")
-                self.no_face_count = 0
-        else:
-            self.no_face_count = 0
-        
-        # Check for multiple faces
-        if len(faces) > 1:
-            self.multiple_face_count += 1
-            if self.multiple_face_count >= 2:
-                self.send_cheating_alert("Multiple Faces Detected", 
-                                        f"Detected {len(faces)} faces in frame")
-                self.multiple_face_count = 0
-        else:
-            self.multiple_face_count = 0
-    
-    def send_cheating_alert(self, alert_type, details):
-        """Send cheating alert to admin"""
-        try:
-            alerts = []
-            if os.path.exists(CHEATING_ALERTS_FILE):
-                with open(CHEATING_ALERTS_FILE, 'r') as f:
-                    alerts = json.load(f)
-            
-            alert = {
-                'username': self.username,
-                'student_name': self.student_name,
-                'exam_name': self.current_exam.get('exam_name', 'Unknown'),
-                'alert_type': alert_type,
-                'details': details,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'question_number': self.current_question_index + 1
-            }
-            
-            alerts.append(alert)
-            
-            with open(CHEATING_ALERTS_FILE, 'w') as f:
-                json.dump(alerts, f, indent=4)
-            
-            self.log_security_violation(alert_type, details)
-            
-            QMessageBox.warning(self, "⚠️ Security Alert", 
-                              f"{alert_type}\n\nThis incident has been reported to the administrator.")
-            
-        except Exception as e:
-            pass
-    
-    def init_ui(self):
-        self.setWindowTitle(f"Examination Portal - {self.current_exam.get('exam_name', 'Exam')}")
-        self.setGeometry(0, 0, 1920, 1080)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(30, 20, 30, 20)
-        layout.setSpacing(15)
-        
-        # Header
-        header_layout = QHBoxLayout()
-        
-        title = QLabel(f"📝 {self.current_exam.get('exam_name', 'Online Examination')}")
-        title.setFont(QFont("Arial", 20, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        # Camera indicator
-        if self.camera_required:
-            camera_status = QLabel("📷 Monitored")
-            camera_status.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-            camera_status.setStyleSheet("""
-                color: white;
-                background-color: #e74c3c;
-                padding: 8px 15px;
-                border-radius: 6px;
-            """)
-            header_layout.addWidget(camera_status)
-        
-        student_label = QLabel(f"Student: {self.student_name}")
-        student_label.setFont(QFont("Arial", 12))
-        student_label.setStyleSheet("color: #7f8c8d; margin-left: 15px;")
-        header_layout.addWidget(student_label)
-        
-        layout.addLayout(header_layout)
-        
-        # Timer and info
-        info_layout = QHBoxLayout()
-        
-        # Timer
-        timer_frame = QWidget()
-        timer_frame.setStyleSheet("""
-            QWidget {
-                background-color: #e74c3c;
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        timer_layout = QHBoxLayout()
-        timer_layout.setContentsMargins(15, 10, 15, 10)
-        
-        self.timer_label = QLabel(f"⏱ Time: {self.time_limit//60}:00")
-        self.timer_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.timer_label.setStyleSheet("color: white;")
-        timer_layout.addWidget(self.timer_label)
-        
-        timer_frame.setLayout(timer_layout)
-        info_layout.addWidget(timer_frame)
-        
-        info_layout.addStretch()
-        
-        # Marks info
-        marks_label = QLabel(f"Total Marks: {self.current_exam.get('total_marks', 0)}")
-        marks_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        marks_label.setStyleSheet("color: #2c3e50;")
-        info_layout.addWidget(marks_label)
-        
-        # Question counter
-        self.question_counter = QLabel("Question: 1/0")
-        self.question_counter.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.question_counter.setStyleSheet("color: #2c3e50;")
-        info_layout.addWidget(self.question_counter)
-        
-        layout.addLayout(info_layout)
-        
-        # Progress bar
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #3498db;
-            }
-        """)
-        layout.addWidget(self.progress_bar)
-        
-        # Question display
-        question_frame = QWidget()
-        question_frame.setStyleSheet("""
-            QWidget {
-                background-color: white;
-                border: 2px solid #3498db;
-                border-radius: 10px;
-                padding: 20px;
-            }
-        """)
-        question_layout = QVBoxLayout()
-        
-        self.question_label = QLabel("Question will appear here")
-        self.question_label.setFont(QFont("Arial", 14))
-        self.question_label.setWordWrap(True)
-        self.question_label.setStyleSheet("color: #2c3e50; padding: 10px;")
-        question_layout.addWidget(self.question_label)
-        
-        # Marks for this question
-        self.question_marks_label = QLabel(f"[Marks: {self.current_exam.get('marks_per_question', 1)}]")
-        self.question_marks_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.question_marks_label.setStyleSheet("color: #e67e22;")
-        question_layout.addWidget(self.question_marks_label)
-        
-        question_frame.setLayout(question_layout)
-        layout.addWidget(question_frame)
-        
-        # Options
-        self.options_group = QButtonGroup()
-        self.option_buttons = []
-        
-        for i in range(4):
-            option = QRadioButton()
-            option.setFont(QFont("Arial", 12))
-            option.setStyleSheet("""
-                QRadioButton {
-                    padding: 12px;
-                    background-color: white;
-                    border: 2px solid #bdc3c7;
-                    border-radius: 8px;
-                    margin: 5px;
-                }
-                QRadioButton:hover {
-                    border: 2px solid #3498db;
-                    background-color: #ebf5fb;
-                }
-                QRadioButton:checked {
-                    border: 2px solid #27ae60;
-                    background-color: #d5f4e6;
-                }
-            """)
-            self.options_group.addButton(option, i)
-            self.option_buttons.append(option)
-            layout.addWidget(option)
-        
-        layout.addStretch()
-        
-        # Navigation buttons
-        nav_layout = QHBoxLayout()
-        
-        self.prev_btn = QPushButton("⬅ Previous")
-        self.prev_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.prev_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 12px 25px;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        self.prev_btn.clicked.connect(self.previous_question)
-        nav_layout.addWidget(self.prev_btn)
-        
-        nav_layout.addStretch()
-        
-        self.status_label = QLabel("0 answered / 0 total")
-        self.status_label.setFont(QFont("Arial", 11))
-        self.status_label.setStyleSheet("color: #7f8c8d;")
-        nav_layout.addWidget(self.status_label)
-        
-        nav_layout.addStretch()
-        
-        self.next_btn = QPushButton("Next ➡")
-        self.next_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 12px 25px;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        self.next_btn.clicked.connect(self.next_question)
-        nav_layout.addWidget(self.next_btn)
-        
-        self.submit_btn = QPushButton("✅ Submit Exam")
-        self.submit_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        self.submit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 12px 25px;
-                border: none;
-                border-radius: 8px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        self.submit_btn.clicked.connect(self.submit_exam)
-        self.submit_btn.hide()
-        nav_layout.addWidget(self.submit_btn)
-        
-        layout.addLayout(nav_layout)
-        
-        # Warning
-        warning_text = "⚠️ Warning: "
-        if self.camera_required:
-            warning_text += "Keep your face visible • "
-        warning_text += "Do not switch tabs or minimize window • All activities are monitored"
-        
-        warning = QLabel(warning_text)
-        warning.setFont(QFont("Arial", 10))
-        warning.setStyleSheet("""
-            color: #e74c3c;
-            background-color: #fadbd8;
-            padding: 10px;
-            border-radius: 5px;
-        """)
-        warning.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(warning)
-        
-        central_widget.setLayout(layout)
-    
-    def load_questions(self):
-        """Load questions for this exam"""
-        try:
-            if not os.path.exists(QUESTIONS_FILE):
-                QMessageBox.critical(self, "Error", "No questions found!")
-                self.close()
-                return
-            
-            with open(QUESTIONS_FILE, 'r') as f:
-                all_questions = json.load(f)
-            
-            # Get questions based on indices from scheduled exam
-            question_indices = self.current_exam.get('question_indices', [])
-            self.questions = [all_questions[i] for i in question_indices if i < len(all_questions)]
-            
-            # Shuffle if required
-            if self.current_exam.get('shuffle_questions', False):
-                random.shuffle(self.questions)
-            
-            if not self.questions:
-                QMessageBox.critical(self, "Error", "No questions available for this exam!")
-                self.close()
-                return
-            
-            for i in range(len(self.questions)):
-                self.answers[i] = None
-            
-            self.progress_bar.setMaximum(len(self.questions))
-            self.question_counter.setText(f"Question: 1/{len(self.questions)}")
-            self.update_status()
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load questions:\n{str(e)}")
-            self.close()
-    
-    def start_timer(self):
-        """Start exam timer"""
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.timer.start(1000)
-    
-    def update_timer(self):
-        """Update timer"""
-        self.time_remaining -= 1
-        
-        if self.time_remaining <= 0:
-            self.timer.stop()
-            QMessageBox.warning(self, "Time's Up!", "Submitting your exam now...")
-            self.submit_exam()
-            return
-        
-        minutes = self.time_remaining // 60
-        seconds = self.time_remaining % 60
-        self.timer_label.setText(f"⏱ Time: {minutes:02d}:{seconds:02d}")
-    
-    def display_question(self):
-        """Display current question"""
-        if self.current_question_index >= len(self.questions):
-            return
-        
-        question = self.questions[self.current_question_index]
-        self.question_label.setText(f"Q{self.current_question_index + 1}. {question['question']}")
-        
-        options = question.get('options', [])
-        for i, option in enumerate(options):
-            if i < len(self.option_buttons):
-                self.option_buttons[i].setText(option)
-                self.option_buttons[i].show()
-        
-        for i in range(len(options), 4):
-            self.option_buttons[i].hide()
-        
-        saved_answer = self.answers.get(self.current_question_index)
-        if saved_answer is not None:
-            self.option_buttons[saved_answer].setChecked(True)
-        else:
-            self.options_group.setExclusive(False)
-            for btn in self.option_buttons:
-                btn.setChecked(False)
-            self.options_group.setExclusive(True)
-        
-        self.prev_btn.setEnabled(self.current_question_index > 0)
-        is_last_question = self.current_question_index == len(self.questions) - 1
-        self.next_btn.setVisible(not is_last_question)
-        self.submit_btn.setVisible(is_last_question)
-        
-        self.question_counter.setText(f"Question: {self.current_question_index + 1}/{len(self.questions)}")
-        self.progress_bar.setValue(self.current_question_index + 1)
-        self.update_status()
-    
-    def save_current_answer(self):
-        """Save current answer"""
-        selected = self.options_group.checkedId()
-        if selected != -1:
-            self.answers[self.current_question_index] = selected
-    
-    def next_question(self):
-        """Next question"""
-        self.save_current_answer()
-        if self.current_question_index < len(self.questions) - 1:
-            self.current_question_index += 1
-            self.display_question()
-    
-    def previous_question(self):
-        """Previous question"""
-        self.save_current_answer()
-        if self.current_question_index > 0:
-            self.current_question_index -= 1
-            self.display_question()
-    
-    def update_status(self):
-        """Update status"""
-        answered = sum(1 for ans in self.answers.values() if ans is not None)
-        total = len(self.questions)
-        self.status_label.setText(f"{answered} answered / {total} total")
-    
-    def submit_exam(self):
-        """Submit exam"""
-        self.save_current_answer()
-        
-        unanswered = sum(1 for ans in self.answers.values() if ans is None)
-        if unanswered > 0:
-            reply = QMessageBox.question(
-                self, 'Incomplete Exam',
-                f'You have {unanswered} unanswered question(s).\n\nSubmit anyway?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            if reply == QMessageBox.StandardButton.No:
-                return
-        
-        self.timer.stop()
-        if self.monitoring_timer:
-            self.monitoring_timer.stop()
-        
-        # Calculate score based on marks per question
-        correct_answers = 0
-        for i, question in enumerate(self.questions):
-            if self.answers.get(i) == question.get('answer', 0):
-                correct_answers += 1
-        
-        marks_per_question = self.current_exam.get('marks_per_question', 1)
-        total_marks = self.current_exam.get('total_marks', len(self.questions))
-        obtained_marks = correct_answers * marks_per_question
-        percentage = (obtained_marks / total_marks * 100) if total_marks > 0 else 0
-        
-        time_taken_sec = self.time_limit - self.time_remaining
-        time_taken = f"{time_taken_sec // 60}m {time_taken_sec % 60}s"
-        
-        passing_percentage = self.current_exam.get('passing_percentage', 40)
-        status = "PASS" if percentage >= passing_percentage else "FAIL"
-        
-        try:
-            results = []
-            if os.path.exists(RESULTS_FILE):
-                with open(RESULTS_FILE, 'r') as f:
-                    results = json.load(f)
-            
-            result = {
-                'username': self.username,
-                'student_name': self.student_name,
-                'exam_name': self.current_exam.get('exam_name', 'Exam'),
-                'exam_id': self.current_exam.get('exam_id', 'N/A'),
-                'score': correct_answers,
-                'total_questions': len(self.questions),
-                'obtained_marks': obtained_marks,
-                'total_marks': total_marks,
-                'percentage': percentage,
-                'time_taken': time_taken,
-                'tab_switch_count': self.tab_switch_count,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'camera_monitoring': self.camera_required,
-                'status': status,
-                'questions_answered': sum(1 for ans in self.answers.values() if ans is not None)
-            }
-            
-            results.append(result)
-            
-            with open(RESULTS_FILE, 'w') as f:
-                json.dump(results, f, indent=4)
-            
-            # Show thank you dialog
-            self.show_thank_you(result)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to save results:\n{str(e)}")
-            self.close()
-    
-    def show_thank_you(self, result_data):
-        """Show thank you dialog"""
-        dialog = ThankYouDialog(result_data, self)
-        dialog.exec()
-        self.cleanup_and_close()
-    
-    def log_security_violation(self, violation_type, details):
-        """Log security violation"""
-        try:
-            logs = []
-            if os.path.exists(SECURITY_LOGS_FILE):
-                with open(SECURITY_LOGS_FILE, 'r') as f:
-                    logs = json.load(f)
-            
-            log_entry = {
-                'username': self.username,
-                'student_name': self.student_name,
-                'exam_name': self.current_exam.get('exam_name', 'Unknown'),
-                'violation_type': violation_type,
-                'details': details,
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
-            
-            logs.append(log_entry)
-            
-            with open(SECURITY_LOGS_FILE, 'w') as f:
-                json.dump(logs, f, indent=4)
-        except:
-            pass
-    
-    def cleanup_and_close(self):
-        """Cleanup resources"""
-        if self.capture:
-            self.capture.release()
-        if self.monitoring_timer:
-            self.monitoring_timer.stop()
-        self.releaseKeyboard()
-        self.close()
-    
-    def closeEvent(self, event):
-        """Handle close"""
-        if hasattr(self, 'timer') and self.timer.isActive():
-            reply = QMessageBox.question(
-                self, 'Exit Exam',
-                'Are you sure you want to exit and submit the exam?',
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                self.submit_exam()
-                event.accept()
-            else:
-                event.ignore()
-        else:
-            self.cleanup_and_close()
-            event.accept()
-    
-    def changeEvent(self, event):
-        """Detect window changes"""
-        if event.type() == event.Type.WindowStateChange:
-            if self.windowState() == Qt.WindowState.WindowMinimized:
-                self.tab_switch_count += 1
-                self.log_security_violation("Window Minimized", "Student minimized exam window")
-                self.send_cheating_alert("Window Minimized", f"Violation #{self.tab_switch_count}")
-    
-    def keyPressEvent(self, event):
-        """Block certain key combinations"""
-        # Block Alt+Tab, Alt+F4, Ctrl+Alt+Del, Windows key, etc.
-        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
-            event.ignore()
-            return
-        if event.modifiers() & Qt.KeyboardModifier.MetaModifier:  # Windows/Command key
-            event.ignore()
-            return
-        super().keyPressEvent(event)
-
-
-if __name__ == "__main__":
-    # For testing - normally called from login system
-    app = QApplication(sys.argv)
-    
-    # Sample student data
-    student_data = {
-        'username': 'student1',
-        'name': 'John Doe',
-        'group': 'Group A'
-    }
-    
-    window = ExamWindow(student_data['username'], student_data['name'], student_data)
-    window.show()
-    sys.exit(app.exec())
-
-"""
-Login Page for Examination Management System
-Handles authentication for both students and administrators
-UPDATED: Integrates with enhanced exam system with camera monitoring and waiting room
-"""
-
-import sys
-import json
-import os
-import hashlib
-from datetime import datetime, timedelta
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QLineEdit,
-                             QMessageBox, QRadioButton, QButtonGroup, QFrame)
-from PyQt6.QtSvgWidgets import QSvgWidget
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
-
-# File paths
-STUDENTS_FILE = "students.json"
-ADMIN_CREDENTIALS_FILE = "admin_credentials.json"
-QUESTIONS_FILE = "questions.json"
-RESULTS_FILE = "results.json"
-SECURITY_LOGS_FILE = "security_logs.json"
-EXAM_CONFIG_FILE = "exam_config.json"
-RULES_FILE = "rules.json"
-CHEATING_ALERTS_FILE = "cheating_alerts.json"
-SCHEDULED_EXAMS_FILE = "scheduled_exams.json"
-
-class LoginWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.admin_panel = None
-        self.exam_window = None
-        self.admin_mgmt_window = None
-        self.waiting_room_window = None
-        self.init_ui()
-        self.create_default_files()
-    
-    def init_ui(self):
-        self.setWindowTitle("SIENNA ECAD - Login")
-        self.setMinimumSize(1200, 800)
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout()
-        layout.setContentsMargins(40, 30, 40, 30)
-        layout.setSpacing(20)
-        
-        # Header section
-        header_frame = QFrame()
-        header_frame.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:1,
-                    stop:0 #3498db, stop:1 #2980b9);
-                border-radius: 15px;
-                padding: 25px;
-            }
-        """)
-        header_layout = QVBoxLayout()
-        
-        # --- Title Row (SVG + Label) ---
-        title_row = QHBoxLayout()
-        title_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Relative path to the SVG file (e.g., "./assets/logo.svg")
-        svg_path = os.path.join(os.path.dirname(__file__), "sym.svg")
-        svg_icon = QSvgWidget(svg_path)
-        svg_icon.setStyleSheet("background: transparent; border: none;")
-        svg_icon.setFixedSize(250, 150)  # Adjust as needed
-        title_row.addWidget(svg_icon)
-        
-        # Title Label
-        # Add title row to header
-        header_layout.addLayout(title_row)
-        
-        # Subtitle
-        subtitle = QLabel("ONLINE ASSESSMENT")
-        subtitle.setFont(QFont("Arial", 12))
-        subtitle.setStyleSheet("color: #ecf0f1;")
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(subtitle)
-        
-        header_frame.setLayout(header_layout)
-        layout.addWidget(header_frame)
-
-        # Radio buttons for login type
-        type_layout = QHBoxLayout()
-        type_layout.setSpacing(20)
-        
-        self.login_type_group = QButtonGroup()
-        
-        self.student_radio = QRadioButton("👨‍🎓 Student")
-        self.student_radio.setFont(QFont("Arial", 11))
-        self.student_radio.setStyleSheet("""
-            QRadioButton {
-                color: #2c3e50;
-                padding: 10px;
-                background-color: white;
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-            }
-            QRadioButton:checked {
-                border: 2px solid #3498db;
-                background-color: #ebf5fb;
-            }
-            QRadioButton::indicator {
-                width: 18px;
-                height: 18px;
-            }
-        """)
-        self.student_radio.setChecked(True)
-        self.login_type_group.addButton(self.student_radio, 1)
-        type_layout.addWidget(self.student_radio)
-        
-        self.admin_radio = QRadioButton("🔒 Administrator")
-        self.admin_radio.setFont(QFont("Arial", 11))
-        self.admin_radio.setStyleSheet("""
-            QRadioButton {
-                color: #2c3e50;
-                padding: 10px;
-                background-color: white;
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-            }
-            QRadioButton:checked {
-                border: 2px solid #e74c3c;
-                background-color: #fadbd8;
-            }
-            QRadioButton::indicator {
-                width: 18px;
-                height: 18px;
-            }
-        """)
-        self.login_type_group.addButton(self.admin_radio, 2)
-        type_layout.addWidget(self.admin_radio)
-        
-        layout.addLayout(type_layout)
-        
-        # Username field
-        username_label = QLabel("Username:")
-        username_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        username_label.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(username_label)
-        
-        self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter your username")
-        self.username_input.setFont(QFont("Arial", 11))
-        self.username_input.setStyleSheet("""
-            QLineEdit {
-                padding: 12px;
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        layout.addWidget(self.username_input)
-        
-        # Password field
-        password_label = QLabel("Password:")
-        password_label.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        password_label.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(password_label)
-        
-        self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter your password")
-        self.password_input.setFont(QFont("Arial", 11))
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setStyleSheet("""
-            QLineEdit {
-                padding: 12px;
-                border: 2px solid #bdc3c7;
-                border-radius: 8px;
-                background-color: white;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        self.password_input.returnPressed.connect(self.login)
-        layout.addWidget(self.password_input)
-        
-        # Login button
-        login_btn = QPushButton("🔓 Login")
-        login_btn.setFont(QFont("Arial", 13, QFont.Weight.Bold))
-        login_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 15px;
-                border: none;
-                border-radius: 8px;
-                margin-top: 10px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
-        login_btn.clicked.connect(self.login)
-        layout.addWidget(login_btn)
-        
-        # Admin management button (only for administrators)
-        self.admin_mgmt_btn = QPushButton("⚙️ Admin Account Management")
-        self.admin_mgmt_btn.setFont(QFont("Arial", 10))
-        self.admin_mgmt_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px;
-                border: none;
-                border-radius: 6px;
-                margin-top: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        self.admin_mgmt_btn.clicked.connect(self.open_admin_management)
-        layout.addWidget(self.admin_mgmt_btn)
-        
-        layout.addStretch()
-        
-        # Footer
-        footer = QLabel("© 2024 Examination System | Secure & Monitored")
-        footer.setFont(QFont("Arial", 9))
-        footer.setStyleSheet("color: #7f8c8d;")
-        footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(footer)
-        
-        central_widget.setLayout(layout)
-    
-    def create_default_files(self):
-        """Create default credential files if they don't exist"""
-        # Create default admin credentials
-        if not os.path.exists(ADMIN_CREDENTIALS_FILE):
-            default_admin = [{
-                "username": "admin",
-                "password": hashlib.sha256("admin123".encode()).hexdigest()
-            }]
-            with open(ADMIN_CREDENTIALS_FILE, 'w') as f:
-                json.dump(default_admin, f, indent=4)
-        
-        # Create empty students file if it doesn't exist
-        if not os.path.exists(STUDENTS_FILE):
-            with open(STUDENTS_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create empty questions file
-        if not os.path.exists(QUESTIONS_FILE):
-            with open(QUESTIONS_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create empty results file
-        if not os.path.exists(RESULTS_FILE):
-            with open(RESULTS_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create empty security logs file
-        if not os.path.exists(SECURITY_LOGS_FILE):
-            with open(SECURITY_LOGS_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create empty cheating alerts file
-        if not os.path.exists(CHEATING_ALERTS_FILE):
-            with open(CHEATING_ALERTS_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create empty rules file
-        if not os.path.exists(RULES_FILE):
-            with open(RULES_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create empty scheduled exams file
-        if not os.path.exists(SCHEDULED_EXAMS_FILE):
-            with open(SCHEDULED_EXAMS_FILE, 'w') as f:
-                json.dump([], f, indent=4)
-        
-        # Create default exam config
-        if not os.path.exists(EXAM_CONFIG_FILE):
-            default_config = {
-                "time_limit": 30,
-                "camera_required": False,
-                "group": None,
-                "rules": [
-                    "Complete the exam within the given time limit",
-                    "Keep your face visible to the camera at all times (if monitoring enabled)",
-                    "Do not switch tabs or minimize the exam window",
-                    "Only one person should be visible in the camera",
-                    "Do not use any external materials, books, or devices",
-                    "Answer all questions to the best of your ability",
-                    "The exam will auto-submit when time expires",
-                    "Any violation will be reported and may result in disqualification"
-                ]
-            }
-            with open(EXAM_CONFIG_FILE, 'w') as f:
-                json.dump(default_config, f, indent=4)
-    
-    def login(self):
-        """Handle login authentication"""
-        username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
-        
-        if not username or not password:
-            QMessageBox.warning(self, "Input Error", "Please enter both username and password!")
-            return
-        
-        if self.admin_radio.isChecked():
-            # Admin login
-            if self.authenticate_admin(username, password):
-                QMessageBox.information(self, "Success", f"Welcome, Administrator {username}!")
-                self.open_admin_panel(username)
-            else:
-                QMessageBox.critical(self, "Login Failed", "Invalid admin credentials!\n\nPlease try again.")
-                self.password_input.clear()
-        else:
-            # Student login
-            student = self.authenticate_student(username, password)
-            if student:
-                QMessageBox.information(self, "Success", f"Welcome, {student['name']}!")
-                self.open_exam_window(username, student['name'], student)
-            else:
-                QMessageBox.critical(self, "Login Failed", 
-                                   "Invalid student credentials!\n\n"
-                                   "Please check your username and password.\n"
-                                   "Contact administrator if you need assistance.")
-                self.password_input.clear()
-    
-    def authenticate_admin(self, username, password):
-        """Authenticate admin credentials"""
-        try:
-            if not os.path.exists(ADMIN_CREDENTIALS_FILE):
-                return False
-            
-            with open(ADMIN_CREDENTIALS_FILE, 'r') as f:
-                admins = json.load(f)
-            
-            # Handle both dict and list formats
-            if isinstance(admins, dict):
-                admins = [admins]
-            
-            # Hash the input password
-            hashed_password = hashlib.sha256(password.encode()).hexdigest()
-            
-            # Check credentials
-            for admin in admins:
-                if admin['username'] == username and admin['password'] == hashed_password:
-                    return True
-            
-            return False
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Authentication error:\n{str(e)}")
-            return False
-    
-    def authenticate_student(self, username, password):
-        """Authenticate student credentials"""
-        try:
-            if not os.path.exists(STUDENTS_FILE):
-                return None
-            
-            with open(STUDENTS_FILE, 'r') as f:
-                students = json.load(f)
-            
-            # Find matching student
-            for student in students:
-                if student['username'] == username and student['password'] == password:
-                    return student
-            
-            return None
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Authentication error:\n{str(e)}")
-            return None
-    
-    def open_admin_panel(self, username):
-        """Open admin panel"""
-        try:
-            # Import here to avoid circular imports
-            from admin_panel import AdminPanel
-            
-            self.admin_panel = AdminPanel()
-            self.admin_panel.logged_in_username = username
-            self.admin_panel.show()
-            self.hide()  # Hide login window instead of closing
-            
-            # Connect closed signal to show login window again
-            self.admin_panel.destroyed.connect(self.show_login_again)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open admin panel:\n{str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    def open_exam_window(self, username, student_name, student_data):
-        """Open exam window for student - checks for scheduled exams first"""
-        try:
-            student_group = student_data.get('group')
-            
-            # Check for scheduled exams
-            scheduled_exam = self.get_scheduled_exam_for_student(student_group)
-            
-            if scheduled_exam:
-                # Check if exam time is appropriate
-                now = datetime.now()
-                start_time = datetime.strptime(scheduled_exam['start_datetime'], '%Y-%m-%d %H:%M:%S')
-                early_access_time = start_time - timedelta(minutes=30)
-                
-                if now < early_access_time:
-                    QMessageBox.information(
-                        self,
-                        "Exam Not Available Yet",
-                        f"The exam '{scheduled_exam['exam_name']}' is scheduled for:\n\n"
-                        f"Start Time: {scheduled_exam['start_datetime']}\n\n"
-                        f"You can login 30 minutes before the exam starts.\n"
-                        f"Please come back at: {early_access_time.strftime('%Y-%m-%d %I:%M %p')}"
-                    )
-                    return
-                
-            
-                
-            # Open waiting room for scheduled exam
-                self.waiting_room_window(username, student_name, student_data, scheduled_exam)
-            else:
-                # No scheduled exam - show message
-                self.open_default_exam(username, student_name, student_data)
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open exam:\n{str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    def get_scheduled_exam_for_student(self, student_group):
-        """Find active scheduled exam for student's group"""
-        try:
-            if not os.path.exists(SCHEDULED_EXAMS_FILE):
-                return None
-            
-            with open(SCHEDULED_EXAMS_FILE, 'r') as f:
-                scheduled_exams = json.load(f)
-            
-            now = datetime.now()
-            
-            for exam in scheduled_exams:
-                # Skip completed exams
-                if exam.get('status') == 'completed':
-                    continue
-                
-                # Check if exam is for this student's group or all students
-                exam_group = exam.get('group')
-                if exam_group and exam_group != student_group:
-                    continue
-                
-                # Check if exam is scheduled or active
-                start_time = datetime.strptime(exam['start_datetime'], '%Y-%m-%d %H:%M:%S')
-                end_time = datetime.strptime(exam['end_datetime'], '%Y-%m-%d %H:%M:%S')
-                
-                # Allow login 30 minutes before exam starts
-                early_access_time = start_time - timedelta(minutes=30)
-                
-                if early_access_time <= now <= end_time:
-                    return exam
-            
-            return None
-            
-        except Exception as e:
-            print(f"Error finding scheduled exam: {str(e)}")
-            return None
-    
-    def open_waiting_room(self, username, student_name, student_data, exam_data):
-        """Open waiting room window for scheduled exam"""
-        try:
-            from waiting_room import WaitingRoomWindow
-            
-            self.waiting_room_window = WaitingRoomWindow(
-                username, 
-                student_name, 
-                student_data, 
-                exam_data
-            )
-            self.waiting_room_window.show()
-            self.hide()
-            
-            # Connect closed signal to show login window again
-            self.waiting_room_window.destroyed.connect(self.show_login_again)
-            
-        except ImportError as e:
-            QMessageBox.critical(self, "Error", 
-                               f"Failed to load waiting room:\n{str(e)}\n\n"
-                               "Please ensure 'waiting_room.py' is in the same directory.")
-            import traceback
-            traceback.print_exc()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open waiting room:\n{str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    def open_default_exam(self, username, student_name, student_data):
-        """Open default exam (when no scheduled exam exists)"""
-        try:
-            # No scheduled exam found - show error message
-            QMessageBox.warning(
-                self,
-                "No Exam Available",
-                "No exam is currently scheduled for you.\n\n"
-                "Please contact your administrator for more information."
-            )
-            return
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to check exam availability:\n{str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    def show_login_again(self):
-        """Show login window again and clear fields"""
-        self.username_input.clear()
-        self.password_input.clear()
-        self.student_radio.setChecked(True)
-        self.show()
-    
-    def open_admin_management(self):
-        """Open admin account management"""
-        # Ask for admin credentials before opening
-        username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
-        
-        if not username or not password:
-            QMessageBox.warning(self, "Authentication Required", 
-                              "Please enter admin credentials first!")
-            return
-        
-        if self.authenticate_admin(username, password):
-            try:
-                # Import here to avoid circular imports
-                from admng import AdminManagementWindow
-                
-                self.admin_mgmt_window = AdminManagementWindow(username)
-                self.admin_mgmt_window.show()
-            except ImportError:
-                QMessageBox.warning(self, "Module Not Found", 
-                                  "Admin management module (admng.py) not found.\n\n"
-                                  "This feature is optional.")
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Failed to open admin management:\n{str(e)}")
-                import traceback
-                traceback.print_exc()
-        else:
-            QMessageBox.critical(self, "Access Denied", 
-                               "Invalid admin credentials!\n\n"
-                               "Only administrators can access this feature.")
-            self.password_input.clear()
-
-
-def main():
-    app = QApplication(sys.argv)
-    
-    # Set application style
-    app.setStyle('Fusion')
-    
-    window = LoginWindow()
-    window.show()
-    
-    sys.exit(app.exec())
-
-
-if __name__ == "__main__":
-    main()
 
 
