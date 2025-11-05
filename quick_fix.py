@@ -1,3 +1,11 @@
+PyQt6==6.6.1
+gspread==6.1.4
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+google-auth==2.27.0
+
+
+
 https://docs.google.com/spreadsheets/d/1qNxYdRyhBL6SOhw9c3zScheJYqU_gYuvziq423JWOq8/edit?usp=drivesdk
 import sys
 import gspread
