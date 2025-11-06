@@ -1,13 +1,1 @@
-{
-  "type": "service_account",
-  "project_id": "online-exam-477315",
-  "private_key_id": "6ec50d02d7a7925cd5494e4cad2c0dc76953c792",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEuwIBADANBgkqhkiG9w0BAQEFAASCBKUwggShAgEAAoIBAQDDfEJ9gW1NFy9U\n5v9YtMlfgU8sj07InGQesZ9CICOkTxRULOnCeyQX4lDsm91Be2n/SxYNdgpBMIav\ncxD9QVcxY0SpBQQ6tEi7gKHDsFZfuz0STYesyZnt9trfyU3R4Ro9CO92JKNK/Lup\nkep/LSGI0g0WNo2v4e+7mhBXSDSgIrwbDWDvmWwx271VbpzUQ1WuIZuuvRFcyBGl\nkNr4M74Gd+edxCCKFdwlH5LBJf+cvAMLPOwCnHHWanNivi83Gi2DqlpRKfUSugwc\nN9coTnyXQNHicywxft3Vn9kUZFIx0qbblobsfSWKLNGzBSDPSGo1ftnFEtQZ20Tw\n/g56mu2hAgMBAAECggEASDni/ygQ0EjergnjEk1JkcXfEOGqBCj0PPr3kqD5Sj4F\njsxBWh/RSBnQOHumFgmZMj/11+djBo79VFm5TzkTFCZPOfumgmIV9WEjY4AFib1O\nZTLMDCU4gFmSqNhhrkfzP9XLU+VZh901IQPOlkqAd2LUfv6M/w0FXFUh8H23I+rL\n5TbkiO16572CmUrnz9G4ApzTikmkfNQa4I5/sdOK738ujejqjZkjRl0BklmbLmj7\nTJkZSSQFnVhdI5ttZflrB+S9GnOzlmQXeQDClrWPHD2UaUmPa2eUqzHU28CoGJ08\nahVCz+Y331IOWdRXiJY10vNFXQH7c18WHExXZECnuQKBgQDtpGp4+uXUsKvmflhS\n6ZHiUXK903ohsK0A+SBF/nJxyjeTpcBOyJ6y6oEmEl4CDoH3zHakcxJxB3jmcrKY\na0FPsfybUgAjgJxJFqfFxCEhVGa5/6bkrrTKSc2NMLuWN6iDOEtM76809RQKfnjx\nGCzlOOpUN1XOk15X/LezdIZiKwKBgQDSlien3i6il751DuS2svXgggl92OxMPTzA\nfEy3u/T3tWjiF7IGwqG3Xpq0KLCLu6Te2HjI/EXd3NtoJWM5PKVeR+w9UwPdAlXG\nmtJGzwUu7DF6U7C4XyDwOea4xKp9q9SIwmwjtbRroPsdj9KFTLA/YwlHqO//MFE5\njBGKBbhlYwJ/Tfmk9g1dXGyb+wV59bquI5SWEbNSX7uZCLi13kGfS7cOhWPdtfwe\nFpbbyaI9Nm+MNcLhKxSW+H97LCJ2d4y54WyFdnFxmjSZE2JbqoiwVj9bdaxtFpw8\ntiOBTtKuupuIr4XJL3V2B+piqQ7WoEVOdeg2+2ssvJueWUCTBk81yQKBgEBBWtZI\n4Bfyj0WuhrEMiCO56eWBdBCLOudMxifl7QhMTTV3n3Wam7eU4UWJiN0KI3Nvv+Mr\nvrHEuxnbFpyXWaob7gSEORCNrtiL0w+SCXXY0fwOX0TSmf1S3YiRUahI7u/PyylW\nPzf8BcNuaAEOdlTRBjrcXGaUOqSBjbR8rFgbAoGBAJykObu3SQ+fnydLiU/zqYHn\nRoAnYQLuv1pa8k3oQ1KahAgDsqaqVLTO7yaXlZN22djge+hl9Vhsn8kSktG1eBo9\nicdijYiiuIDOz71JLYgeeuQKH+3bdiohGbS5mGCsfrGlVa0QSGGkL2arHmi7la/D\nfAKS7C9OVSHFR4oNIrva\n-----END PRIVATE KEY-----\n",
-  "client_email": "sienna-online-exam@online-exam-477315.iam.gserviceaccount.com",
-  "client_id": "106564040827760533139",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/sienna-online-exam%40online-exam-477315.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-}
+
