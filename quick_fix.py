@@ -1,7 +1,7 @@
-
 """
 BOM Data Extractor - Component Information Extraction Tool
 Extracts technical specifications without pricing data
+FIXED: DigiKey stock extraction
 """
 
 from openpyxl import Workbook
@@ -180,10 +180,18 @@ def detect_csv_delimiter(file_path: str, encoding: str = 'utf-8') -> str:
 
 
 class FindchipsClient:
-    def __init__(self, timeout=15):
+    def __init__(self, timeout=10):
         self.s = requests.Session()
         self.s.headers.update({"User-Agent": USER_AGENT})
         self.timeout = timeout
+        # Enable connection pooling for better performance
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=10,
+            pool_maxsize=20,
+            max_retries=2
+        )
+        self.s.mount('http://', adapter)
+        self.s.mount('https://', adapter)
 
     def get(self, url):
         return self.s.get(url, timeout=self.timeout)
@@ -225,7 +233,7 @@ class FindchipsClient:
         return unique_results
 
     def detail(self, mpn: str, manufacturer: str) -> dict:
-        """Extract component details from detail page"""
+        """Extract component details from detail page - FIXED DigiKey stock extraction"""
         url = BASE_DETAIL.format(
             mpn=urllib.parse.quote(mpn),
             mfg=urllib.parse.quote(manufacturer.replace(' ', '-'))
@@ -252,6 +260,54 @@ class FindchipsClient:
 
         soup = BeautifulSoup(html, "html.parser")
 
+        # PRIORITY: Extract DigiKey description from page title or meta
+        # Method 1: Look for page title with description
+        try:
+            page_title = soup.find("title")
+            if page_title:
+                title_text = page_title.get_text()
+                # Extract description after MPN
+                if mpn in title_text:
+                    parts = title_text.split(mpn)
+                    if len(parts) > 1:
+                        desc = parts[1].strip()
+                        # Clean up common separators
+                        desc = desc.split('|')[0].strip()
+                        desc = desc.split('-')[0].strip() if desc.count('-') > 1 else desc
+                        if desc and len(desc) > 5:
+                            meta["digikey_description"] = desc
+        except:
+            pass
+
+        # Method 2: Look for meta description
+        if not meta["digikey_description"]:
+            try:
+                meta_desc = soup.find("meta", {"name": "description"}) or soup.find("meta", {"property": "og:description"})
+                if meta_desc and meta_desc.get("content"):
+                    meta["digikey_description"] = meta_desc.get("content").strip()
+            except:
+                pass
+
+        # Method 3: Look for part description in headers or main sections
+        if not meta["digikey_description"]:
+            try:
+                desc_patterns = [
+                    soup.find("h1", class_=re.compile(r'part|product|title', re.I)),
+                    soup.find("div", class_=re.compile(r'description|product-desc', re.I)),
+                    soup.find("span", class_=re.compile(r'description', re.I))
+                ]
+                
+                for elem in desc_patterns:
+                    if elem:
+                        desc_text = elem.get_text(strip=True)
+                        # Remove MPN from description
+                        desc_text = desc_text.replace(mpn, "").strip()
+                        if desc_text and len(desc_text) > 10:
+                            meta["digikey_description"] = desc_text
+                            break
+            except:
+                pass
+
         # Extract from Part Data Attributes table
         data_rows = soup.find_all("tr", class_="data-row")
         for row in data_rows:
@@ -265,8 +321,9 @@ class FindchipsClient:
 
                     if field_name == "Part Life Cycle Code":
                         meta["life_cycle_code"] = field_value
-                    elif field_name in ["Part Package Code", "Size Code", "Package Description"]:
-                        meta["package_code"] = field_value
+                    elif field_name in ["Part Package Code", "Size Code", "Package Description", "Package Code"]:
+                        if not meta["package_code"]:  # Don't override if already set
+                            meta["package_code"] = field_value
                     elif field_name == "Factory Lead Time":
                         meta["lead_time"] = field_value
                     elif field_name in ["Length", "Package Length"]:
@@ -277,7 +334,7 @@ class FindchipsClient:
                         width_match = re.search(r'(\d+(?:\.\d+)?)', field_value)
                         if width_match:
                             meta["width_mm"] = float(width_match.group(1))
-                    elif field_name in ["Height", "Package Height"]:
+                    elif field_name in ["Height", "Package Height", "Seated Height-Max"]:
                         height_match = re.search(r'(\d+(?:\.\d+)?)', field_value)
                         if height_match:
                             meta["height_mm"] = float(height_match.group(1))
@@ -285,41 +342,132 @@ class FindchipsClient:
                         terminal_match = re.search(r'(\d+)', field_value)
                         if terminal_match:
                             meta["num_terminals"] = int(terminal_match.group(1))
-                    elif field_name in ["Description", "Part Description"]:
-                        meta["digikey_description"] = field_value
+                    elif field_name in ["Description", "Part Description", "Function", "Logic IC Type"]:
+                        # Store description from data table if not already found
+                        if not meta["digikey_description"]:
+                            meta["digikey_description"] = field_value
                     elif "Operating Temperature" in field_name or "Temperature Range" in field_name:
-                        # Try to extract min and max temperatures
-                        temp_match = re.findall(r'(-?\d+(?:\.\d+)?)\s*Â°?C', field_value)
-                        if len(temp_match) >= 2:
-                            meta["temp_min"] = temp_match[0]
-                            meta["temp_max"] = temp_match[1]
-                        elif len(temp_match) == 1:
-                            if "min" in field_name.lower():
-                                meta["temp_min"] = temp_match[0]
-                            elif "max" in field_name.lower():
-                                meta["temp_max"] = temp_match[0]
+                        # Handle both "Operating Temperature-Max" and general temperature ranges
+                        if "Max" in field_name:
+                            temp_match = re.search(r'(-?\d+(?:\.\d+)?)', field_value)
+                            if temp_match:
+                                meta["temp_max"] = temp_match.group(1)
+                        elif "Min" in field_name:
+                            temp_match = re.search(r'(-?\d+(?:\.\d+)?)', field_value)
+                            if temp_match:
+                                meta["temp_min"] = temp_match.group(1)
+                        else:
+                            # Try to extract both min and max from a range
+                            temp_matches = re.findall(r'(-?\d+(?:\.\d+)?)', field_value)
+                            if len(temp_matches) >= 2:
+                                meta["temp_min"] = temp_matches[0]
+                                meta["temp_max"] = temp_matches[1]
+                            elif len(temp_matches) == 1:
+                                if "-" in field_value and field_value.index("-") < field_value.index(temp_matches[0]):
+                                    meta["temp_min"] = temp_matches[0]
+                                else:
+                                    meta["temp_max"] = temp_matches[0]
 
             except Exception:
                 continue
 
-        # Extract datasheet link
-        datasheet_link = soup.find("a", href=re.compile(r'.*datasheet.*', re.I))
-        if datasheet_link and datasheet_link.get("href"):
-            meta["datasheet_url"] = datasheet_link["href"]
+        # Method 4: If still no description, try to construct from component type fields
+        if not meta["digikey_description"]:
+            try:
+                desc_parts = []
+                for row in data_rows:
+                    field_cell = row.find("td", class_="field-cell")
+                    main_cell = row.find("td", class_="main-part-cell")
+                    if field_cell and main_cell:
+                        field_name = field_cell.get_text(strip=True)
+                        if field_name in ["Logic IC Type", "Technology", "Function", "Family"]:
+                            value = main_cell.get_text(strip=True)
+                            if value and value not in desc_parts:
+                                desc_parts.append(value)
+                
+                if desc_parts:
+                    meta["digikey_description"] = " ".join(desc_parts)
+            except:
+                pass
 
-        # Extract stock information
+        # Extract datasheet link - look for PDF or datasheet links
+        datasheet_patterns = [
+            soup.find("a", href=re.compile(r'.*datasheet.*', re.I)),
+            soup.find("a", href=re.compile(r'.*\.pdf$', re.I)),
+            soup.find("a", string=re.compile(r'datasheet', re.I))
+        ]
+        
+        for datasheet_link in datasheet_patterns:
+            if datasheet_link and datasheet_link.get("href"):
+                href = datasheet_link["href"]
+                # Make sure it's a full URL
+                if href.startswith("http"):
+                    meta["datasheet_url"] = href
+                    break
+
+        # FIXED: Extract DigiKey stock information
+        # Look for distributor rows that contain DigiKey information
         try:
-            stock_section = soup.find("div", class_="stock-summary") or soup.find("span", class_="stock")
-            if stock_section:
-                stock_text = stock_section.get_text()
-                stock_match = re.search(r'(\d[\d,]*)', stock_text)
-                if stock_match:
-                    meta["stock"] = int(stock_match.group(1).replace(",", ""))
-        except Exception:
+            # Method 1: Look for distributor table rows
+            distributor_rows = soup.find_all("tr", class_=re.compile(r'distributor|dist-row|row'))
+            
+            for row in distributor_rows:
+                row_text = row.get_text().lower()
+                
+                # Check if this row contains DigiKey
+                if 'digikey' in row_text or 'digi-key' in row_text:
+                    # Extract stock from this row
+                    # Look for stock quantity patterns
+                    stock_patterns = [
+                        r'stock[:\s]+(\d[\d,]*)',
+                        r'in\s+stock[:\s]+(\d[\d,]*)',
+                        r'qty[:\s]+(\d[\d,]*)',
+                        r'(\d[\d,]+)\s+in\s+stock',
+                        r'available[:\s]+(\d[\d,]*)'
+                    ]
+                    
+                    for pattern in stock_patterns:
+                        stock_match = re.search(pattern, row_text, re.I)
+                        if stock_match:
+                            stock_value = stock_match.group(1).replace(",", "")
+                            meta["stock"] = int(stock_value)
+                            break
+                    
+                    if meta["stock"] > 0:
+                        break
+            
+            # Method 2: Look for data attributes that might contain stock
+            if meta["stock"] == 0:
+                stock_cells = soup.find_all("td", {"data-stock": True})
+                for cell in stock_cells:
+                    parent_row = cell.find_parent("tr")
+                    if parent_row:
+                        row_text = parent_row.get_text().lower()
+                        if 'digikey' in row_text:
+                            try:
+                                stock_value = cell.get("data-stock", "0").replace(",", "")
+                                meta["stock"] = int(stock_value)
+                                break
+                            except:
+                                pass
+            
+            # Method 3: Look for stock summary sections
+            if meta["stock"] == 0:
+                stock_sections = soup.find_all("div", class_=re.compile(r'stock|inventory', re.I))
+                for section in stock_sections:
+                    section_text = section.get_text()
+                    if 'digikey' in section_text.lower():
+                        stock_match = re.search(r'(\d[\d,]+)', section_text)
+                        if stock_match:
+                            stock_value = stock_match.group(1).replace(",", "")
+                            meta["stock"] = int(stock_value)
+                            break
+                            
+        except Exception as e:
+            print(f"Error extracting DigiKey stock: {e}")
             pass
 
         return meta
-
 
 class JSONStorage:
     """JSON-based storage for component data"""
@@ -436,86 +584,124 @@ class ScrapeThread(QThread):
     log = pyqtSignal(str)
     done = pyqtSignal()
 
-    def __init__(self, mpns, storage: JSONStorage):
+    def __init__(self, mpns, storage: JSONStorage, num_threads=5):
         super().__init__()
         self.mpns = mpns
         self.storage = storage
-        self.client = FindchipsClient()
+        self.num_threads = num_threads
         self.cancelled = False
 
     def cancel(self):
         self.cancelled = True
         self.log.emit("Scraping cancelled by user")
 
+    def _process_single_mpn(self, mpn):
+        """Process a single MPN - thread-safe"""
+        try:
+            if self.cancelled:
+                return None
+
+            if self.storage.is_data_fresh(mpn, hours=6):
+                return {"status": "cached", "mpn": mpn}
+
+            client = FindchipsClient(timeout=10)
+            search_results = client.search(mpn)
+            
+            if not search_results:
+                return {"status": "no_results", "mpn": mpn}
+
+            filtered_results = filter_search_results(mpn, search_results)
+            if not filtered_results:
+                return {"status": "no_match", "mpn": mpn}
+
+            results_data = []
+            for result in filtered_results[:1]:  # Process only first match for speed
+                if self.cancelled:
+                    return None
+
+                result_mpn = result["mpn"]
+                manufacturer = result["manufacturer"]
+                is_exact = result_mpn.strip().lower() == mpn.strip().lower()
+                part_type = "Precise Match" if is_exact else "Alternate Parts"
+
+                detail_data = client.detail(result_mpn, manufacturer)
+                
+                results_data.append({
+                    "mpn": mpn,
+                    "manufacturer": manufacturer,
+                    "detail_data": detail_data,
+                    "part_type": part_type,
+                    "stock": detail_data.get("stock", 0)
+                })
+
+            return {"status": "success", "mpn": mpn, "results": results_data}
+
+        except Exception as e:
+            return {"status": "error", "mpn": mpn, "error": str(e)}
+
     def run(self):
+        import concurrent.futures
+        
         total = len(self.mpns)
         fresh_count = 0
         scraped_count = 0
+        error_count = 0
+        processed = 0
 
-        for i, mpn in enumerate(self.mpns):
-            if self.cancelled:
-                self.log.emit("Scraping process was cancelled")
-                self.done.emit()
-                return
+        self.log.emit(f"Starting parallel scraping with {self.num_threads} threads...")
 
-            try:
-                if self.storage.is_data_fresh(mpn, hours=6):
-                    self.log.emit(f"Using cached data for {mpn}")
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.num_threads) as executor:
+            # Submit all tasks
+            future_to_mpn = {executor.submit(self._process_single_mpn, mpn): mpn for mpn in self.mpns}
+            
+            # Process completed tasks
+            for future in concurrent.futures.as_completed(future_to_mpn):
+                if self.cancelled:
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    self.log.emit("Scraping process was cancelled")
+                    self.done.emit()
+                    return
+
+                result = future.result()
+                
+                if result is None:
+                    continue
+                    
+                mpn = result.get("mpn", "Unknown")
+                status = result.get("status")
+
+                if status == "cached":
                     fresh_count += 1
-                    self.progress.emit(int((i + 1) * 100 / total))
-                    continue
+                    self.log.emit(f"✓ Cached: {mpn}")
+                    
+                elif status == "success":
+                    for item in result.get("results", []):
+                        self.storage.upsert_component(
+                            mpn=item["mpn"],
+                            manufacturer=item["manufacturer"],
+                            **item["detail_data"],
+                            part_type=item["part_type"]
+                        )
+                        if item["stock"] > 0:
+                            self.log.emit(f"✓ {mpn}: Stock={item['stock']}")
+                        else:
+                            self.log.emit(f"✓ {mpn}: Complete")
+                    scraped_count += 1
+                    
+                elif status == "no_results":
+                    self.log.emit(f"⚠ {mpn}: No results found")
+                    
+                elif status == "no_match":
+                    self.log.emit(f"⚠ {mpn}: No suitable match")
+                    
+                elif status == "error":
+                    error_count += 1
+                    self.log.emit(f"✗ {mpn}: {result.get('error', 'Unknown error')}")
 
-                self.log.emit(f"Scraping {mpn}")
+                processed += 1
+                self.progress.emit(int(processed * 100 / total))
 
-                search_results = self.client.search(mpn)
-                if not search_results:
-                    self.log.emit(f"No manufacturers found for {mpn}")
-                    self.progress.emit(int((i + 1) * 100 / total))
-                    time.sleep(0.1)
-                    continue
-
-                filtered_results = filter_search_results(mpn, search_results)
-                if not filtered_results:
-                    self.log.emit(f"No suitable matches found for {mpn}")
-                    self.progress.emit(int((i + 1) * 100 / total))
-                    time.sleep(0.1)
-                    continue
-
-                self.log.emit(f"Found {len(filtered_results)} matches for {mpn}")
-
-                for result in filtered_results:
-                    if self.cancelled:
-                        self.log.emit("Scraping process was cancelled")
-                        self.done.emit()
-                        return
-
-                    result_mpn = result["mpn"]
-                    manufacturer = result["manufacturer"]
-
-                    is_exact = result_mpn.strip().lower() == mpn.strip().lower()
-                    part_type = "Precise Match" if is_exact else "Alternate Parts"
-
-                    self.log.emit(f"Getting details: {result_mpn} / {manufacturer}")
-
-                    detail_data = self.client.detail(result_mpn, manufacturer)
-
-                    self.storage.upsert_component(
-                        mpn=mpn,
-                        manufacturer=manufacturer,
-                        **detail_data,
-                        part_type=part_type
-                    )
-
-                scraped_count += 1
-                self.log.emit(f"Completed: {mpn}")
-
-            except Exception as e:
-                self.log.emit(f"Error processing {mpn}: {e}")
-
-            self.progress.emit(int((i + 1) * 100 / total))
-            time.sleep(0.1)
-
-        self.log.emit(f"Scraping completed - Cached: {fresh_count}, Scraped: {scraped_count}")
+        self.log.emit(f"Complete! Cached: {fresh_count}, Scraped: {scraped_count}, Errors: {error_count}")
         self.done.emit()
 
 
@@ -608,7 +794,7 @@ class RobustBOMLoader:
 class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BOM Data Extractor V1.0 - Â© 2025 Sienna ECAD Technologies")
+        self.setWindowTitle("BOM Data Extractor V1.0 - © 2025 Sienna ECAD Technologies")
 
         logo_path = resource_path("bomlogo.ico")
         if os.path.exists(logo_path):
@@ -824,6 +1010,7 @@ class App(QMainWindow):
 
         self.log_msg(f"Starting fetch for {len(mpns)} unique MPNs")
         self.log_msg(f"Fresh data: {len(fresh_mpns)} MPNs, Will scrape: {len(stale_mpns)} MPNs")
+        self.log_msg(f"Using parallel processing (5 threads) for faster extraction...")
 
         self.progress.setVisible(True)
         self.progress.setValue(0)
@@ -831,7 +1018,8 @@ class App(QMainWindow):
         self.cancel_btn.setEnabled(True)
         self.cancel_btn.setText("Cancel")
 
-        self.worker = ScrapeThread(mpns, self.storage)
+        # Use 5 threads for parallel processing
+        self.worker = ScrapeThread(mpns, self.storage, num_threads=5)
         self.worker.progress.connect(self.progress.setValue)
         self.worker.log.connect(self.log_msg)
         self.worker.done.connect(self.on_scrape_done)
