@@ -1,2226 +1,2062 @@
-"""
-Central Examination Server
-Run this on a central server accessible over the internet
-"""
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import json
+i want bom data extrater   it will extrat 
+
+                "Part Type", "MPN", "Manufacturer", "Part Life Cycle Code", "Package",
+                "Size (L*W mm)", "Height", "Lead Time", "In Stock" , "Number of Terminals", "digikey description", "Operating Temperature-Min", "Operating Temperature-Max" "datasheet link"
+
+ give me in result and remove all pricing related filter and calculation logic
+
+
+
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.cell import MergedCell
+import sys, re, json, time, urllib.parse, math, os, chardet
+from datetime import datetime, timedelta
+import requests
 import os
-from datetime import datetime
-import hashlib
+import sys
+from bs4 import BeautifulSoup
+import pandas as pd
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QToolBar,
+    QFileDialog, QTableWidget, QTableWidgetItem, QComboBox, QLabel,
+    QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox, QTabWidget, QProgressBar,
+    QSplitter, QDialog, QListWidget, QPushButton
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal,QTimer
+from PyQt6.QtGui import QColor, QAction, QFont, QPalette, QPixmap,QIcon
 
-app = Flask(__name__)
-CORS(app)  # Enable CORS for cross-origin requests
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
-# File paths
-QUESTIONS_FILE = "server_questions.json"
-STUDENTS_FILE = "server_students.json"
-SECURITY_LOGS_FILE = "server_security_logs.json"
-RESULTS_FILE = "server_results.json"
-SERVER_CONFIG_FILE = "server_config.json"
 
-# Simple authentication token (in production, use proper JWT tokens)
-def verify_token(token):
-    """Verify authentication token"""
-    try:
-        with open(SERVER_CONFIG_FILE, 'r') as f:
-            config = json.load(f)
-            return token == config.get('api_token', 'secure_token_12345')
-    except:
-        return token == 'secure_token_12345'
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+BASE_SEARCH = "https://www.findchips.com/search/"
+BASE_DETAIL = "https://www.findchips.com/detail/{mpn}/{mfg}"
 
-def generate_api_token():
-    """Generate a secure API token"""
-    return hashlib.sha256(datetime.now().isoformat().encode()).hexdigest()
 
-# Initialize server files
-def init_server_files():
-    """Initialize server data files"""
-    if not os.path.exists(SERVER_CONFIG_FILE):
-        config = {
-            'api_token': 'secure_token_12345',  # Change this in production
-            'server_name': 'Central Examination Server',
-            'version': '1.0'
-        }
-        with open(SERVER_CONFIG_FILE, 'w') as f:
-            json.dump(config, f, indent=4)
-    
-    if not os.path.exists(QUESTIONS_FILE):
-        default_questions = [
-            {
-                "question": "What does HTML stand for?",
-                "options": ["Hyper Text Markup Language", "High Tech Modern Language", 
-                           "Home Tool Markup Language", "Hyperlinks and Text Markup Language"],
-                "answer": 0
-            },
-            {
-                "question": "Which programming language is known as the 'language of the web'?",
-                "options": ["Python", "Java", "JavaScript", "C++"],
-                "answer": 2
-            }
-        ]
-        with open(QUESTIONS_FILE, 'w') as f:
-            json.dump(default_questions, f, indent=4)
-    
-    if not os.path.exists(STUDENTS_FILE):
-        default_students = [
-            {
-                "name": "Demo Student",
-                "email": "student@example.com",
-                "username": "student",
-                "password": "exam123",
-                "student_id": "STU001"
-            }
-        ]
-        with open(STUDENTS_FILE, 'w') as f:
-            json.dump(default_students, f, indent=4)
-    
-    if not os.path.exists(SECURITY_LOGS_FILE):
-        with open(SECURITY_LOGS_FILE, 'w') as f:
-            json.dump([], f)
-    
-    if not os.path.exists(RESULTS_FILE):
-        with open(RESULTS_FILE, 'w') as f:
-            json.dump([], f)
+def apply_dark_green_theme(app):
+    """Apply dark green theme to the entire application"""
+    palette = QPalette()
 
-init_server_files()
+    # Window background - Dark gray/black
+    palette.setColor(QPalette.ColorRole.Window, QColor(25, 35, 25))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 255, 100))  # Bright green text
 
-# API Endpoints
+    # Base background for input fields
+    palette.setColor(QPalette.ColorRole.Base, QColor(35, 45, 35))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(45, 55, 45))
 
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        'status': 'online',
-        'message': 'Central Examination Server is running',
-        'timestamp': datetime.now().isoformat()
-    })
+    # Text colors
+    palette.setColor(QPalette.ColorRole.Text, QColor(0, 255, 100))
 
-@app.route('/api/login', methods=['POST'])
-def login():
-    """Student login endpoint"""
-    data = request.json
-    username = data.get('username')
-    password = data.get('password')
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(STUDENTS_FILE, 'r') as f:
-            students = json.load(f)
-        
-        for student in students:
-            if student['username'] == username and student['password'] == password:
-                return jsonify({
-                    'success': True,
-                    'student': {
-                        'name': student['name'],
-                        'email': student['email'],
-                        'username': student['username'],
-                        'student_id': student.get('student_id', 'N/A')
-                    }
-                })
-        
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+    # Button styling
+    palette.setColor(QPalette.ColorRole.Button, QColor(35, 55, 35))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 255, 100))
 
-@app.route('/api/questions', methods=['GET'])
-def get_questions():
-    """Get exam questions"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(QUESTIONS_FILE, 'r') as f:
-            questions = json.load(f)
-        return jsonify({'success': True, 'questions': questions})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+    # Highlight colors
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 150, 50))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
 
-@app.route('/api/security-log', methods=['POST'])
-def log_security_violation():
-    """Log security violations from clients"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        data = request.json
-        log_entry = {
-            'username': data.get('username'),
-            'student_name': data.get('student_name'),
-            'violation_type': data.get('violation_type'),
-            'details': data.get('details'),
-            'timestamp': datetime.now().isoformat(),
-            'client_ip': request.remote_addr
+    # Links
+    palette.setColor(QPalette.ColorRole.Link, QColor(100, 255, 150))
+
+    # FIXED: Disabled elements - Use ColorGroup.Disabled, not ColorRole.Disabled
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(100, 100, 100))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(100, 100, 100))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(100, 100, 100))
+
+    app.setPalette(palette)
+
+    # Additional stylesheet for better appearance
+    app.setStyleSheet("""
+        QMainWindow {
+            background-color: rgb(25, 35, 25);
+            color: rgb(0, 255, 100);
         }
         
-        logs = []
-        if os.path.exists(SECURITY_LOGS_FILE):
-            with open(SECURITY_LOGS_FILE, 'r') as f:
-                logs = json.load(f)
-        
-        logs.append(log_entry)
-        
-        with open(SECURITY_LOGS_FILE, 'w') as f:
-            json.dump(logs, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Violation logged'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/security-logs', methods=['GET'])
-def get_security_logs():
-    """Get all security logs (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(SECURITY_LOGS_FILE, 'r') as f:
-            logs = json.load(f)
-        return jsonify({'success': True, 'logs': logs})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
-
-@app.route('/api/submit-exam', methods=['POST'])
-def submit_exam():
-    """Submit exam results"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        data = request.json
-        result_entry = {
-            'username': data.get('username'),
-            'student_name': data.get('student_name'),
-            'score': data.get('score'),
-            'total_questions': data.get('total_questions'),
-            'percentage': data.get('percentage'),
-            'time_taken': data.get('time_taken'),
-            'tab_switch_count': data.get('tab_switch_count'),
-            'camera_violation_count': data.get('camera_violation_count'),
-            'timestamp': datetime.now().isoformat(),
-            'client_ip': request.remote_addr
+        QToolBar {
+            background-color: rgb(35, 45, 35);
+            border: 1px solid rgb(0, 150, 50);
+            spacing: 3px;
         }
         
+        QToolBar::separator {
+            background-color: rgb(0, 150, 50);
+            width: 2px;
+            margin: 2px;
+        }
+        
+        QPushButton, QToolButton {
+            background-color: rgb(35, 55, 35);
+            color: rgb(0, 255, 100);
+            border: 2px solid rgb(0, 150, 50);
+            border-radius: 5px;
+            padding: 5px 10px;
+            font-weight: bold;
+        }
+        
+        QPushButton:hover, QToolButton:hover {
+            background-color: rgb(0, 150, 50);
+            color: white;
+        }
+        
+        QPushButton:pressed, QToolButton:pressed {
+            background-color: rgb(0, 100, 30);
+        }
+        
+        QComboBox {
+            background-color: rgb(35, 45, 35);
+            color: rgb(0, 255, 100);
+            border: 2px solid rgb(0, 150, 50);
+            border-radius: 3px;
+            padding: 2px 5px;
+        }
+        
+        QComboBox::drop-down {
+            border: none;
+        }
+        
+        QComboBox::down-arrow {
+            image: none;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid rgb(0, 255, 100);
+        }
+        
+        QSpinBox, QDoubleSpinBox {
+            background-color: rgb(35, 45, 35);
+            color: rgb(0, 255, 100);
+            border: 2px solid rgb(0, 150, 50);
+            border-radius: 3px;
+            padding: 2px;
+        }
+        
+        QLabel {
+            color: rgb(0, 255, 100);
+            font-weight: bold;
+        }
+        
+        QTabBar::tab {
+            background-color: rgb(35, 45, 35);
+            color: rgb(0, 255, 100);
+            border: 2px solid rgb(0, 150, 50);
+            padding: 8px 15px;
+            margin: 2px;
+        }
+        
+        QTabBar::tab:selected {
+            background-color: rgb(0, 150, 50);
+            color: white;
+        }
+        
+        QTabBar::tab:hover {
+            background-color: rgb(0, 120, 40);
+        }
+        
+        QProgressBar {
+            background-color: rgb(35, 45, 35);
+            border: 2px solid rgb(0, 150, 50);
+            border-radius: 5px;
+            color: white;          
+            text-align: center;
+        }
+        
+        QProgressBar::chunk {
+            background-color: rgb(0, 200, 50);
+            border-radius: 3px;
+        }
+        
+        QSplitter::handle {
+            background-color: rgb(0, 150, 50);
+        }
+        
+        QMessageBox {
+            background-color: rgb(25, 35, 25);
+            color: rgb(0, 255, 100);
+        }
+        
+        QDialog {
+            background-color: rgb(25, 35, 25);
+            color: rgb(0, 255, 100);
+        }
+        
+        QListWidget {
+            background-color: white;
+            color: black;
+            border: 2px solid rgb(0, 150, 50);
+        }
+    """)
+
+
+
+def filter_search_results(mpn: str, search_results: list[dict]) -> list[dict]:
+    """
+    Filter search results based on exact vs partial matches:
+    - If exact matches exist, return only exact matches
+    - If no exact matches exist, return only the first partial match
+    """
+    exact_matches = []
+    partial_matches = []
+    mpn_lower = mpn.strip().lower()
+    
+    for result in search_results:
+        result_mpn = result["mpn"].strip().lower()
+        if result_mpn == mpn_lower:
+            exact_matches.append(result)
+        else:
+            partial_matches.append(result)
+    
+    # Return exact matches if they exist, otherwise return only first partial match
+    if exact_matches:
+        return exact_matches
+    elif partial_matches:
+        return partial_matches[:1] # Only take the first partial match
+    else:
+        return []
+
+def detect_file_encoding(file_path: str) -> str:
+    """Detect the encoding of a file"""
+    try:
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(10000)  # Read first 10KB
+            result = chardet.detect(raw_data)
+            return result['encoding'] or 'utf-8'
+    except Exception:
+        return 'utf-8'
+
+def detect_csv_delimiter(file_path: str, encoding: str = 'utf-8') -> str:
+    """Detect CSV delimiter by testing common delimiters"""
+    delimiters = [',', ';', '\t', '|']
+    try:
+        with open(file_path, 'r', encoding=encoding) as f:
+            sample = f.read(1024)
+            
+        delimiter_scores = {}
+        for delim in delimiters:
+            lines = sample.split('\n')[:3]  # Check first 3 lines
+            scores = []
+            for line in lines:
+                if line.strip():
+                    scores.append(line.count(delim))
+            if scores and max(scores) > 0:
+                delimiter_scores[delim] = max(scores)
+        
+        if delimiter_scores:
+            return max(delimiter_scores.items(), key=lambda x: x[1])[0]
+        return ','
+    except Exception:
+        return ','
+
+class SheetSelectionDialog(QDialog):
+    """Dialog for selecting Excel worksheet"""
+    def __init__(self, sheet_names, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Worksheet")
+        self.setModal(True)
+        self.resize(300, 200)
+        
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("Multiple worksheets found. Select one:"))
+        
+        self.sheet_list = QListWidget()
+        self.sheet_list.addItems(sheet_names)
+        self.sheet_list.setCurrentRow(0)
+        layout.addWidget(self.sheet_list)
+        
+        buttons = QHBoxLayout()
+        ok_btn = QPushButton("OK")
+        cancel_btn = QPushButton("Cancel")
+        ok_btn.clicked.connect(self.accept)
+        cancel_btn.clicked.connect(self.reject)
+        buttons.addWidget(ok_btn)
+        buttons.addWidget(cancel_btn)
+        layout.addLayout(buttons)
+        
+        self.setLayout(layout)
+        
+    def get_selected_sheet(self, _):
+        current_item = self.sheet_list.currentItem()
+        return current_item.text() if current_item else None
+
+class FindchipsClient:
+    def __init__(self, timeout=15):
+        self.s = requests.Session()
+        self.s.headers.update({"User-Agent": USER_AGENT})
+        self.timeout = timeout
+
+    def get(self, url):
+        return self.s.get(url, timeout=self.timeout)
+
+    def search(self, mpn: str) -> list[dict]:
+        """Extract only MPN and manufacturer from search page"""
+        url = BASE_SEARCH + urllib.parse.quote(mpn)
+        r = self.get(url)
+        if r.status_code != 200:
+            return []
+
+        soup = BeautifulSoup(r.content, "html.parser")
+        rows = soup.find_all("tr", class_="row")
         results = []
-        if os.path.exists(RESULTS_FILE):
-            with open(RESULTS_FILE, 'r') as f:
-                results = json.load(f)
-        
-        results.append(result_entry)
-        
-        with open(RESULTS_FILE, 'w') as f:
-            json.dump(results, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Exam submitted successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
 
-@app.route('/api/results', methods=['GET'])
-def get_results():
-    """Get all exam results (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(RESULTS_FILE, 'r') as f:
-            results = json.load(f)
-        return jsonify({'success': True, 'results': results})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        for row in rows:
+            try:
+                mfg = (row.get("data-mfr") or row.get("data-manufacturer") or "").strip()
+                result_mpn = (row.get("data-mfrpartnumber") or "").strip()
+                if not mfg or not result_mpn:
+                    continue
 
-@app.route('/api/students', methods=['GET'])
-def get_students():
-    """Get all students (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        with open(STUDENTS_FILE, 'r') as f:
-            students = json.load(f)
-        # Remove passwords from response
-        safe_students = [{'name': s['name'], 'email': s['email'], 
-                         'username': s['username'], 'student_id': s.get('student_id', 'N/A')} 
-                        for s in students]
-        return jsonify({'success': True, 'students': safe_students})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+                # Only return MPN and manufacturer - no pricing/stock data
+                results.append({
+                    "mpn": result_mpn,
+                    "manufacturer": mfg
+                })
+            except Exception:
+                continue
 
-@app.route('/api/admin/add-question', methods=['POST'])
-def add_question():
-    """Add a new question (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        data = request.json
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_results = []
+        for item in results:
+            key = (item["mpn"].lower(), item["manufacturer"].lower())
+            if key not in seen:
+                seen.add(key)
+                unique_results.append(item)
+
+        return unique_results
+
+    def detail(self, mpn: str, manufacturer: str) -> dict:
+        """Extract all data from detail page"""
+        url = BASE_DETAIL.format(
+            mpn=urllib.parse.quote(mpn),
+            mfg=urllib.parse.quote(manufacturer.replace(' ', '-'))
+        )
+        r = self.get(url)
+        if r.status_code != 200:
+            return {}
+
+        html = r.text
+        meta = {
+            "life_cycle_code": None,
+            "package_code": None,
+            "length_mm": None,
+            "width_mm": None,
+            "default_currency": None,
+            "lead_time": None,
+            "offers": []
+        }
+
+        # Extract metadata from JavaScript or meta tags
+        dc = re.search(r'"defaultCurrency"\s*:\s*"([A-Z]{3})"', html)
+        if dc:
+            meta["default_currency"] = dc.group(1)
+
+        # Parse HTML table for Part Data Attributes
+        soup = BeautifulSoup(html, "html.parser")
         
-        with open(QUESTIONS_FILE, 'r') as f:
-            questions = json.load(f)
-        
-        questions.append(data)
-        
-        with open(QUESTIONS_FILE, 'w') as f:
-            json.dump(questions, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Question added successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        # Extract from Part Data Attributes table
+        data_rows = soup.find_all("tr", class_="data-row")
+        for row in data_rows:
+            try:
+                field_cell = row.find("td", class_="field-cell")
+                main_cell = row.find("td", class_="main-part-cell")
+                
+                if field_cell and main_cell:
+                    field_name = field_cell.get_text(strip=True)
+                    field_value = main_cell.get_text(strip=True)
+                    
+                    # Extract specific fields
+                    if field_name == "Part Life Cycle Code":
+                        meta["life_cycle_code"] = field_value
+                    elif field_name in ["Part Package Code", "Size Code", "Package Description"]:
+                        # Try to normalize package code
+                        normalized = norm_eia_code(field_value)
+                        if normalized:
+                            meta["package_code"] = normalized
+                        else:
+                            meta["package_code"] = field_value
+                    elif field_name == "Factory Lead Time":
+                        meta["lead_time"] = field_value
+                    # NEW: Extract Length and Width
+                    elif field_name in ["Length","Package Length"]:
+                        # Extract numeric value from "14 mm"
+                        length_match = re.search(r'(\d+(?:\.\d+)?)', field_value)
+                        if length_match:
+                            meta["length_mm"] = float(length_match.group(1))
+                    elif field_name in ["Width","Package Width"]:
+                        # Extract numeric value from "14 mm"
+                        width_match = re.search(r'(\d+(?:\.\d+)?)', field_value)
+                        if width_match:
+                            meta["width_mm"] = float(width_match.group(1))
+                            
+            except Exception:
+                continue
 
-@app.route('/api/admin/add-student', methods=['POST'])
-def add_student():
-    """Add a new student (admin only)"""
-    token = request.headers.get('Authorization')
-    
-    if not verify_token(token):
-        return jsonify({'success': False, 'message': 'Invalid API token'}), 401
-    
-    try:
-        data = request.json
-        
-        with open(STUDENTS_FILE, 'r') as f:
-            students = json.load(f)
-        
-        # Check for duplicate username
-        if any(s['username'] == data.get('username') for s in students):
-            return jsonify({'success': False, 'message': 'Username already exists'}), 400
-        
-        students.append(data)
-        
-        with open(STUDENTS_FILE, 'w') as f:
-            json.dump(students, f, indent=4)
-        
-        return jsonify({'success': True, 'message': 'Student added successfully'})
-    except Exception as e:
-        return jsonify({'success': False, 'message': str(e)}), 500
+        # Try to extract dimensions from package description
+        pkg_desc_rows = soup.find_all("tr", attrs={"data-field": "Package Description"})
+        for row in pkg_desc_rows:
+            try:
+                desc_cell = row.find("td", class_="main-part-cell")
+                if desc_cell:
+                    desc_text = desc_cell.get_text(strip=True)
+                    # Try to extract dimensions from package description
+                    # Look for patterns like "1.6x0.8" or "1.6 x 0.8"
+                    size_match = re.search(r'(\d+(?:\.\d+)?)\s*[x*]\s*(\d+(?:\.\d+)?)', desc_text)
+                    if size_match:
+                        meta["length_mm"] = float(size_match.group(1))
+                        meta["width_mm"] = float(size_match.group(2))
+                    else:
+                        # Try to extract standard package sizes (like 0805)
+                        std_size = norm_eia_code(desc_text)
+                        if std_size and std_size in EIA_TO_MM:
+                            meta["package_code"] = std_size
+                            l, w = EIA_TO_MM[std_size]
+                            meta["length_mm"] = l
+                            meta["width_mm"] = w
+            except Exception:
+                continue
 
-if __name__ == '__main__':
-    print("\n" + "="*60)
-    print("  CENTRAL EXAMINATION SERVER")
-    print("="*60)
-    print("\n📡 Server starting...")
-    print("🔐 API Token: secure_token_12345 (Change in server_config.json)")
-    print("🌐 Server will be accessible at: http://YOUR_IP:5000")
-    print("\nTo access from other computers:")
-    print("  1. Find your IP address (ipconfig/ifconfig)")
-    print("  2. Update client applications with your IP")
-    print("  3. Ensure port 5000 is open in firewall")
-    print("\n" + "="*60 + "\n")
-    
-    # Run on all interfaces to be accessible from network
-    app.run(host='0.0.0.0', port=5000, debug=True)
+        # Fallback: Try original JavaScript extraction methods
+        if not meta["life_cycle_code"]:
+            life = re.search(r'"lifeCycle(Code)?"\s*:\s*"([^"]+)"', html)
+            if life:
+                meta["life_cycle_code"] = life.group(2)
 
-"""
-Enhanced Examination Client with Kiosk Mode and Server Connection
-"""
+        if not meta["package_code"]:
+            pkg = re.search(r'"sizeCode"\s*:\s*"([^"]+)"', html) or re.search(r'"package"\s*:\s*"([^"]+)"', html)
+            if pkg:
+                normalized = norm_eia_code(pkg.group(1))
+                meta["package_code"] = normalized or pkg.group(1)
 
-import sys
-import json
-import os
-import requests
-from datetime import datetime
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-                             QMessageBox, QRadioButton, QButtonGroup, QProgressBar,
-                             QTextEdit, QGroupBox, QDialog, QCheckBox)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt6.QtGui import QFont, QImage, QPixmap
-import cv2
+        # Continue with existing dimensions extraction if not found
+        if not meta["length_mm"]:
+            lmatch = re.search(r'"length"\s*:\s*([0-9.]+)\s*,\s*"unit"\s*:\s*"mm"', html)
+            if lmatch:
+                meta["length_mm"] = float(lmatch.group(1))
+                
+        if not meta["width_mm"]:
+            wmatch = re.search(r'"width"\s*:\s*([0-9.]+)\s*,\s*"unit"\s*:\s*"mm"', html)
+            if wmatch:
+                meta["width_mm"] = float(wmatch.group(1))
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
+        # Extract distributor offers from the FC.group JavaScript object
+        group_match = re.search(r'FC\.group\s*=\s*\{[^}]*offers:\s*(\[.*?\])', html, re.DOTALL)
+        if group_match:
+            try:
+                offers_json = group_match.group(1)
+                # Clean up the JavaScript to make it valid JSON
+                offers_json = re.sub(r'([{,]\s*)(\w+):', r'\1"\2":', offers_json) # Quote keys
+                offers_json = re.sub(r"'([^']*)'", r'"\1"', offers_json) # Convert single quotes
+                offers_data = json.loads(offers_json)
 
-# Server configuration - CHANGE THIS TO YOUR SERVER IP/URL
-SERVER_URL = "http://localhost:5000"  # Change to your server IP, e.g., "http://192.168.1.100:5000"
-API_TOKEN = "secure_token_12345"  # Must match server token
+                for offer in offers_data:
+                    distributor = offer.get("distributor", "").strip()
+                    stock = int(offer.get("stock", 0) or 0)
 
-# Local cache files (for offline fallback)
-LOCAL_CACHE_FILE = "client_cache.json"
 
-# ============================================================================
-# SERVER API CLIENT
-# ============================================================================
 
-class ExamServerAPI:
-    """API client for communicating with central exam server"""
-    
-    @staticmethod
-    def test_connection():
-        """Test connection to server"""
+                if distributor and (price_tiers or stock > 0):
+                    meta["offers"].append({
+                        "distributor": distributor,
+                        "stock": stock,
+                        "currency": "USD",
+                        "price_tiers": sorted(price_tiers, key=lambda x: x["quantity"]),
+                        "lead_time": offer.get("leadTime") or meta.get("lead_time"),
+                        "moq": min(tier["quantity"] for tier in price_tiers) if price_tiers else None
+                    })
+            except (json.JSONDecodeError, Exception):
+                pass
+
+        # Fallback: Parse HTML tables for distributor data
+        if not meta["offers"]:
+            price_stock_table = soup.find("table", class_="price-stock-table")
+            if price_stock_table:
+                for row in price_stock_table.find_all("tr", class_="price-stock-tr"):
+                    try:
+                        # Extract distributor name
+                        dist_cell = row.find("td", class_="td-dis")
+                        if not dist_cell:
+                            continue
+                        distributor = dist_cell.get_text(strip=True)
+
+                        # Extract stock
+                        stock_cell = row.find("td", class_="td-stock")
+                        stock = 0
+                        if stock_cell:
+                            stock_text = stock_cell.get_text(strip=True)
+                            stock_match = re.search(r'(\d[\d,]*)', stock_text)
+                            if stock_match:
+                                stock = int(stock_match.group(1).replace(",", ""))
+
+                        # Extract lead time from description
+                        desc_cell = row.find("td", class_="td-desc")
+                        row_lead_time = None
+                        if desc_cell:
+                            desc_text = desc_cell.get_text()
+                            lead_match = re.search(r'Lead time:\s*([^<\n]+)', desc_text)
+                            if lead_match:
+                                row_lead_time = lead_match.group(1).strip()
+
+
+
+                        if distributor and (  stock > 0):
+                            meta["offers"].append({
+                                "distributor": distributor,
+                                "stock": stock,
+                                "currency": "USD",
+
+                                "lead_time": row_lead_time or meta.get("lead_time"),
+                            })
+                    except Exception:
+                        continue
+
+        return meta
+
+class JSONStorage:
+    """JSON-based storage system to replace SQLite database"""
+    def __init__(self, path="bom_costing_data.json"):
+        self.path = path
+        self.data = self._load()
+
+    def _load(self):
+        """Load data from JSON file"""
+        if os.path.exists(self.path):
+            try:
+                with open(self.path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                print(f"Error loading JSON data: {e}")
+                return {}
+        return {}
+
+    def _save(self):
+        """Save data to JSON file"""
         try:
-            response = requests.get(f"{SERVER_URL}/api/health", timeout=5)
-            return response.status_code == 200
-        except:
+            # Create backup of existing file
+            if os.path.exists(self.path):
+                backup_path = f"{self.path}.backup"
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+                os.rename(self.path, backup_path)
+            
+            with open(self.path, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            print(f"Error saving JSON data: {e}")
+            # Restore backup if save failed
+            backup_path = f"{self.path}.backup"
+            if os.path.exists(backup_path):
+                os.rename(backup_path, self.path)
+
+    def upsert_offer(
+        self, mpn, distributor, manufacturer, price_tiers, stock, currency,
+        lead_time=None, life_cycle_code=None, package_code=None,
+        length_mm=None, width_mm=None, default_currency=None, part_type=None
+    ):
+        """Insert or update component offer data"""
+        if mpn not in self.data:
+            self.data[mpn] = {}
+        
+        if distributor not in self.data[mpn]:
+            self.data[mpn][distributor] = {}
+        
+        # Sort price tiers
+        tiers_sorted = sorted(price_tiers or [], key=lambda x: x["quantity"])
+        
+        # Update offer data
+        offer_data = {
+            "manufacturer": manufacturer,
+            "price_tiers": tiers_sorted,
+            "stock": max(self.data[mpn][distributor].get("stock", 0), int(stock or 0)),
+            "currency": currency or "USD",
+            "lead_time": lead_time or self.data[mpn][distributor].get("lead_time"),
+            "life_cycle_code": life_cycle_code or self.data[mpn][distributor].get("life_cycle_code"),
+            "package_code": package_code or self.data[mpn][distributor].get("package_code"),
+            "length_mm": length_mm if length_mm is not None else self.data[mpn][distributor].get("length_mm"),
+            "width_mm": width_mm if width_mm is not None else self.data[mpn][distributor].get("width_mm"),
+            "default_currency": default_currency or self.data[mpn][distributor].get("default_currency", "USD"),
+            "part_type": part_type or self.data[mpn][distributor].get("part_type"),
+            "scraped_date": datetime.now().isoformat()
+        }
+        
+        self.data[mpn][distributor].update(offer_data)
+        self._save()
+
+    def offers_by_mpn(self, mpn):
+        """Get all offers for a specific MPN"""
+        if mpn not in self.data:
+            return []
+        
+        offers = []
+        for distributor, offer_data in self.data[mpn].items():
+            offers.append({
+                "distributor": distributor,
+                "manufacturer": offer_data.get("manufacturer", ""),
+                "price_tiers": offer_data.get("price_tiers", []),
+                "stock": offer_data.get("stock", 0),
+                "currency": offer_data.get("currency", "USD"),
+                "lead_time": offer_data.get("lead_time"),
+                "life_cycle_code": offer_data.get("life_cycle_code"),
+                "package_code": offer_data.get("package_code"),
+                "length_mm": offer_data.get("length_mm"),
+                "width_mm": offer_data.get("width_mm"),
+                "default_currency": offer_data.get("default_currency", "USD"),
+                "part_type": offer_data.get("part_type")
+            })
+        
+        return sorted(offers, key=lambda x: x["distributor"])
+
+    def part_meta(self, mpn):
+        """Get metadata for a part"""
+        offers = self.offers_by_mpn(mpn)
+        
+        life = next((o["life_cycle_code"] for o in offers if o.get("life_cycle_code")), "")
+        pkg = next((o["package_code"] for o in offers if o.get("package_code")), "")
+        L = next((o["length_mm"] for o in offers if o.get("length_mm") is not None), None)
+        W = next((o["width_mm"] for o in offers if o.get("width_mm") is not None), None)
+        defcur = next((o["default_currency"] for o in offers if o.get("default_currency")), "USD")
+        ptype = next((o["part_type"] for o in offers if o.get("part_type")), "")
+        lead = next((o["lead_time"] for o in offers if o.get("lead_time")), "")
+        
+        return {
+            "life": life, "package": pkg, "L": L, "W": W, 
+            "default_currency": defcur, "part_type": ptype, "lead_time": lead
+        }
+
+    def update_size_for_mpn(self, mpn, length_mm, width_mm):
+        """Update length and width for all distributors of a specific MPN"""
+        if mpn in self.data:
+            for distributor in self.data[mpn]:
+                self.data[mpn][distributor]["length_mm"] = length_mm
+                self.data[mpn][distributor]["width_mm"] = width_mm
+            self._save()
+            return len(self.data[mpn])
+        return 0
+
+    def update_package_for_mpn(self, mpn, new_package):
+        """Update package code for all distributors of a specific MPN"""
+        if mpn in self.data:
+            for distributor in self.data[mpn]:
+                self.data[mpn][distributor]["package_code"] = new_package
+            self._save()
+            return len(self.data[mpn])
+        return 0
+    
+    def is_data_fresh(self, mpn, hours=6):
+        """Check if MPN data is fresh (within specified hours)"""
+        if mpn not in self.data:
             return False
+        
+        # Check if any distributor has recent data
+        for distributor_data in self.data[mpn].values():
+            scraped_date_str = distributor_data.get("scraped_date")
+            if scraped_date_str:
+                try:
+                    scraped_date = datetime.fromisoformat(scraped_date_str)
+                    time_diff = datetime.now() - scraped_date
+                    if time_diff < timedelta(hours=hours):
+                        return True
+                except Exception:
+                    continue
+        return False
     
-    @staticmethod
-    def login(username, password):
-        """Login to server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            data = {'username': username, 'password': password}
-            response = requests.post(f"{SERVER_URL}/api/login", 
-                                    json=data, headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            return {'success': False, 'message': f'Connection error: {str(e)}'}
-    
-    @staticmethod
-    def get_questions():
-        """Get questions from server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            response = requests.get(f"{SERVER_URL}/api/questions", 
-                                   headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            return {'success': False, 'message': f'Connection error: {str(e)}'}
-    
-    @staticmethod
-    def log_security_violation(username, student_name, violation_type, details):
-        """Log security violation to server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            data = {
-                'username': username,
-                'student_name': student_name,
-                'violation_type': violation_type,
-                'details': details
-            }
-            response = requests.post(f"{SERVER_URL}/api/security-log", 
-                                    json=data, headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            print(f"Failed to log violation: {e}")
-            return {'success': False, 'message': str(e)}
-    
-    @staticmethod
-    def submit_exam(username, student_name, score, total, percentage, 
-                   time_taken, tab_switches, camera_violations):
-        """Submit exam results to server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            data = {
-                'username': username,
-                'student_name': student_name,
-                'score': score,
-                'total_questions': total,
-                'percentage': percentage,
-                'time_taken': time_taken,
-                'tab_switch_count': tab_switches,
-                'camera_violation_count': camera_violations
-            }
-            response = requests.post(f"{SERVER_URL}/api/submit-exam", 
-                                    json=data, headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            return {'success': False, 'message': f'Connection error: {str(e)}'}
+    def get_data_age_hours(self, mpn):
+        """Get the age of data in hours for an MPN"""
+        if mpn not in self.data:
+            return float('inf')
+        
+        oldest_hours = 0
+        for distributor_data in self.data[mpn].values():
+            scraped_date_str = distributor_data.get("scraped_date")
+            if scraped_date_str:
+                try:
+                    scraped_date = datetime.fromisoformat(scraped_date_str)
+                    hours_old = (datetime.now() - scraped_date).total_seconds() / 3600
+                    oldest_hours = max(oldest_hours, hours_old)
+                except Exception:
+                    continue
+        return oldest_hours if oldest_hours > 0 else float('inf')
 
-# ============================================================================
-# WEBCAM MONITORING
-# ============================================================================
+class ScrapeThread(QThread):
+    progress = pyqtSignal(int)
+    log = pyqtSignal(str)
+    done = pyqtSignal()
 
-class WebcamThread(QThread):
-    frame_ready = pyqtSignal(QImage)
-    camera_lost = pyqtSignal()
-    
-    def __init__(self):
+    def __init__(self, mpns, storage: JSONStorage):
         super().__init__()
-        self.running = False
-        self.camera = None
-    
+        self.mpns = mpns
+        self.storage = storage
+        self.client = FindchipsClient()
+        self.cancelled = False
+
+    def cancel(self, _):
+        """Cancel the scraping process"""
+        self.cancelled = True
+        self.log.emit("Scraping cancelled by user")
+
     def run(self):
-        self.running = True
-        self.camera = cv2.VideoCapture(0)
+        total = len(self.mpns)
+        fresh_count = 0
+        scraped_count = 0
         
-        if not self.camera.isOpened():
-            self.camera_lost.emit()
-            return
-        
-        while self.running:
-            ret, frame = self.camera.read()
-            if ret:
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb_frame.shape
-                bytes_per_line = ch * w
-                q_image = QImage(rgb_frame.data, w, h, bytes_per_line, 
-                               QImage.Format.Format_RGB888)
-                self.frame_ready.emit(q_image)
-            else:
-                self.camera_lost.emit()
-                break
-            
-            self.msleep(100)
-    
-    def stop(self):
-        self.running = False
-        if self.camera:
-            self.camera.release()
-        self.wait()
-
-# ============================================================================
-# EXAM RULES DIALOG
-# ============================================================================
-
-class ExamRulesDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Examination Rules and Regulations")
-        self.setModal(True)
-        self.setMinimumSize(700, 500)
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
-        
-        title = QLabel("Examination Rules and Regulations")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("color: #2c3e50; padding: 10px;")
-        layout.addWidget(title)
-        
-        rules_text = QTextEdit()
-        rules_text.setReadOnly(True)
-        rules_text.setStyleSheet("""
-            QTextEdit {
-                background-color: white;
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 12px;
-            }
-        """)
-        
-        rules = """
-<h3 style='color: #e74c3c;'>IMPORTANT: Read Carefully Before Starting</h3>
-
-<h4 style='color: #2c3e50;'>Kiosk Mode Security:</h4>
-<ul>
-    <li>The application will run in <b>FULL SCREEN KIOSK MODE</b>.</li>
-    <li>You <b>CANNOT minimize, close, or switch</b> to other applications.</li>
-    <li>The exam window will stay on top at all times.</li>
-    <li>All violations are logged to the central server immediately.</li>
-</ul>
-
-<h4 style='color: #2c3e50;'>Camera Monitoring:</h4>
-<ul>
-    <li>Your webcam <b>MUST be turned ON</b> throughout the entire examination.</li>
-    <li>If the camera is turned off, it will be recorded as a security violation.</li>
-    <li>Ensure your face is clearly visible to the camera at all times.</li>
-</ul>
-
-<h4 style='color: #2c3e50;'>Data Collection:</h4>
-<ul>
-    <li>All exam data is sent to the <b>central examination server</b>.</li>
-    <li>Security violations are logged in real-time.</li>
-    <li>Your exam results are automatically submitted upon completion.</li>
-    <li>Network connectivity is required throughout the exam.</li>
-</ul>
-
-<h4 style='color: #e74c3c;'>Consequences of Violations:</h4>
-<ul>
-    <li>All violations are logged with timestamp and IP address.</li>
-    <li>Multiple violations may result in exam cancellation.</li>
-    <li>The administrator can review all activities from the central server.</li>
-</ul>
-
-<p style='color: #27ae60; font-weight: bold; margin-top: 20px;'>
-By clicking "I Agree and Start Exam", you acknowledge that you have read, 
-understood, and agree to comply with all the above rules and regulations.
-</p>
-        """
-        
-        rules_text.setHtml(rules)
-        layout.addWidget(rules_text)
-        
-        self.agree_checkbox = QCheckBox("I have read and agree to all examination rules")
-        self.agree_checkbox.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.agree_checkbox.setStyleSheet("color: #2c3e50; padding: 10px;")
-        self.agree_checkbox.stateChanged.connect(self.toggle_start_button)
-        layout.addWidget(self.agree_checkbox)
-        
-        btn_layout = QHBoxLayout()
-        
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFont(QFont("Arial", 11))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-        
-        btn_layout.addStretch()
-        
-        self.start_btn = QPushButton("I Agree and Start Exam")
-        self.start_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
-        self.start_btn.setEnabled(False)
-        self.start_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(self.start_btn)
-        
-        layout.addLayout(btn_layout)
-        self.setLayout(layout)
-    
-    def toggle_start_button(self):
-        self.start_btn.setEnabled(self.agree_checkbox.isChecked())
-
-# ============================================================================
-# LOGIN WINDOW
-# ============================================================================
-
-class LoginWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.exam_window = None
-        self.init_ui()
-        self.check_server_connection()
-        
-    def check_server_connection(self):
-        """Check if server is reachable"""
-        if ExamServerAPI.test_connection():
-            self.connection_status.setText("🟢 Connected to Server")
-            self.connection_status.setStyleSheet("color: #27ae60; font-weight: bold;")
-        else:
-            self.connection_status.setText("🔴 Server Not Reachable")
-            self.connection_status.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            QMessageBox.warning(self, "Connection Error", 
-                              f"Cannot connect to examination server at:\n{SERVER_URL}\n\n"
-                              "Please check your internet connection and server address.")
-    
-    def init_ui(self):
-        self.setWindowTitle("Online Examination - Secure Login")
-        self.setGeometry(100, 100, 500, 450)
-        self.setStyleSheet("background-color: #f0f0f0;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(50, 40, 50, 40)
-        
-        title = QLabel("Secure Online Examination System")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Connected to Central Server")
-        subtitle.setFont(QFont("Arial", 10))
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("color: #7f8c8d;")
-        layout.addWidget(subtitle)
-        
-        self.connection_status = QLabel("⚪ Checking connection...")
-        self.connection_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.connection_status.setStyleSheet("padding: 10px;")
-        layout.addWidget(self.connection_status)
-        
-        username_label = QLabel("Username:")
-        username_label.setFont(QFont("Arial", 10))
-        layout.addWidget(username_label)
-        
-        self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter your username")
-        self.username_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        layout.addWidget(self.username_input)
-        
-        password_label = QLabel("Password:")
-        password_label.setFont(QFont("Arial", 10))
-        layout.addWidget(password_label)
-        
-        self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter your password")
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        self.password_input.returnPressed.connect(self.login)
-        layout.addWidget(self.password_input)
-        
-        info_label = QLabel("Demo Credentials:\nUsername: student | Password: exam123")
-        info_label.setFont(QFont("Arial", 8))
-        info_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
-        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info_label)
-        
-        login_btn = QPushButton("🔐 Login and Start Exam")
-        login_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        login_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 12px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:pressed {
-                background-color: #1c6ea4;
-            }
-        """)
-        login_btn.clicked.connect(self.login)
-        layout.addWidget(login_btn)
-        
-        layout.addStretch()
-        central_widget.setLayout(layout)
-    
-    def login(self):
-        username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
-        
-        if not username or not password:
-            QMessageBox.warning(self, "Input Error", "Please enter both username and password!")
-            return
-        
-        # Show loading message
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        
-        # Authenticate with server
-        result = ExamServerAPI.login(username, password)
-        
-        QApplication.restoreOverrideCursor()
-        
-        if result.get('success'):
-            student_data = result.get('student', {})
-            student_name = student_data.get('name', 'Student')
-            
-            # Show rules dialog
-            rules_dialog = ExamRulesDialog(self)
-            if rules_dialog.exec() == QDialog.DialogCode.Accepted:
-                self.open_exam_window(username, student_name)
-        else:
-            QMessageBox.warning(self, "Login Failed", 
-                              f"Authentication failed:\n{result.get('message', 'Invalid credentials')}")
-    
-    def open_exam_window(self, username, student_name):
-        self.exam_window = ExamWindow(username, student_name)
-        self.exam_window.show()
-        self.close()
-
-# ============================================================================
-# EXAM WINDOW WITH KIOSK MODE
-# ============================================================================
-
-class ExamWindow(QMainWindow):
-    def __init__(self, username, student_name):
-        super().__init__()
-        self.username = username
-        self.student_name = student_name
-        self.current_question = 0
-        self.score = 0
-        self.time_remaining = 300  # 5 minutes
-        self.start_time = datetime.now()
-        self.camera_active = False
-        self.exam_paused = False
-        self.tab_switch_count = 0
-        self.camera_violation_count = 0
-        
-        # Load questions from server
-        self.questions = self.load_questions_from_server()
-        
-        if not self.questions:
-            QMessageBox.critical(self, "Error", "Failed to load questions from server!")
-            self.close()
-            return
-        
-        self.user_answers = [-1] * len(self.questions)
-        self.init_ui()
-        self.enable_kiosk_mode()
-        self.setup_camera()
-        self.start_timer()
-        
-        # Install event filter for focus detection
-        self.installEventFilter(self)
-    
-    def load_questions_from_server(self):
-        """Load questions from central server"""
-        result = ExamServerAPI.get_questions()
-        if result.get('success'):
-            return result.get('questions', [])
-        return []
-    
-    def enable_kiosk_mode(self):
-        """Enable full-screen kiosk mode"""
-        # Set window to stay on top and full screen
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.CustomizeWindowHint
-        )
-        
-        # Show fullscreen
-        self.showFullScreen()
-        
-        # Grab keyboard to prevent shortcuts
-        self.grabKeyboard()
-        
-        # Set focus policy
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        
-        print("🔒 KIOSK MODE ENABLED - Full screen locked")
-    
-    def keyPressEvent(self, event):
-        """Block certain key combinations"""
-        # Block Alt+Tab, Alt+F4, Windows key, etc.
-        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
-            if event.key() in [Qt.Key.Key_Tab, Qt.Key.Key_F4]:
-                self.handle_escape_attempt("Alt+Tab/Alt+F4")
-                event.ignore()
+        for i, mpn in enumerate(self.mpns):
+            # Check for cancellation
+            if self.cancelled:
+                self.log.emit("Scraping process was cancelled")
+                self.done.emit()
                 return
-        
-        # Block Windows key
-        if event.key() in [Qt.Key.Key_Meta, Qt.Key.Key_Super_L, Qt.Key.Key_Super_R]:
-            self.handle_escape_attempt("Windows Key")
-            event.ignore()
-            return
-        
-        # Block Ctrl+Alt+Del (can't fully block but log attempt)
-        if (event.modifiers() & Qt.KeyboardModifier.ControlModifier and 
-            event.modifiers() & Qt.KeyboardModifier.AltModifier and
-            event.key() == Qt.Key.Key_Delete):
-            self.handle_escape_attempt("Ctrl+Alt+Del")
-            event.ignore()
-            return
-        
-        # Allow Esc only for testing - remove in production
-        if event.key() == Qt.Key.Key_Escape:
-            reply = QMessageBox.question(self, "Exit Exam?", 
-                                        "Are you sure you want to exit the exam?\n"
-                                        "This will submit your current answers.",
-                                        QMessageBox.StandardButton.Yes | 
-                                        QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                self.submit_exam()
-            event.ignore()
-            return
-        
-        super().keyPressEvent(event)
+                
+            try:
+                # Check if data is fresh (less than 6 hours old)
+                if self.storage.is_data_fresh(mpn, hours=6):
+                    data_age = self.storage.get_data_age_hours(mpn)
+                    self.log.emit(f"Using cached data for {mpn} (age: {data_age:.1f} hours)")
+                    fresh_count += 1
+                    self.progress.emit(int((i + 1) * 100 / total))
+                    continue
+                
+                # Data is stale or doesn't exist, scrape from Findchips
+                data_age = self.storage.get_data_age_hours(mpn)
+                age_text = f"{data_age:.1f} hours old" if data_age != float('inf') else "not found"
+                self.log.emit(f"Scraping {mpn} (existing data: {age_text})")
+                
+                # Step 1: Get manufacturers from search page
+                search_results = self.client.search(mpn)
+                if not search_results:
+                    self.log.emit(f"No manufacturers found for {mpn}")
+                    self.progress.emit(int((i + 1) * 100 / total))
+                    time.sleep(0.1)
+                    continue
+
+                # Step 1.5: Filter search results - exact matches first, then max 1 partial match
+                filtered_results = filter_search_results(mpn, search_results)
+                if not filtered_results:
+                    self.log.emit(f"No suitable matches found for {mpn}")
+                    self.progress.emit(int((i + 1) * 100 / total))
+                    time.sleep(0.1)
+                    continue
+
+                self.log.emit(f"Found {len(filtered_results)} suitable matches for {mpn}")
+
+                # Step 2: For each filtered manufacturer, get detailed data from detail page
+                for result in filtered_results:
+                    # Check for cancellation before each detail request
+                    if self.cancelled:
+                        self.log.emit("Scraping process was cancelled")
+                        self.done.emit()
+                        return
+                        
+                    result_mpn = result["mpn"]
+                    manufacturer = result["manufacturer"]
+
+                    # Determine if this is exact match or alternate
+                    is_exact = result_mpn.strip().lower() == mpn.strip().lower()
+                    part_type = "Precise Match" if is_exact else "Alternate Parts"
+
+                    self.log.emit(f"Getting details: {result_mpn} / {manufacturer} ({'Exact' if is_exact else 'Partial'} match)")
+
+                    # Get detailed data from detail page
+                    detail_data = self.client.detail(result_mpn, manufacturer)
+
+                    # Store offers from detail page
+                    offers = detail_data.get("offers", [])
+                    if not offers:
+                        # If no offers, create a placeholder entry
+                        offers = [{"distributor": "Unknown", "stock": 0, "price_tiers": [], "currency": "USD"}]
+
+                    for offer in offers:
+                        self.storage.upsert_offer(
+                            mpn=mpn,  # Store under the searched MPN
+                            distributor=offer.get("distributor", "Unknown"),
+                            manufacturer=manufacturer,
+                            price_tiers=offer.get("price_tiers", []),
+                            stock=offer.get("stock", 0),
+                            currency=offer.get("currency", "USD"),
+                            lead_time=offer.get("lead_time"),
+                            life_cycle_code=detail_data.get("life_cycle_code"),
+                            package_code=detail_data.get("package_code"),
+                            length_mm=detail_data.get("length_mm"),
+                            width_mm=detail_data.get("width_mm"),
+                            default_currency=detail_data.get("default_currency", "USD"),
+                            part_type=part_type
+                        )
+
+                scraped_count += 1
+                self.log.emit(f"Completed: {mpn} - processed {len(filtered_results)} manufacturers")
+
+            except Exception as e:
+                self.log.emit(f"Error processing {mpn}: {e}")
+
+            self.progress.emit(int((i + 1) * 100 / total))
+            time.sleep(0.1)
+
+        # Final summary
+        self.log.emit(f"Scraping completed - Used cached: {fresh_count}, Scraped fresh: {scraped_count}")
+        self.done.emit()
+
+
+
+class RobustBOMLoader:
+    """Enhanced BOM file loader with better error handling and format support"""
     
-    def handle_escape_attempt(self, method):
-        """Handle attempts to escape kiosk mode"""
-        self.tab_switch_count += 1
-        ExamServerAPI.log_security_violation(
-            self.username,
-            self.student_name,
-            "Escape Attempt",
-            f"Attempted to use {method} - Violation #{self.tab_switch_count}"
-        )
-        self.update_violations_display()
+    @staticmethod
+    def load_bom_file(file_path: str) -> pd.DataFrame:
+        """Load BOM file with robust error handling and format detection"""
         
-        QMessageBox.critical(self, "Security Violation",
-                           f"⚠️ SECURITY ALERT ⚠️\n\n"
-                           f"Attempt to exit kiosk mode detected!\n"
-                           f"Method: {method}\n\n"
-                           f"This is violation #{self.tab_switch_count}\n"
-                           f"This has been reported to the administrator.")
+        # Detect file extension
+        file_ext = os.path.splitext(file_path)[1].lower()
+        
+        try:
+            if file_ext == '.csv':
+                return RobustBOMLoader._load_csv(file_path)
+            elif file_ext in ['.xlsx', '.xls']:
+                return RobustBOMLoader._load_excel(file_path)
+            else:
+                raise ValueError(f"Unsupported file format: {file_ext}")
+        except Exception as e:
+            raise Exception(f"Failed to load BOM file: {str(e)}")
     
-    def setup_camera(self):
-        """Initialize webcam monitoring"""
-        self.webcam_thread = WebcamThread()
-        self.webcam_thread.frame_ready.connect(self.update_camera_frame)
-        self.webcam_thread.camera_lost.connect(self.handle_camera_loss)
-        self.webcam_thread.start()
-        self.camera_active = True
+    @staticmethod
+    def _load_csv(file_path: str) -> pd.DataFrame:
+        """Load CSV file with encoding and delimiter detection"""
+        
+        # Detect encoding
+        encoding = detect_file_encoding(file_path)
+        
+        # Detect delimiter
+        delimiter = detect_csv_delimiter(file_path, encoding)
+        
+        # Try different encoding options if detection fails
+        encodings_to_try = [encoding, 'utf-8', 'utf-8-sig', 'iso-8859-1', 'cp1252']
+        
+        for enc in encodings_to_try:
+            try:
+                # Read with pandas
+                df = pd.read_csv(
+                    file_path, 
+                    delimiter=delimiter, 
+                    encoding=enc,
+                    engine='python',  # More flexible parser
+                    on_bad_lines='skip',  # Skip bad lines instead of failing
+                    dtype=str  # Read all as strings initially
+                )
+                
+                # Basic validation
+                if df.empty:
+                    raise ValueError("CSV file is empty")
+                
+                if len(df.columns) < 2:
+                    raise ValueError("CSV file must have at least 2 columns")
+                
+                # Clean up column names (remove extra whitespace)
+                df.columns = df.columns.str.strip()
+                
+                return df
+                
+            except UnicodeDecodeError:
+                continue  # Try next encoding
+            except Exception as e:
+                if enc == encodings_to_try[-1]:  # Last encoding failed
+                    raise Exception(f"Failed to read CSV: {str(e)}")
+                continue
+        
+        raise Exception("Could not read CSV file with any supported encoding")
     
-    def update_camera_frame(self, q_image):
-        """Update camera preview"""
-        pixmap = QPixmap.fromImage(q_image)
-        scaled_pixmap = pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
-        self.camera_label.setPixmap(scaled_pixmap)
-    
-    def handle_camera_loss(self):
-        """Handle camera being turned off"""
-        if self.camera_active:
-            self.camera_active = False
-            self.camera_violation_count += 1
+    @staticmethod
+    def _load_excel(file_path: str) -> pd.DataFrame:
+        """Load Excel file with sheet selection and error handling"""
+        
+        try:
+            # Try to read Excel file and get sheet names
+            excel_file = pd.ExcelFile(file_path)
+            sheet_names = excel_file.sheet_names
             
-            # Log to server
-            ExamServerAPI.log_security_violation(
-                self.username,
-                self.student_name,
-                "Camera Disabled",
-                f"Violation #{self.camera_violation_count}"
+            if len(sheet_names) == 0:
+                raise ValueError("Excel file contains no worksheets")
+            
+            # If multiple sheets, we need to let user choose
+            # For now, just use the first sheet, but in the GUI we can add sheet selection
+            selected_sheet = sheet_names[0]
+            
+            # Read the selected sheet
+            df = pd.read_excel(
+                file_path,
+                sheet_name=selected_sheet,
+                dtype=str,  # Read all as strings initially
+                engine='openpyxl'
             )
             
-            self.update_violations_display()
+            # Basic validation
+            if df.empty:
+                raise ValueError("Excel sheet is empty")
             
-            QMessageBox.critical(self, "Camera Violation", 
-                               f"⚠️ WARNING ⚠️\n\n"
-                               f"Camera has been disabled!\n\n"
-                               f"Violation #{self.camera_violation_count}\n"
-                               f"Reported to central server.\n\n"
-                               f"Please enable your camera immediately!")
+            if len(df.columns) < 2:
+                raise ValueError("Excel sheet must have at least 2 columns")
             
-            # Try to restart camera
-            self.setup_camera()
+            # Clean up column names
+            df.columns = df.columns.str.strip()
+            
+            # Remove completely empty rows
+            df = df.dropna(how='all')
+            
+            return df
+            
+        except Exception as e:
+            raise Exception(f"Failed to read Excel file: {str(e)}")
+
+class BOMDataCache:
+    """Cache frequently accessed data to avoid repeated JSON queries"""
+    def __init__(self):
+        self.offers_cache = {}
+        self.meta_cache = {}
+        self.last_update = {}
+        
+    def get_offers(self, mpn, storage):
+        """Get cached offers or fetch from storage"""
+        if mpn not in self.offers_cache:
+            self.offers_cache[mpn] = storage.offers_by_mpn(mpn)
+            self.last_update[mpn] = time.time()
+        return self.offers_cache[mpn]
     
-    def init_ui(self):
-        self.setWindowTitle("Online Examination - KIOSK MODE")
-        self.setStyleSheet("background-color: #ecf0f1;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        main_layout = QHBoxLayout()
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Left panel
-        left_panel = QWidget()
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel(f"🔒 SECURE EXAM - {self.student_name}")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        self.timer_label = QLabel("Time: 05:00")
-        self.timer_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.timer_label.setStyleSheet("color: #e74c3c; background-color: white; "
-                                      "padding: 10px; border-radius: 5px;")
-        header_layout.addWidget(self.timer_label)
-        
-        left_layout.addLayout(header_layout)
-        
-        # Security status
-        security_layout = QHBoxLayout()
-        
-        self.camera_status = QLabel("📹 Camera: Active")
-        self.camera_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
-        security_layout.addWidget(self.camera_status)
-        
-        self.kiosk_status = QLabel("🔒 Kiosk Mode: ACTIVE")
-        self.kiosk_status.setStyleSheet("color: #e74c3c; font-weight: bold; padding: 5px;")
-        security_layout.addWidget(self.kiosk_status)
-        
-        security_layout.addStretch()
-        
-        left_layout.addLayout(security_layout)
-        
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximum(len(self.questions))
-        self.progress_bar.setValue(1)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #27ae60;
-            }
-        """)
-        left_layout.addWidget(self.progress_bar)
-        
-        # Question area
-        question_widget = QWidget()
-        question_widget.setStyleSheet("background-color: white; border-radius: 10px;")
-        question_layout = QVBoxLayout()
-        question_layout.setContentsMargins(20, 20, 20, 20)
-        
-        self.question_label = QLabel()
-        self.question_label.setFont(QFont("Arial", 13))
-        self.question_label.setWordWrap(True)
-        self.question_label.setStyleSheet("color: #2c3e50; padding: 10px;")
-        question_layout.addWidget(self.question_label)
-        
-        self.option_group = QButtonGroup()
-        self.option_buttons = []
-        
-        for i in range(4):
-            radio = QRadioButton()
-            radio.setFont(QFont("Arial", 11))
-            radio.setStyleSheet("padding: 8px;")
-            radio.toggled.connect(lambda checked, idx=i: 
-                                self.option_selected(idx) if checked else None)
-            self.option_buttons.append(radio)
-            self.option_group.addButton(radio)
-            question_layout.addWidget(radio)
-        
-        question_widget.setLayout(question_layout)
-        left_layout.addWidget(question_widget)
-        
-        # Navigation buttons
-        nav_layout = QHBoxLayout()
-        
-        self.prev_btn = QPushButton("⬅ Previous")
-        self.prev_btn.setFont(QFont("Arial", 11))
-        self.prev_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
-        self.prev_btn.clicked.connect(self.previous_question)
-        nav_layout.addWidget(self.prev_btn)
-        
-        nav_layout.addStretch()
-        
-        self.next_btn = QPushButton("Next ➡")
-        self.next_btn.setFont(QFont("Arial", 11))
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        self.next_btn.clicked.connect(self.next_question)
-        nav_layout.addWidget(self.next_btn)
-        
-        self.submit_btn = QPushButton("✓ Submit Exam")
-        self.submit_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.submit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        self.submit_btn.clicked.connect(self.submit_exam)
-        self.submit_btn.hide()
-        nav_layout.addWidget(self.submit_btn)
-        
-        left_layout.addLayout(nav_layout)
-        
-        left_panel.setLayout(left_layout)
-        main_layout.addWidget(left_panel, 3)
-        
-        # Right panel - Monitoring
-        right_panel = QWidget()
-        right_panel.setStyleSheet("background-color: white; border-radius: 10px;")
-        right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(15, 15, 15, 15)
-        
-        camera_title = QLabel("🎥 Live Monitoring")
-        camera_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_layout.addWidget(camera_title)
-        
-        self.camera_label = QLabel()
-        self.camera_label.setStyleSheet("border: 2px solid #bdc3c7; background-color: #2c3e50;")
-        self.camera_label.setMinimumSize(200, 150)
-        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_layout.addWidget(self.camera_label)
-        
-        server_label = QLabel("🌐 Connected to:\nCentral Server")
-        server_label.setStyleSheet("color: #27ae60; padding: 10px; font-weight: bold;")
-        server_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        server_label.setWordWrap(True)
-        right_layout.addWidget(server_label)
-        
-        warning_label = QLabel("⚠️ All activities are\nmonitored and logged")
-        warning_label.setStyleSheet("color: #e74c3c; padding: 10px; font-weight: bold;")
-        warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        warning_label.setWordWrap(True)
-        right_layout.addWidget(warning_label)
-        
-        violations_label = QLabel("Security Violations:")
-        violations_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        right_layout.addWidget(violations_label)
-        
-        self.violations_display = QLabel(
-            f"Escape Attempts: {self.tab_switch_count}\n"
-            f"Camera Off: {self.camera_violation_count}"
-        )
-        self.violations_display.setStyleSheet(
-            "background-color: #f8f9fa; padding: 10px; border-radius: 5px;"
-        )
-        right_layout.addWidget(self.violations_display)
-        
-        right_layout.addStretch()
-        
-        right_panel.setLayout(right_layout)
-        main_layout.addWidget(right_panel, 1)
-        
-        central_widget.setLayout(main_layout)
-        self.load_question()
+    def get_meta(self, mpn, storage):
+        """Get cached metadata or fetch from storage"""
+        if mpn not in self.meta_cache:
+            self.meta_cache[mpn] = storage.part_meta(mpn)
+            self.last_update[mpn] = time.time()
+        return self.meta_cache[mpn]
     
-    def changeEvent(self, event):
-        """Detect window state changes"""
-        if event.type() == event.Type.WindowStateChange or event.type() == event.Type.ActivationChange:
-            if not self.isActiveWindow() and not self.exam_paused:
-                self.handle_focus_loss()
-        super().changeEvent(event)
-    
-    def handle_focus_loss(self):
-        """Handle focus loss"""
-        self.tab_switch_count += 1
-        ExamServerAPI.log_security_violation(
-            self.username,
-            self.student_name,
-            "Focus Loss",
-            f"Attempt #{self.tab_switch_count}"
-        )
-        self.update_violations_display()
-    
-    def update_violations_display(self):
-        """Update the violations counter"""
-        self.violations_display.setText(
-            f"Escape Attempts: {self.tab_switch_count}\n"
-            f"Camera Off: {self.camera_violation_count}"
-        )
-    
-    def start_timer(self):
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.timer.start(1000)
-    
-    def update_timer(self):
-        self.time_remaining -= 1
-        minutes = self.time_remaining // 60
-        seconds = self.time_remaining % 60
-        self.timer_label.setText(f"Time: {minutes:02d}:{seconds:02d}")
-        
-        if self.time_remaining <= 0:
-            self.timer.stop()
-            QMessageBox.warning(self, "Time's Up!", "Exam time is over! Submitting automatically.")
-            self.submit_exam()
-    
-    def load_question(self):
-        q = self.questions[self.current_question]
-        self.question_label.setText(f"Q{self.current_question + 1}. {q['question']}")
-        
-        for i, option in enumerate(q['options']):
-            self.option_buttons[i].setText(option)
-            self.option_buttons[i].setChecked(self.user_answers[self.current_question] == i)
-        
-        self.prev_btn.setEnabled(self.current_question > 0)
-        self.progress_bar.setValue(self.current_question + 1)
-        
-        if self.current_question == len(self.questions) - 1:
-            self.next_btn.hide()
-            self.submit_btn.show()
+    def invalidate(self, mpn=None):
+        """Invalidate cache for specific MPN or all"""
+        if mpn:
+            self.offers_cache.pop(mpn, None)
+            self.meta_cache.pop(mpn, None)
+            self.last_update.pop(mpn, None)
         else:
-            self.next_btn.show()
-            self.submit_btn.hide()
-    
-    def option_selected(self, index):
-        self.user_answers[self.current_question] = index
-    
-    def next_question(self):
-        if self.current_question < len(self.questions) - 1:
-            self.current_question += 1
-            self.load_question()
-    
-    def previous_question(self):
-        if self.current_question > 0:
-            self.current_question -= 1
-            self.load_question()
-    
-    def submit_exam(self):
-        self.timer.stop()
-        if self.webcam_thread:
-            self.webcam_thread.stop()
-        
-        # Calculate score
-        self.score = 0
-        for i, q in enumerate(self.questions):
-            if self.user_answers[i] == q['answer']:
-                self.score += 1
-        
-        percentage = (self.score / len(self.questions)) * 100
-        time_taken = (datetime.now() - self.start_time).total_seconds()
-        
-        # Submit to server
-        result = ExamServerAPI.submit_exam(
-            self.username,
-            self.student_name,
-            self.score,
-            len(self.questions),
-            percentage,
-            int(time_taken),
-            self.tab_switch_count,
-            self.camera_violation_count
-        )
-        
-        result_msg = f"""
-✅ Exam Completed and Submitted!
+            self.offers_cache.clear()
+            self.meta_cache.clear()
+            self.last_update.clear()
 
-Total Questions: {len(self.questions)}
-Correct Answers: {self.score}
-Wrong Answers: {len(self.questions) - self.score}
-Score: {percentage:.1f}%
 
-Security Summary:
-Escape Attempts: {self.tab_switch_count}
-Camera Violations: {self.camera_violation_count}
-
-Server Status: {'✓ Submitted Successfully' if result.get('success') else '✗ Submission Failed'}
-
-All data has been sent to the central server.
-        """
-        
-        QMessageBox.information(self, "Exam Results", result_msg)
-        
-        # Release keyboard and close
-        self.releaseKeyboard()
-        self.close()
-    
-    def closeEvent(self, event):
-        """Handle window close event"""
-        if self.webcam_thread:
-            self.webcam_thread.stop()
-        self.releaseKeyboard()
-        event.accept()
-
-# ============================================================================
-# MAIN APPLICATION
-# ============================================================================
-
-def main():
-    app = QApplication(sys.argv)
-    
-    print("\n" + "="*60)
-    print("  SECURE ONLINE EXAMINATION CLIENT")
-    print("="*60)
-    print(f"\n📡 Server: {SERVER_URL}")
-    print(f"🔐 API Token: {API_TOKEN[:20]}...")
-    print("\n⚠️  KIOSK MODE ENABLED - Full screen will be locked")
-    print("="*60 + "\n")
-    
-    login_window = LoginWindow()
-    login_window.show()
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()
-
-ri """
-Enhanced Examination Client with Kiosk Mode and Server Connection
-"""
-
-import sys
-import json
-import os
-import requests
-from datetime import datetime
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QLineEdit, QPushButton, 
-                             QMessageBox, QRadioButton, QButtonGroup, QProgressBar,
-                             QTextEdit, QGroupBox, QDialog, QCheckBox)
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QThread
-from PyQt6.QtGui import QFont, QImage, QPixmap
-import cv2
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-# Server configuration - CHANGE THIS TO YOUR SERVER IP/URL
-SERVER_URL = "http://localhost:5000"  # Change to your server IP, e.g., "http://192.168.1.100:5000"
-API_TOKEN = "secure_token_12345"  # Must match server token
-
-# Local cache files (for offline fallback)
-LOCAL_CACHE_FILE = "client_cache.json"
-
-# ============================================================================
-# SERVER API CLIENT
-# ============================================================================
-
-class ExamServerAPI:
-    """API client for communicating with central exam server"""
-    
-    @staticmethod
-    def test_connection():
-        """Test connection to server"""
-        try:
-            response = requests.get(f"{SERVER_URL}/api/health", timeout=5)
-            return response.status_code == 200
-        except:
-            return False
-    
-    @staticmethod
-    def login(username, password):
-        """Login to server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            data = {'username': username, 'password': password}
-            response = requests.post(f"{SERVER_URL}/api/login", 
-                                    json=data, headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            return {'success': False, 'message': f'Connection error: {str(e)}'}
-    
-    @staticmethod
-    def get_questions():
-        """Get questions from server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            response = requests.get(f"{SERVER_URL}/api/questions", 
-                                   headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            return {'success': False, 'message': f'Connection error: {str(e)}'}
-    
-    @staticmethod
-    def log_security_violation(username, student_name, violation_type, details):
-        """Log security violation to server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            data = {
-                'username': username,
-                'student_name': student_name,
-                'violation_type': violation_type,
-                'details': details
-            }
-            response = requests.post(f"{SERVER_URL}/api/security-log", 
-                                    json=data, headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            print(f"Failed to log violation: {e}")
-            return {'success': False, 'message': str(e)}
-    
-    @staticmethod
-    def submit_exam(username, student_name, score, total, percentage, 
-                   time_taken, tab_switches, camera_violations):
-        """Submit exam results to server"""
-        try:
-            headers = {'Authorization': API_TOKEN}
-            data = {
-                'username': username,
-                'student_name': student_name,
-                'score': score,
-                'total_questions': total,
-                'percentage': percentage,
-                'time_taken': time_taken,
-                'tab_switch_count': tab_switches,
-                'camera_violation_count': camera_violations
-            }
-            response = requests.post(f"{SERVER_URL}/api/submit-exam", 
-                                    json=data, headers=headers, timeout=10)
-            return response.json()
-        except Exception as e:
-            return {'success': False, 'message': f'Connection error: {str(e)}'}
-
-# ============================================================================
-# WEBCAM MONITORING
-# ============================================================================
-
-class WebcamThread(QThread):
-    frame_ready = pyqtSignal(QImage)
-    camera_lost = pyqtSignal()
-    
+class App(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.running = False
-        self.camera = None
-    
-    def run(self):
-        self.running = True
-        self.camera = cv2.VideoCapture(0)
+        self.setWindowTitle("SIENNA BOM Cost Analysis tool V1.1                    © 2025 Sienna ECAD Technologies. All Rights Reserved.")
         
-        if not self.camera.isOpened():
-            self.camera_lost.emit()
+        logo_path = resource_path("bomlogo.ico")
+        if os.path.exists(logo_path):
+            self.setWindowIcon(QIcon(logo_path))
+        else:
+            print(f"Icon not found at: {logo_path}")
+
+        self.resize(1250, 750)
+        self.storage = JSONStorage()
+        self.client = FindchipsClient()
+        self.exchange = {"USD": 1.0, "INR": 87.0}
+        self._manufacturer_overrides = {}
+        self._package_overrides = {}
+        
+        # ADD THESE LINES:
+        self.data_cache = BOMDataCache()
+        self._calculation_in_progress = False
+        self._signal_connected = True  # NEW: Track signal connection state
+        
+        self._build_ui()
+        self._apply_white_backgrounds()
+        self.bom_df = None
+        self.loader = RobustBOMLoader()
+
+    def _build_ui(self):
+        tb = QToolBar(); self.addToolBar(tb)
+        act_open = QAction("Upload BOM", self); act_open.triggered.connect(self.on_open); tb.addAction(act_open)
+        tb.addSeparator()
+        act_fetch = QAction("Fetch Data", self); act_fetch.triggered.connect(self.on_fetch); tb.addAction(act_fetch)
+        tb.addSeparator()
+        act_export = QAction("Export to Excel", self); act_export.triggered.connect(self.on_export_smart); tb.addAction(act_export)
+
+        top = QHBoxLayout()
+
+        # MPN Column
+        mpn_layout = QHBoxLayout()
+        mpn_layout.addWidget(QLabel("MPN Column:"))
+        self.cmb_mpn = QComboBox()
+        self.cmb_mpn.setMinimumWidth(200)
+        mpn_layout.addWidget(self.cmb_mpn)
+        mpn_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(mpn_layout)
+        
+
+        # QTY Column
+        qty_layout = QHBoxLayout()
+        qty_layout.addWidget(QLabel("QTY Column:"))
+        self.cmb_qty = QComboBox()
+        self.cmb_qty.setMinimumWidth(200)
+        qty_layout.addWidget(self.cmb_qty)
+        qty_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(qty_layout)
+
+        # PCB Qty
+        pcb_layout = QHBoxLayout()
+        pcb_layout.addWidget(QLabel("PCB Qty:"))
+        self.sp_pcb = QSpinBox()
+        self.sp_pcb.setRange(1, 1000000)
+        self.sp_pcb.setEnabled(True)
+        self.sp_pcb.setValue(1)
+        self.sp_pcb.setMinimumWidth(150)
+        pcb_layout.addWidget(self.sp_pcb)
+        pcb_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(pcb_layout)
+
+        # Currency
+        cur_layout = QHBoxLayout()
+        cur_layout.addWidget(QLabel("Currency:"))
+        self.cmb_cur = QComboBox()
+        self.cmb_cur.addItems(["USD", "INR"])
+        self.cmb_cur.setMinimumWidth(120)
+        cur_layout.addWidget(self.cmb_cur)
+        cur_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(cur_layout)
+
+        # Exchange Rate
+        rate_layout = QHBoxLayout()
+        rate_layout.addWidget(QLabel("USD→INR:"))
+        self.sp_rate = QDoubleSpinBox()
+        self.sp_rate.setRange(0.01, 1000.0)
+        self.sp_rate.setDecimals(2)
+        self.sp_rate.setValue(87.0)
+        self.sp_rate.setMinimumWidth(120)
+        rate_layout.addWidget(self.sp_rate)
+        rate_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(rate_layout)
+
+        img1_layout = QHBoxLayout()
+        img_label = QLabel()
+        pixmap = QPixmap(os.path.join(os.path.dirname(__file__), "SiennaLogo.png"))
+        img_label.setPixmap(pixmap.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation))
+        img_label.setMinimumWidth(80)  # Optional scaling
+        img1_layout.addWidget(img_label)
+        img1_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        top.addLayout(img1_layout)
+
+        # Set the layout to a widget
+        topw = QWidget()
+        topw.setLayout(top)
+
+
+        self.tabs = QTabWidget()
+        self.tbl_results = QTableWidget()
+        self.tbl_details = QTableWidget()
+        self.tabs.addTab(self.tbl_results, "BOM Results")
+        self.tabs.addTab(self.tbl_details, "Component Details")
+
+        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setMaximumHeight(160)
+        # Progress bar with cancel button
+        progress_layout = QHBoxLayout()
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self.on_cancel_scraping)
+        
+        progress_layout.addWidget(self.progress)
+        progress_layout.addWidget(self.cancel_btn)
+        progress_widget = QWidget()
+        progress_widget.setLayout(progress_layout)
+
+        spl = QSplitter(Qt.Orientation.Vertical)
+        spl.addWidget(self.tabs); spl.addWidget(self.log); spl.setStretchFactor(0, 3); spl.setStretchFactor(1, 1)
+
+        root = QVBoxLayout(); root.addWidget(topw); root.addWidget(progress_widget); root.addWidget(spl)
+        cw = QWidget(); cw.setLayout(root); self.setCentralWidget(cw)
+
+        self._setup_debounced_recalc()
+        self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
+
+    def on_cancel_scraping(self, _):
+        """Cancel the current scraping operation"""
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_btn.setEnabled(False)
+            self.cancel_btn.setText("Cancelling...")
+
+    def on_fetch(self, _):
+        if self.bom_df is None:
+            QMessageBox.warning(self, "Warning", "Upload BOM first")
             return
-        
-        while self.running:
-            ret, frame = self.camera.read()
-            if ret:
-                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w, ch = rgb_frame.shape
-                bytes_per_line = ch * w
-                q_image = QImage(rgb_frame.data, w, h, bytes_per_line, 
-                               QImage.Format.Format_RGB888)
-                self.frame_ready.emit(q_image)
-            else:
-                self.camera_lost.emit()
-                break
-            
-            self.msleep(100)
-    
-    def stop(self):
-        self.running = False
-        if self.camera:
-            self.camera.release()
-        self.wait()
 
-# ============================================================================
-# EXAM RULES DIALOG
-# ============================================================================
+        mpn_col = self.cmb_mpn.currentText()
+        if not mpn_col:
+            QMessageBox.warning(self, "Warning", "Select MPN column")
+            return
 
-class ExamRulesDialog(QDialog):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Examination Rules and Regulations")
-        self.setModal(True)
-        self.setMinimumSize(700, 500)
-        self.init_ui()
-    
-    def init_ui(self):
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
-        layout.setContentsMargins(30, 30, 30, 30)
+        # Get unique MPNs, handling NaN values
+        mpns = []
+        for val in self.bom_df[mpn_col].dropna().astype(str).str.strip().unique():
+            if val and val.lower() != 'nan':
+                mpns.append(val)
+
+        if not mpns:
+            QMessageBox.warning(self, "Warning", "No valid MPNs found")
+            return
+
+        # Show cache status
+        fresh_mpns = [mpn for mpn in mpns if self.storage.is_data_fresh(mpn, hours=6)]
+        stale_mpns = [mpn for mpn in mpns if not self.storage.is_data_fresh(mpn, hours=6)]
         
-        title = QLabel("Examination Rules and Regulations")
-        title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("color: #2c3e50; padding: 10px;")
-        layout.addWidget(title)
+        self.log_msg(f"Starting fetch for {len(mpns)} unique MPNs")
+        self.log_msg(f"Fresh data (< 6 hours): {len(fresh_mpns)} MPNs")
+        self.log_msg(f"Will scrape: {len(stale_mpns)} MPNs")
+
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+        self.cancel_btn.setVisible(True)
+        self.cancel_btn.setEnabled(True)
+        self.cancel_btn.setText("Cancel")
+
+        self.worker = ScrapeThread(mpns, self.storage)
+        self.worker.progress.connect(self.progress.setValue)
+        self.worker.log.connect(self.log_msg)
+        self.worker.done.connect(self.on_scrape_done)
+        self.worker.start()
+
+        self._details_needs_refresh = True
+
+    # 6. UPDATE on_scrape_done to invalidate cache
+    def on_scrape_done(self):
+        self.progress.setVisible(False)
+        self.cancel_btn.setVisible(False)
+        self._details_needs_refresh = True
         
-        rules_text = QTextEdit()
-        rules_text.setReadOnly(True)
-        rules_text.setStyleSheet("""
-            QTextEdit {
+        # INVALIDATE CACHE after scraping new data
+        self.data_cache.invalidate()
+        
+        self.log_msg("Processing completed")
+        self.recalc_all()
+
+    def _apply_white_backgrounds(self):
+        """Apply white backgrounds to log and table widgets for better readability"""
+        white_style = """
+            background-color: white;
+            color: black;
+            border: 2px solid rgb(0, 150, 50);
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        """
+        
+        table_style = """
+            QTableWidget {
                 background-color: white;
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                padding: 15px;
-                font-size: 12px;
+                color: black;
+                border: 2px solid rgb(0, 150, 50);
+                selection-background-color: rgb(0, 150, 50);
+                selection-color: white;
             }
-        """)
-        
-        rules = """
-<h3 style='color: #e74c3c;'>IMPORTANT: Read Carefully Before Starting</h3>
-
-<h4 style='color: #2c3e50;'>Kiosk Mode Security:</h4>
-<ul>
-    <li>The application will run in <b>FULL SCREEN KIOSK MODE</b>.</li>
-    <li>You <b>CANNOT minimize, close, or switch</b> to other applications.</li>
-    <li>The exam window will stay on top at all times.</li>
-    <li>All violations are logged to the central server immediately.</li>
-</ul>
-
-<h4 style='color: #2c3e50;'>Camera Monitoring:</h4>
-<ul>
-    <li>Your webcam <b>MUST be turned ON</b> throughout the entire examination.</li>
-    <li>If the camera is turned off, it will be recorded as a security violation.</li>
-    <li>Ensure your face is clearly visible to the camera at all times.</li>
-</ul>
-
-<h4 style='color: #2c3e50;'>Data Collection:</h4>
-<ul>
-    <li>All exam data is sent to the <b>central examination server</b>.</li>
-    <li>Security violations are logged in real-time.</li>
-    <li>Your exam results are automatically submitted upon completion.</li>
-    <li>Network connectivity is required throughout the exam.</li>
-</ul>
-
-<h4 style='color: #e74c3c;'>Consequences of Violations:</h4>
-<ul>
-    <li>All violations are logged with timestamp and IP address.</li>
-    <li>Multiple violations may result in exam cancellation.</li>
-    <li>The administrator can review all activities from the central server.</li>
-</ul>
-
-<p style='color: #27ae60; font-weight: bold; margin-top: 20px;'>
-By clicking "I Agree and Start Exam", you acknowledge that you have read, 
-understood, and agree to comply with all the above rules and regulations.
-</p>
+            QTableWidget::item {
+                padding: 3px;
+            }
+            QTableWidget::item:selected {
+                background-color: rgb(0, 150, 50);
+                color: white;
+            }
+            /* Horizontal headers (column headers) - GREEN background, WHITE text */
+            QHeaderView::section:horizontal {
+                background-color: rgb(0, 150, 50);
+                color: white;
+                padding: 5px;
+                border: 1px solid rgb(200, 200, 200);
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            
+            /* Vertical headers (row numbers) - WHITE background, BLACK text */
+            QHeaderView::section:vertical {
+                background-color: white;
+                color: black;
+                padding: 3px;
+                border: 1px solid rgb(200, 200, 200);
+                font-weight: bold;
+            }
+            
+            /* Corner button (top-left corner) */
+            QTableCornerButton::section {
+                background-color: rgb(0, 150, 50);
+                border: 1px solid rgb(200, 200, 200);
+            }
         """
         
-        rules_text.setHtml(rules)
-        layout.addWidget(rules_text)
-        
-        self.agree_checkbox = QCheckBox("I have read and agree to all examination rules")
-        self.agree_checkbox.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.agree_checkbox.setStyleSheet("color: #2c3e50; padding: 10px;")
-        self.agree_checkbox.stateChanged.connect(self.toggle_start_button)
-        layout.addWidget(self.agree_checkbox)
-        
-        btn_layout = QHBoxLayout()
-        
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setFont(QFont("Arial", 11))
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
-        btn_layout.addWidget(cancel_btn)
-        
-        btn_layout.addStretch()
-        
-        self.start_btn = QPushButton("I Agree and Start Exam")
-        self.start_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
-        self.start_btn.setEnabled(False)
-        self.start_btn.clicked.connect(self.accept)
-        btn_layout.addWidget(self.start_btn)
-        
-        layout.addLayout(btn_layout)
-        self.setLayout(layout)
-    
-    def toggle_start_button(self):
-        self.start_btn.setEnabled(self.agree_checkbox.isChecked())
+        self.log.setStyleSheet(white_style)
+        self.tbl_results.setStyleSheet(table_style)
+        self.tbl_details.setStyleSheet(table_style)
 
-# ============================================================================
-# LOGIN WINDOW
-# ============================================================================
+    def log_msg(self, m):
+        self.log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {m}")
 
-class LoginWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.exam_window = None
-        self.init_ui()
-        self.check_server_connection()
-        
-    def check_server_connection(self):
-        """Check if server is reachable"""
-        if ExamServerAPI.test_connection():
-            self.connection_status.setText("🟢 Connected to Server")
-            self.connection_status.setStyleSheet("color: #27ae60; font-weight: bold;")
-        else:
-            self.connection_status.setText("🔴 Server Not Reachable")
-            self.connection_status.setStyleSheet("color: #e74c3c; font-weight: bold;")
-            QMessageBox.warning(self, "Connection Error", 
-                              f"Cannot connect to examination server at:\n{SERVER_URL}\n\n"
-                              "Please check your internet connection and server address.")
-    
-    def init_ui(self):
-        self.setWindowTitle("Online Examination - Secure Login")
-        self.setGeometry(100, 100, 500, 450)
-        self.setStyleSheet("background-color: #f0f0f0;")
-        
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        
-        layout = QVBoxLayout()
-        layout.setSpacing(20)
-        layout.setContentsMargins(50, 40, 50, 40)
-        
-        title = QLabel("Secure Online Examination System")
-        title.setFont(QFont("Arial", 18, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet("color: #2c3e50;")
-        layout.addWidget(title)
-        
-        subtitle = QLabel("Connected to Central Server")
-        subtitle.setFont(QFont("Arial", 10))
-        subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        subtitle.setStyleSheet("color: #7f8c8d;")
-        layout.addWidget(subtitle)
-        
-        self.connection_status = QLabel("⚪ Checking connection...")
-        self.connection_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.connection_status.setStyleSheet("padding: 10px;")
-        layout.addWidget(self.connection_status)
-        
-        username_label = QLabel("Username:")
-        username_label.setFont(QFont("Arial", 10))
-        layout.addWidget(username_label)
-        
-        self.username_input = QLineEdit()
-        self.username_input.setPlaceholderText("Enter your username")
-        self.username_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        layout.addWidget(self.username_input)
-        
-        password_label = QLabel("Password:")
-        password_label.setFont(QFont("Arial", 10))
-        layout.addWidget(password_label)
-        
-        self.password_input = QLineEdit()
-        self.password_input.setPlaceholderText("Enter your password")
-        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.password_input.setStyleSheet("""
-            QLineEdit {
-                padding: 10px;
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                font-size: 12px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #3498db;
-            }
-        """)
-        self.password_input.returnPressed.connect(self.login)
-        layout.addWidget(self.password_input)
-        
-        info_label = QLabel("Demo Credentials:\nUsername: student | Password: exam123")
-        info_label.setFont(QFont("Arial", 8))
-        info_label.setStyleSheet("color: #7f8c8d; padding: 5px;")
-        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(info_label)
-        
-        login_btn = QPushButton("🔐 Login and Start Exam")
-        login_btn.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        login_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 12px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:pressed {
-                background-color: #1c6ea4;
-            }
-        """)
-        login_btn.clicked.connect(self.login)
-        layout.addWidget(login_btn)
-        
-        layout.addStretch()
-        central_widget.setLayout(layout)
-    
-    def login(self):
-        username = self.username_input.text().strip()
-        password = self.password_input.text().strip()
-        
-        if not username or not password:
-            QMessageBox.warning(self, "Input Error", "Please enter both username and password!")
-            return
-        
-        # Show loading message
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-        
-        # Authenticate with server
-        result = ExamServerAPI.login(username, password)
-        
-        QApplication.restoreOverrideCursor()
-        
-        if result.get('success'):
-            student_data = result.get('student', {})
-            student_name = student_data.get('name', 'Student')
-            
-            # Show rules dialog
-            rules_dialog = ExamRulesDialog(self)
-            if rules_dialog.exec() == QDialog.DialogCode.Accepted:
-                self.open_exam_window(username, student_name)
-        else:
-            QMessageBox.warning(self, "Login Failed", 
-                              f"Authentication failed:\n{result.get('message', 'Invalid credentials')}")
-    
-    def open_exam_window(self, username, student_name):
-        self.exam_window = ExamWindow(username, student_name)
-        self.exam_window.show()
-        self.close()
-
-# ============================================================================
-# EXAM WINDOW WITH KIOSK MODE
-# ============================================================================
-
-class ExamWindow(QMainWindow):
-    def __init__(self, username, student_name):
-        super().__init__()
-        self.username = username
-        self.student_name = student_name
-        self.current_question = 0
-        self.score = 0
-        self.time_remaining = 300  # 5 minutes
-        self.start_time = datetime.now()
-        self.camera_active = False
-        self.exam_paused = False
-        self.tab_switch_count = 0
-        self.camera_violation_count = 0
-        
-        # Load questions from server
-        self.questions = self.load_questions_from_server()
-        
-        if not self.questions:
-            QMessageBox.critical(self, "Error", "Failed to load questions from server!")
-            self.close()
-            return
-        
-        self.user_answers = [-1] * len(self.questions)
-        self.init_ui()
-        self.enable_kiosk_mode()
-        self.setup_camera()
-        self.start_timer()
-        
-        # Install event filter for focus detection
-        self.installEventFilter(self)
-    
-    def load_questions_from_server(self):
-        """Load questions from central server"""
-        result = ExamServerAPI.get_questions()
-        if result.get('success'):
-            return result.get('questions', [])
-        return []
-    
-    def enable_kiosk_mode(self):
-        """Enable full-screen kiosk mode"""
-        # Set window to stay on top and full screen
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.CustomizeWindowHint
+    def on_open(self, _):
+        path, _ = QFileDialog.getOpenFileName(
+            self, 
+            "Open BOM", 
+            "", 
+            "Excel (*.xlsx *.xls);;CSV (*.csv);;All Files (*.*)"
         )
-        
-        # Show fullscreen
-        self.showFullScreen()
-        
-        # Grab keyboard to prevent shortcuts
-        self.grabKeyboard()
-        
-        # Set focus policy
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        
-        print("🔒 KIOSK MODE ENABLED - Full screen locked")
-    
-    def keyPressEvent(self, event):
-        """Block certain key combinations"""
-        # Block Alt+Tab, Alt+F4, Windows key, etc.
-        if event.modifiers() & Qt.KeyboardModifier.AltModifier:
-            if event.key() in [Qt.Key.Key_Tab, Qt.Key.Key_F4]:
-                self.handle_escape_attempt("Alt+Tab/Alt+F4")
-                event.ignore()
-                return
-        
-        # Block Windows key
-        if event.key() in [Qt.Key.Key_Meta, Qt.Key.Key_Super_L, Qt.Key.Key_Super_R]:
-            self.handle_escape_attempt("Windows Key")
-            event.ignore()
+        if not path: 
             return
         
-        # Block Ctrl+Alt+Del (can't fully block but log attempt)
-        if (event.modifiers() & Qt.KeyboardModifier.ControlModifier and 
-            event.modifiers() & Qt.KeyboardModifier.AltModifier and
-            event.key() == Qt.Key.Key_Delete):
-            self.handle_escape_attempt("Ctrl+Alt+Del")
-            event.ignore()
-            return
-        
-        # Allow Esc only for testing - remove in production
-        if event.key() == Qt.Key.Key_Escape:
-            reply = QMessageBox.question(self, "Exit Exam?", 
-                                        "Are you sure you want to exit the exam?\n"
-                                        "This will submit your current answers.",
-                                        QMessageBox.StandardButton.Yes | 
-                                        QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                self.submit_exam()
-            event.ignore()
-            return
-        
-        super().keyPressEvent(event)
-    
-    def handle_escape_attempt(self, method):
-        """Handle attempts to escape kiosk mode"""
-        self.tab_switch_count += 1
-        ExamServerAPI.log_security_violation(
-            self.username,
-            self.student_name,
-            "Escape Attempt",
-            f"Attempted to use {method} - Violation #{self.tab_switch_count}"
-        )
-        self.update_violations_display()
-        
-        QMessageBox.critical(self, "Security Violation",
-                           f"⚠️ SECURITY ALERT ⚠️\n\n"
-                           f"Attempt to exit kiosk mode detected!\n"
-                           f"Method: {method}\n\n"
-                           f"This is violation #{self.tab_switch_count}\n"
-                           f"This has been reported to the administrator.")
-    
-    def setup_camera(self):
-        """Initialize webcam monitoring"""
-        self.webcam_thread = WebcamThread()
-        self.webcam_thread.frame_ready.connect(self.update_camera_frame)
-        self.webcam_thread.camera_lost.connect(self.handle_camera_loss)
-        self.webcam_thread.start()
-        self.camera_active = True
-    
-    def update_camera_frame(self, q_image):
-        """Update camera preview"""
-        pixmap = QPixmap.fromImage(q_image)
-        scaled_pixmap = pixmap.scaled(200, 150, Qt.AspectRatioMode.KeepAspectRatio)
-        self.camera_label.setPixmap(scaled_pixmap)
-    
-    def handle_camera_loss(self):
-        """Handle camera being turned off"""
-        if self.camera_active:
-            self.camera_active = False
-            self.camera_violation_count += 1
+        try:
+            self.log_msg(f"Loading file: {os.path.basename(path)}")
             
-            # Log to server
-            ExamServerAPI.log_security_violation(
-                self.username,
-                self.student_name,
-                "Camera Disabled",
-                f"Violation #{self.camera_violation_count}"
+            # Use robust BOM loader
+            self.bom_df = self.loader.load_bom_file(path)
+            
+            # Update UI
+            self.cmb_mpn.clear()
+            self.cmb_qty.clear()
+            cols = list(self.bom_df.columns)
+            self.cmb_mpn.addItems(cols)
+            self.cmb_qty.addItems(cols)
+            
+            # Try to auto-detect MPN and QTY columns
+            self._auto_detect_columns(cols)
+            
+            self.show_bom(self.bom_df)
+            self.populate_details_initial()
+            self.log_msg(f"Successfully loaded BOM with {len(self.bom_df)} rows and {len(self.bom_df.columns)} columns")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Error Loading BOM", str(e))
+            self.log_msg(f"Error loading BOM: {str(e)}")
+
+    def _setup_debounced_recalc(self):
+        """Setup debounced recalculation to prevent rapid-fire updates"""
+        
+        # Create debounce timer
+        self.debounce_timer = QTimer(self)
+        self.debounce_timer.setSingleShot(True)  # Only fire once
+        self.debounce_timer.setInterval(300)     # 300ms delay
+        self.debounce_timer.timeout.connect(self.recalc_all)
+        
+        # Connect signals to start/restart the debounce timer
+        self.cmb_cur.currentTextChanged.connect(self._trigger_debounced_recalc)
+        self.sp_rate.valueChanged.connect(self._trigger_debounced_recalc)
+        self.sp_pcb.valueChanged.connect(self._trigger_debounced_recalc)
+
+    def _trigger_debounced_recalc(self, _):
+        """Start/restart the debounce timer"""
+        self.debounce_timer.start()  # Restarts timer if alrea
+
+    def _auto_detect_columns(self, columns):
+        """Auto-detect MPN and QTY columns based on common naming patterns"""
+        mpn_patterns = ['mpn', 'part', 'partno', 'part_no', 'part number']
+        qty_patterns = ['qty', 'quantity']
+        
+        # Find MPN column
+        for i, col in enumerate(columns):
+            col_lower = col.lower().strip()
+            if any(pattern in col_lower for pattern in mpn_patterns):
+                self.cmb_mpn.setCurrentIndex(i)
+                break
+        
+        # Find QTY column
+        for i, col in enumerate(columns):
+            col_lower = col.lower().strip()
+            if any(pattern in col_lower for pattern in qty_patterns):
+                self.cmb_qty.setCurrentIndex(i)
+                break
+
+    def show_bom(self, df):
+        self.tbl_results.setRowCount(len(df))
+        self.tbl_results.setColumnCount(len(df.columns))
+        self.tbl_results.setHorizontalHeaderLabels(list(df.columns))
+        for r in range(len(df)):
+            for c in range(len(df.columns)):
+                val = df.iloc[r, c]
+                # Handle NaN values
+                display_val = str(val) if pd.notna(val) else ""
+                self.tbl_results.setItem(r, c, QTableWidgetItem(display_val))
+
+    def populate_details_initial(self):
+        if self.bom_df is None: 
+            return
+        self.tbl_details.setRowCount(len(self.bom_df))
+        self.tbl_details.setColumnCount(len(self.bom_df.columns))
+        self.tbl_details.setHorizontalHeaderLabels(list(self.bom_df.columns))
+        for r in range(len(self.bom_df)):
+            for c in range(len(self.bom_df.columns)):
+                val = self.bom_df.iloc[r, c]
+                display_val = str(val) if pd.notna(val) else ""
+                self.tbl_details.setItem(r, c, QTableWidgetItem(display_val))
+
+
+    def recalc_all(self):
+        if self.bom_df is None:
+            return
+        try:
+            self.calc_bom_results()
+            self.refresh_details_view()
+        except Exception as e:
+            self.log_msg(f"Recalc error: {e}")
+
+    def refresh_details_view(self):
+        if self.bom_df is None: 
+            return
+        
+        if not hasattr(self, '_details_needs_refresh'):
+            self._details_needs_refresh = True
+        
+        if not self._details_needs_refresh:
+            return
+
+        mpn_col = self.cmb_mpn.currentText() or self.bom_df.columns[0]
+        df = self.bom_df.copy()
+
+        add_cols = ["Manufacturer", "Part Type", "Life Cycle", "Package", "Size (L*W mm)", "Default Currency", "Lead Time"]
+        for col in add_cols:
+            df[col] = ""
+
+        fixed_dists = ['Digikey', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'RS Components', 'Element14']
+        max_tiers = 5
+
+        for d in fixed_dists:
+            df[f"{d} Stock"] = ""
+            for t in range(1, max_tiers + 1):
+                df[f"{d} T{t} Qty"] = ""
+                df[f"{d} T{t} Price"] = ""
+
+        for idx, row in df.iterrows():
+            mpn_val = row[mpn_col]
+            if pd.isna(mpn_val):
+                continue
+            mpn = str(mpn_val).strip()
+            if not mpn or mpn.lower() == 'nan':
+                continue
+
+            offers = self.storage.offers_by_mpn(mpn)
+            manuf = sorted({o["manufacturer"] for o in offers if o.get("manufacturer")})
+            meta = self.storage.part_meta(mpn)
+
+            df.at[idx, "Manufacturer"] = " | ".join(manuf) if manuf else ""
+            df.at[idx, "Part Type"] = meta.get("part_type", "")
+            df.at[idx, "Life Cycle"] = meta.get("life", "")
+            df.at[idx, "Lead Time"] = meta.get("lead_time", "")
+            pkg = meta.get("package") or ""
+            L = meta.get("L")
+            W = meta.get("W")
+            df.at[idx, "Package"] = pkg or ""
+            if L is not None or W is not None:
+                df.at[idx, "Size (L*W mm)"] = f"{(L or '')}*{(W or '')}"
+            df.at[idx, "Default Currency"] = meta.get("default_currency", "USD")
+
+            for o in offers:
+                dname_raw = o["distributor"] or ""
+                matched = next((d for d in fixed_dists if d.lower() in dname_raw.lower()), None)
+                if not matched:
+                    continue
+
+                df.at[idx, f"{matched} Stock"] = str(o.get("stock", 0))
+                tiers = sorted(o.get("price_tiers") or [], key=lambda x: x["quantity"])
+                for ti, t in enumerate(tiers[:max_tiers], start=1):
+                    df.at[idx, f"{matched} T{ti} Qty"] = str(t["quantity"])
+                    df.at[idx, f"{matched} T{ti} Price"] = f"{t['price']:.6f}"
+
+        self.tbl_details.setRowCount(len(df))
+        self.tbl_details.setColumnCount(len(df.columns))
+        self.tbl_details.setHorizontalHeaderLabels(list(df.columns))
+        for r in range(len(df)):
+            for c in range(len(df.columns)):
+                val = df.iloc[r, c]
+                display_val = str(val) if pd.notna(val) else ""
+                self.tbl_details.setItem(r, c, QTableWidgetItem(display_val))
+
+        self._details_needs_refresh = False
+
+    # 3. REPLACE calc_bom_results with OPTIMIZED VERSION
+    def calc_bom_results(self):
+        """Optimized BOM calculation with caching and batch processing"""
+        
+        # Prevent recursive calculations
+        if self._calculation_in_progress:
+            return
+        
+        mpn_col = self.cmb_mpn.currentText()
+        qty_col = self.cmb_qty.currentText()
+        if not mpn_col or not qty_col:
+            return
+
+        self._calculation_in_progress = True
+        
+        try:
+            df = self.bom_df.copy()
+
+            result_cols = [
+                "Part Type", "MPN", "Manufacturer", "Part Life Cycle Code", "Package",
+                "Size (L*W mm)", "Lead Time", "In Stock", "MOQ", "Total Required Qty",
+                "Procure Qty", "Distributor", "Qty Tier", "Unit Price", "PCB Per Unit Price", "Total Project Price"
+            ]
+
+            for col in result_cols:
+                df[col] = ""
+
+            pcb_qty = int(self.sp_pcb.value())
+            currency = self.cmb_cur.currentText()
+            usd_to_inr = float(self.sp_rate.value())
+
+            # OPTIMIZATION: Pre-fetch all unique MPNs at once
+            unique_mpns = set()
+            for idx, row in df.iterrows():
+                mpn_val = row[mpn_col]
+                if pd.notna(mpn_val):
+                    mpn = str(mpn_val).strip()
+                    if mpn and mpn.lower() != 'nan':
+                        unique_mpns.add(mpn)
+            
+            # OPTIMIZATION: Batch process rows
+            rows_data = []
+            for idx, row in df.iterrows():
+                mpn_val = row[mpn_col]
+                if pd.isna(mpn_val):
+                    continue
+                mpn = str(mpn_val).strip()
+                if not mpn or mpn.lower() == 'nan':
+                    continue
+
+                qty_val = row[qty_col]
+                if pd.isna(qty_val):
+                    bom_qty = 0.0
+                else:
+                    try:
+                        bom_qty = float(qty_val)
+                    except (ValueError, TypeError):
+                        bom_qty = 0.0
+                
+                total_required = int(bom_qty * pcb_qty)
+
+                # OPTIMIZATION: Use cached data instead of repeated storage queries
+                offers = self.data_cache.get_offers(mpn, self.storage)
+                meta = self.data_cache.get_meta(mpn, self.storage)
+
+                # Filter by manufacturer if user selected one
+                selected_manufacturer = self._manufacturer_overrides.get(mpn)
+                if selected_manufacturer:
+                    offers = [o for o in offers if o.get("manufacturer") == selected_manufacturer]
+                    if offers:
+                        life = next((o["life_cycle_code"] for o in offers if o.get("life_cycle_code")), "")
+                        pkg = next((o["package_code"] for o in offers if o.get("package_code")), "")
+                        L = next((o["length_mm"] for o in offers if o.get("length_mm") is not None), None)
+                        W = next((o["width_mm"] for o in offers if o.get("width_mm") is not None), None)
+                        defcur = next((o["default_currency"] for o in offers if o.get("default_currency")), "USD")
+                        ptype = next((o["part_type"] for o in offers if o.get("part_type")), "")
+                        lead = next((o["lead_time"] for o in offers if o.get("lead_time")), "")
+                        meta = {"life": life, "package": pkg, "L": L, "W": W, "default_currency": defcur, "part_type": ptype, "lead_time": lead}
+
+                pkg_code = meta.get("package") or ""
+                L = meta.get("L")
+                W = meta.get("W")
+
+                # Convert prices (this is still needed per-row)
+
+
+                # Store row data for batch update
+                row_data = {
+                    'idx': idx,
+                    'mpn': mpn,
+                    'bom_qty': bom_qty,
+                    'total_required': total_required,
+                    'best': best,
+                    'meta': meta,
+                    'offers': self.data_cache.get_offers(mpn, self.storage)  # Get from cache
+                }
+                rows_data.append(row_data)
+
+            # OPTIMIZATION: Batch update DataFrame
+            for row_data in rows_data:
+                idx = row_data['idx']
+                best = row_data['best']
+                meta = row_data['meta']
+                
+                if best:
+                    df.at[idx, "In Stock"] = str(best.get("stock", 0))
+                    df.at[idx, "MOQ"] = str(best.get("moq", ""))
+                    df.at[idx, "Total Required Qty"] = str(row_data['total_required'])
+                    df.at[idx, "Procure Qty"] = str(best.get("procure_qty", row_data['total_required']))
+                    df.at[idx, "Distributor"] = best.get("distributor", "")
+
+                df.at[idx, "Part Type"] = meta.get("part_type", "")
+                df.at[idx, "MPN"] = row_data['mpn']
+                df.at[idx, "Part Life Cycle Code"] = meta.get("life", "")
+                df.at[idx, "Package"] = meta.get("package", "")
+                df.at[idx, "Lead Time"] = meta.get("lead_time", "")
+                
+                if meta.get("L") is not None or meta.get("W") is not None:
+                    df.at[idx, "Size (L*W mm)"] = f"{(meta.get('L') or '')}*{(meta.get('W') or '')}"
+
+                # Set manufacturer
+                all_offers = row_data['offers']
+                manufacturers = sorted({o["manufacturer"] for o in all_offers if o.get("manufacturer")})
+                if manufacturers:
+                    selected_manufacturer = self._manufacturer_overrides.get(row_data['mpn'])
+                    df.at[idx, "Manufacturer"] = selected_manufacturer or manufacturers[0]
+
+            # Calculate totals
+            sums_cols = ["PCB Per Unit Price", "Total Project Price"]
+            totals = {}
+            for c in sums_cols:
+                vals = pd.to_numeric(df[c].replace("", 0), errors="coerce").fillna(0) if c in df.columns else pd.Series()
+                totals[c] = vals.sum()
+
+            # OPTIMIZATION: Disable updates during bulk changes
+            self.tbl_results.setUpdatesEnabled(False)
+            
+            # FIXED: Only disconnect if currently connected
+            if self._signal_connected:
+                try:
+                    self.tbl_results.itemChanged.disconnect(self._on_package_edit_changed)
+                    self._signal_connected = False
+                except TypeError:
+                    pass  # Already disconnected
+            
+            try:
+                self.tbl_results.setRowCount(len(df) + 1)
+                self.tbl_results.setColumnCount(len(df.columns))
+                self.tbl_results.setHorizontalHeaderLabels(list(df.columns))
+
+                # Batch update table
+                for r in range(len(df)):
+                    for c in range(len(df.columns)):
+                        col_name = df.columns[c]
+                        val = df.iloc[r, c]
+                        display_val = str(val) if pd.notna(val) else ""
+                        it = QTableWidgetItem(display_val)
+                        
+                        if col_name == "In Stock":
+                            try:
+                                s = int(display_val) if display_val else 0
+                            except Exception:
+                                s = 0
+                            if s == 0: 
+                                it.setBackground(QColor(255, 200, 200))
+                            elif s < 100: 
+                                it.setBackground(QColor(255, 255, 200))
+                            elif s < 1000: 
+                                it.setBackground(QColor(255, 255, 150))
+                            else: 
+                                it.setBackground(QColor(200, 255, 200))
+                            f = QFont(); f.setBold(True); it.setFont(f)
+                        
+                        elif col_name == "Package":
+                            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+                            it.setBackground(QColor(240, 255, 240))
+
+                        elif col_name == "Size (L*W mm)":
+                            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+                            it.setBackground(QColor(240, 240, 255))
+
+                        self.tbl_results.setItem(r, c, it)
+
+                # Add manufacturer dropdowns (optimized)
+                self._add_manufacturer_dropdowns_optimized(df, rows_data)
+
+                # Add totals row
+                tr = len(df)
+                for c in range(len(df.columns)):
+                    name = df.columns[c]
+                    if c == 0:
+                        tit = QTableWidgetItem("TOTAL")
+                    elif name in totals:
+                        tit = QTableWidgetItem(f"{totals[name]:.4f}")
+                    else:
+                        tit = QTableWidgetItem("")
+                    f = QFont(); f.setBold(True); tit.setFont(f); tit.setBackground(QColor(220, 220, 220))
+                    self.tbl_results.setItem(tr, c, tit)
+            
+            finally:
+                # FIXED: Only reconnect if we disconnected it
+                if not self._signal_connected:
+                    try:
+                        self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
+                        self._signal_connected = True
+                    except TypeError:
+                        pass  # Already connected
+                
+                self.tbl_results.setUpdatesEnabled(True)
+                
+        finally:
+            self._calculation_in_progress = False
+
+    # 5. MODIFY _on_package_edit_changed to invalidate cache
+    def _on_package_edit_changed(self, item):
+        """Handle manual package and size edits and update storage"""
+        if not item or self._calculation_in_progress:
+            return
+
+        # Skip last TOTAL row
+        if item.row() >= self.tbl_results.rowCount() - 1:
+            return
+
+        col = item.column()
+        header = self.tbl_results.horizontalHeaderItem(col)
+        if not header:
+            return
+        
+        col_name = header.text()
+        
+        if col_name not in ["Package", "Size (L*W mm)"]:
+            return
+
+        row = item.row()
+        mpn_col_idx = None
+        for c in range(self.tbl_results.columnCount()):
+            h = self.tbl_results.horizontalHeaderItem(c)
+            if h and h.text() == "MPN":
+                mpn_col_idx = c
+                break
+
+        if mpn_col_idx is None:
+            return
+
+        mpn_item = self.tbl_results.item(row, mpn_col_idx)
+        if not mpn_item:
+            return
+
+        mpn = mpn_item.text().strip()
+        new_value = item.text().strip()
+
+        if not mpn:
+            return
+
+        orig_meta = self.storage.part_meta(mpn)
+        
+        # Disconnect signal only if currently connected
+        if self._signal_connected:
+            try:
+                self.tbl_results.itemChanged.disconnect(self._on_package_edit_changed)
+                self._signal_connected = False
+            except TypeError:
+                pass
+        
+        try:
+            if col_name == "Package":
+                original_package = orig_meta.get("package", "")
+                if new_value != original_package:
+                    # Store the override in memory for immediate use
+                    self._package_overrides[mpn] = new_value
+                    
+                    # Also update storage for persistence
+                    rows_affected = self.storage.update_package_for_mpn(mpn, new_value)
+                    self.log_msg(f"Package updated for {mpn}: '{new_value}' - {rows_affected} records")
+                    self.data_cache.invalidate(mpn)
+                    self.recalc_all()
+                elif mpn in self._package_overrides and new_value == original_package:
+                    # User changed it back to original, remove override
+                    del self._package_overrides[mpn]
+                    self.log_msg(f"Package override removed for {mpn}")
+                    self.recalc_all()
+            
+            elif col_name == "Size (L*W mm)":
+                original_l = orig_meta.get("L")
+                original_w = orig_meta.get("W")
+                original_size = f"{(original_l or '')}*{(original_w or '')}" if (original_l is not None or original_w is not None) else ""
+                
+                if new_value != original_size:
+                    length_mm, width_mm = self._parse_size_input(new_value)
+                    
+                    if length_mm is None and width_mm is None and new_value:
+                        self.log_msg(f"Error: Invalid size format '{new_value}'")
+                        item.setText(original_size)
+                        return
+                    
+                    rows_affected = self.storage.update_size_for_mpn(mpn, length_mm, width_mm)
+                    new_size_display = f"{(length_mm or '')}*{(width_mm or '')}" if (length_mm is not None or width_mm is not None) else ""
+                    self.log_msg(f"Size updated for {mpn}: '{new_size_display}' - {rows_affected} records")
+                    item.setText(new_size_display)
+                    self.data_cache.invalidate(mpn)
+                    self.recalc_all()
+
+        except Exception as e:
+            self.log_msg(f"Error updating {col_name}: {e}")
+            if col_name == "Package":
+                item.setText(orig_meta.get("package", ""))
+            elif col_name == "Size (L*W mm)":
+                original_l = orig_meta.get("L")
+                original_w = orig_meta.get("W")
+                original_size = f"{(original_l or '')}*{(original_w or '')}" if (original_l is not None or original_w is not None) else ""
+                item.setText(original_size)
+        
+        finally:
+            # Reconnect signal only if we disconnected it
+            if not self._signal_connected:
+                try:
+                    self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
+                    self._signal_connected = True
+                except TypeError:
+                    pass
+
+    def _parse_size_input(self, size_text):
+        """Parse size input like '1.6*0.8' or '1.6x0.8' into length and width"""
+        if not size_text or size_text.strip() == "*" or size_text.strip() == "x":
+            return None, None
+
+        # Look for patterns like "1.6*0.8", "1.6x0.8", "1.6 x 0.8", etc.
+        pattern = r'([0-9]*\.?[0-9]+)\s*[*x]\s*([0-9]*\.?[0-9]+)'
+        match = re.search(pattern, size_text.strip())
+        
+        if match:
+            try:
+                length = float(match.group(1))
+                width = float(match.group(2))
+                return length, width
+            except ValueError:
+                pass
+        
+        # Try to parse single number (assume it's length only)
+        try:
+            single_value = float(size_text.strip())
+            return single_value, None
+        except ValueError:
+            pass
+        
+        return None, None
+
+    # 4. ADD OPTIMIZED MANUFACTURER DROPDOWN METHOD
+    def _add_manufacturer_dropdowns_optimized(self, df, rows_data):
+        """Optimized manufacturer dropdowns - only create when needed"""
+        if "Manufacturer" not in df.columns:
+            return
+        
+        manf_col_idx = list(df.columns).index("Manufacturer")
+        
+        # Create lookup for fast access
+        mpn_to_row = {rd['mpn']: rd for rd in rows_data}
+        
+        for r in range(len(df)):
+            mpn = df.iloc[r, list(df.columns).index("MPN")]
+            if pd.isna(mpn) or not mpn:
+                continue
+            
+            mpn = str(mpn).strip()
+            if not mpn or mpn.lower() == 'nan':
+                continue
+            
+            # Get cached offers
+            row_data = mpn_to_row.get(mpn)
+            if not row_data:
+                continue
+                
+            manufacturers = sorted({o["manufacturer"] for o in row_data['offers'] if o.get("manufacturer")})
+            
+            if len(manufacturers) <= 1:
+                continue
+            
+            # Only create dropdown if multiple manufacturers exist
+            combo = QComboBox()
+            combo.addItems(manufacturers)
+            
+            current_manf = self._manufacturer_overrides.get(mpn, manufacturers[0])
+            combo.setCurrentText(current_manf)
+            
+            # Use lambda with default argument to avoid closure issues
+            combo.currentTextChanged.connect(
+                lambda selected_manf, mpn=mpn: self._on_manufacturer_changed(mpn, selected_manf)
             )
             
-            self.update_violations_display()
-            
-            QMessageBox.critical(self, "Camera Violation", 
-                               f"⚠️ WARNING ⚠️\n\n"
-                               f"Camera has been disabled!\n\n"
-                               f"Violation #{self.camera_violation_count}\n"
-                               f"Reported to central server.\n\n"
-                               f"Please enable your camera immediately!")
-            
-            # Try to restart camera
-            self.setup_camera()
-    
-    def init_ui(self):
-        self.setWindowTitle("Online Examination - KIOSK MODE")
-        self.setStyleSheet("background-color: #ecf0f1;")
+            self.tbl_results.setCellWidget(r, manf_col_idx, combo)
+
+    def _on_manufacturer_changed(self, mpn, selected_manufacturer):
+        """Handle manufacturer dropdown change"""
+        self._manufacturer_overrides[mpn] = selected_manufacturer
+        self.log_msg(f"Manufacturer changed for {mpn}: {selected_manufacturer}")
         
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
+        # Recalculate results with new manufacturer selection
+        self.recalc_all()
+
+    def on_export_smart(self, _):
+        """Smart export - detects active tab and exports accordingly"""
+        current_tab_index = self.tabs.currentIndex()
+        current_tab_text = self.tabs.tabText(current_tab_index)
         
-        main_layout = QHBoxLayout()
-        main_layout.setSpacing(20)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Left panel
-        left_panel = QWidget()
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(20)
-        
-        header_layout = QHBoxLayout()
-        
-        title = QLabel(f"🔒 SECURE EXAM - {self.student_name}")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        title.setStyleSheet("color: #2c3e50;")
-        header_layout.addWidget(title)
-        
-        header_layout.addStretch()
-        
-        self.timer_label = QLabel("Time: 05:00")
-        self.timer_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        self.timer_label.setStyleSheet("color: #e74c3c; background-color: white; "
-                                      "padding: 10px; border-radius: 5px;")
-        header_layout.addWidget(self.timer_label)
-        
-        left_layout.addLayout(header_layout)
-        
-        # Security status
-        security_layout = QHBoxLayout()
-        
-        self.camera_status = QLabel("📹 Camera: Active")
-        self.camera_status.setStyleSheet("color: #27ae60; font-weight: bold; padding: 5px;")
-        security_layout.addWidget(self.camera_status)
-        
-        self.kiosk_status = QLabel("🔒 Kiosk Mode: ACTIVE")
-        self.kiosk_status.setStyleSheet("color: #e74c3c; font-weight: bold; padding: 5px;")
-        security_layout.addWidget(self.kiosk_status)
-        
-        security_layout.addStretch()
-        
-        left_layout.addLayout(security_layout)
-        
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setMaximum(len(self.questions))
-        self.progress_bar.setValue(1)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                text-align: center;
-                height: 25px;
-            }
-            QProgressBar::chunk {
-                background-color: #27ae60;
-            }
-        """)
-        left_layout.addWidget(self.progress_bar)
-        
-        # Question area
-        question_widget = QWidget()
-        question_widget.setStyleSheet("background-color: white; border-radius: 10px;")
-        question_layout = QVBoxLayout()
-        question_layout.setContentsMargins(20, 20, 20, 20)
-        
-        self.question_label = QLabel()
-        self.question_label.setFont(QFont("Arial", 13))
-        self.question_label.setWordWrap(True)
-        self.question_label.setStyleSheet("color: #2c3e50; padding: 10px;")
-        question_layout.addWidget(self.question_label)
-        
-        self.option_group = QButtonGroup()
-        self.option_buttons = []
-        
-        for i in range(4):
-            radio = QRadioButton()
-            radio.setFont(QFont("Arial", 11))
-            radio.setStyleSheet("padding: 8px;")
-            radio.toggled.connect(lambda checked, idx=i: 
-                                self.option_selected(idx) if checked else None)
-            self.option_buttons.append(radio)
-            self.option_group.addButton(radio)
-            question_layout.addWidget(radio)
-        
-        question_widget.setLayout(question_layout)
-        left_layout.addWidget(question_widget)
-        
-        # Navigation buttons
-        nav_layout = QHBoxLayout()
-        
-        self.prev_btn = QPushButton("⬅ Previous")
-        self.prev_btn.setFont(QFont("Arial", 11))
-        self.prev_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
-        self.prev_btn.clicked.connect(self.previous_question)
-        nav_layout.addWidget(self.prev_btn)
-        
-        nav_layout.addStretch()
-        
-        self.next_btn = QPushButton("Next ➡")
-        self.next_btn.setFont(QFont("Arial", 11))
-        self.next_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        self.next_btn.clicked.connect(self.next_question)
-        nav_layout.addWidget(self.next_btn)
-        
-        self.submit_btn = QPushButton("✓ Submit Exam")
-        self.submit_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.submit_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 10px 20px;
-                border: none;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-        """)
-        self.submit_btn.clicked.connect(self.submit_exam)
-        self.submit_btn.hide()
-        nav_layout.addWidget(self.submit_btn)
-        
-        left_layout.addLayout(nav_layout)
-        
-        left_panel.setLayout(left_layout)
-        main_layout.addWidget(left_panel, 3)
-        
-        # Right panel - Monitoring
-        right_panel = QWidget()
-        right_panel.setStyleSheet("background-color: white; border-radius: 10px;")
-        right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(15, 15, 15, 15)
-        
-        camera_title = QLabel("🎥 Live Monitoring")
-        camera_title.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        camera_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_layout.addWidget(camera_title)
-        
-        self.camera_label = QLabel()
-        self.camera_label.setStyleSheet("border: 2px solid #bdc3c7; background-color: #2c3e50;")
-        self.camera_label.setMinimumSize(200, 150)
-        self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        right_layout.addWidget(self.camera_label)
-        
-        server_label = QLabel("🌐 Connected to:\nCentral Server")
-        server_label.setStyleSheet("color: #27ae60; padding: 10px; font-weight: bold;")
-        server_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        server_label.setWordWrap(True)
-        right_layout.addWidget(server_label)
-        
-        warning_label = QLabel("⚠️ All activities are\nmonitored and logged")
-        warning_label.setStyleSheet("color: #e74c3c; padding: 10px; font-weight: bold;")
-        warning_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        warning_label.setWordWrap(True)
-        right_layout.addWidget(warning_label)
-        
-        violations_label = QLabel("Security Violations:")
-        violations_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        right_layout.addWidget(violations_label)
-        
-        self.violations_display = QLabel(
-            f"Escape Attempts: {self.tab_switch_count}\n"
-            f"Camera Off: {self.camera_violation_count}"
-        )
-        self.violations_display.setStyleSheet(
-            "background-color: #f8f9fa; padding: 10px; border-radius: 5px;"
-        )
-        right_layout.addWidget(self.violations_display)
-        
-        right_layout.addStretch()
-        
-        right_panel.setLayout(right_layout)
-        main_layout.addWidget(right_panel, 1)
-        
-        central_widget.setLayout(main_layout)
-        self.load_question()
-    
-    def changeEvent(self, event):
-        """Detect window state changes"""
-        if event.type() == event.Type.WindowStateChange or event.type() == event.Type.ActivationChange:
-            if not self.isActiveWindow() and not self.exam_paused:
-                self.handle_focus_loss()
-        super().changeEvent(event)
-    
-    def handle_focus_loss(self):
-        """Handle focus loss"""
-        self.tab_switch_count += 1
-        ExamServerAPI.log_security_violation(
-            self.username,
-            self.student_name,
-            "Focus Loss",
-            f"Attempt #{self.tab_switch_count}"
-        )
-        self.update_violations_display()
-    
-    def update_violations_display(self):
-        """Update the violations counter"""
-        self.violations_display.setText(
-            f"Escape Attempts: {self.tab_switch_count}\n"
-            f"Camera Off: {self.camera_violation_count}"
-        )
-    
-    def start_timer(self):
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_timer)
-        self.timer.start(1000)
-    
-    def update_timer(self):
-        self.time_remaining -= 1
-        minutes = self.time_remaining // 60
-        seconds = self.time_remaining % 60
-        self.timer_label.setText(f"Time: {minutes:02d}:{seconds:02d}")
-        
-        if self.time_remaining <= 0:
-            self.timer.stop()
-            QMessageBox.warning(self, "Time's Up!", "Exam time is over! Submitting automatically.")
-            self.submit_exam()
-    
-    def load_question(self):
-        q = self.questions[self.current_question]
-        self.question_label.setText(f"Q{self.current_question + 1}. {q['question']}")
-        
-        for i, option in enumerate(q['options']):
-            self.option_buttons[i].setText(option)
-            self.option_buttons[i].setChecked(self.user_answers[self.current_question] == i)
-        
-        self.prev_btn.setEnabled(self.current_question > 0)
-        self.progress_bar.setValue(self.current_question + 1)
-        
-        if self.current_question == len(self.questions) - 1:
-            self.next_btn.hide()
-            self.submit_btn.show()
+        if "Results" in current_tab_text:
+            self.on_export_results()
+        elif "Details" in current_tab_text:
+            self.on_export_details()
         else:
-            self.next_btn.show()
-            self.submit_btn.hide()
-    
-    def option_selected(self, index):
-        self.user_answers[self.current_question] = index
-    
-    def next_question(self):
-        if self.current_question < len(self.questions) - 1:
-            self.current_question += 1
-            self.load_question()
-    
-    def previous_question(self):
-        if self.current_question > 0:
-            self.current_question -= 1
-            self.load_question()
-    
-    def submit_exam(self):
-        self.timer.stop()
-        if self.webcam_thread:
-            self.webcam_thread.stop()
-        
-        # Calculate score
-        self.score = 0
-        for i, q in enumerate(self.questions):
-            if self.user_answers[i] == q['answer']:
-                self.score += 1
-        
-        percentage = (self.score / len(self.questions)) * 100
-        time_taken = (datetime.now() - self.start_time).total_seconds()
-        
-        # Submit to server
-        result = ExamServerAPI.submit_exam(
-            self.username,
-            self.student_name,
-            self.score,
-            len(self.questions),
-            percentage,
-            int(time_taken),
-            self.tab_switch_count,
-            self.camera_violation_count
-        )
-        
-        result_msg = f"""
-✅ Exam Completed and Submitted!
+            # Default to results if unclear
+            self.on_export_results()
 
-Total Questions: {len(self.questions)}
-Correct Answers: {self.score}
-Wrong Answers: {len(self.questions) - self.score}
-Score: {percentage:.1f}%
 
-Security Summary:
-Escape Attempts: {self.tab_switch_count}
-Camera Violations: {self.camera_violation_count}
+    def on_export_results(self):
+        """Export BOM Results to Excel with summary table and green headers"""
+        if self.tbl_results.rowCount() == 0:
+            QMessageBox.warning(self, "Warning", "No data to export")
+            return
 
-Server Status: {'✓ Submitted Successfully' if result.get('success') else '✗ Submission Failed'}
+        path, _ = QFileDialog.getSaveFileName(self, "Save Results Excel", "", "Excel (*.xlsx)")
+        if not path:
+            return
 
-All data has been sent to the central server.
-        """
+        try:
+            # Get results data
+            headers = [self.tbl_results.horizontalHeaderItem(i).text() for i in range(self.tbl_results.columnCount())]
+            data = []
+            
+            for r in range(self.tbl_results.rowCount()):
+                row = []
+                for c in range(self.tbl_results.columnCount()):
+                    it = self.tbl_results.item(r, c)
+                    row.append(it.text() if it else "")
+                data.append(row)
+
+            df = pd.DataFrame(data, columns=headers)
+            
+
+            
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "BOM Results"
+            
+            # Create summary table at top
+            self._add_summary_table(ws, df)
+            
+            # Add spacing
+            current_row = ws.max_row + 3
+            
+            # Add main data table
+            for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), start=current_row):
+                for c_idx, value in enumerate(row, start=1):
+                    ws.cell(row=r_idx, column=c_idx, value=value)
+            
+            # Style the main table headers
+            self._style_table_headers(ws, current_row, len(headers))
+            
+            # Auto-adjust column widths
+            self._auto_adjust_columns(ws)
+            
+            wb.save(path)
+            self.log_msg(f"Results exported: {path}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+            self.log_msg(f"Results export failed: {e}")
+
+    def _add_summary_table(self, ws, df):
+        """Add summary table with image at the top of the worksheet"""
         
-        QMessageBox.information(self, "Exam Results", result_msg)
+        # Calculate summary statistics
+        total_rows = len(df) - 1  # Subtract TOTAL row
+        if total_rows < 0:
+            total_rows = 0
         
-        # Release keyboard and close
-        self.releaseKeyboard()
-        self.close()
-    
-    def closeEvent(self, event):
-        """Handle window close event"""
-        if self.webcam_thread:
-            self.webcam_thread.stop()
-        self.releaseKeyboard()
-        event.accept()
+        # Try to get totals from the TOTAL row
+        total_project_cost = 0
+        total_pcb_cost = 0
+        
+        try:
+            total_row = df.iloc[-1]  # Last row should be TOTAL
+            if 'Total Project Price' in df.columns:
+                total_project_str = str(total_row['Total Project Price']).replace(',', '')
+                if total_project_str and total_project_str != 'TOTAL':
+                    total_project_cost = float(total_project_str)
+            
+            if 'PCB Per Unit Price' in df.columns:
+                total_pcb_str = str(total_row['PCB Per Unit Price']).replace(',', '')
+                if total_pcb_str and total_pcb_str != 'TOTAL':
+                    total_pcb_cost = float(total_pcb_str)
+        except:
+            pass
+        
+        currency = self.cmb_cur.currentText()
+        pcb_qty = self.sp_pcb.value()
+        
+        # Title styling
+        title_font = Font(size=16, bold=True, color="00962F")
+        header_font = Font(size=12, bold=True, color="FFFFFF")
+        value_font = Font(size=11)
+        
+        green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
+        light_green_fill = PatternFill(start_color="E8F5E8", end_color="E8F5E8", fill_type="solid")
+        
+        center_align = Alignment(horizontal="center", vertical="center")
+        
+        # Add title
+        ws['A1'] = 'Sienna ECAD Technologies'
+        ws['A1'].font = title_font
+        ws['A1'].alignment = center_align
+        ws.merge_cells('A1:F1')
+        
+        # Add summary table
+        summary_start_row = 3
+        
+        # Summary headers
+        summary_headers = [
+            ('Metric', 'A'), ('Value', 'B'), ('', 'C'), 
+            ('Metric', 'D'), ('Value', 'E'), ('Unit', 'F')
+        ]
+        
+        for header, col in summary_headers:
+            cell = ws[f'{col}{summary_start_row}']
+            cell.value = header
+            cell.font = header_font
+            cell.fill = green_fill
+            cell.alignment = center_align
+        
+        # Summary data
+        summary_data = [
+            ('Total Components', total_rows, '', 'PCB Quantity', pcb_qty, 'pcs'),
+            ('Currency', currency, '', 'PCB Unit Cost', f'{total_pcb_cost:.2f}', currency),
+            ('Project Total', f'{total_project_cost:.2f}', currency, 'Cost per PCB', f'{total_project_cost/pcb_qty if pcb_qty > 0 else 0:.2f}', f'{currency}/pcb'),
+            ('Generated On', datetime.now().strftime('%Y-%m-%d %H:%M'), '', 'Exchange Rate', f'${1:.2f} = ₹{self.sp_rate.value():.2f}' if currency == 'INR' else 'N/A', ''),
+        ]
+        
+        for row_idx, (metric1, value1, unit1, metric2, value2, unit2) in enumerate(summary_data, start=summary_start_row + 1):
+            # Left side
+            ws[f'A{row_idx}'].value = metric1
+            ws[f'B{row_idx}'].value = value1
+            ws[f'C{row_idx}'].value = unit1
+            
+            # Right side  
+            ws[f'D{row_idx}'].value = metric2
+            ws[f'E{row_idx}'].value = value2
+            ws[f'F{row_idx}'].value = unit2
+            
+            # Style alternating rows
+            fill = light_green_fill if row_idx % 2 == 0 else PatternFill()
+            for col in ['A', 'B', 'C', 'D', 'E', 'F']:
+                cell = ws[f'{col}{row_idx}']
+                cell.fill = fill
+                cell.alignment = center_align if col in ['B', 'E', 'F'] else Alignment(horizontal="left", vertical="center")
 
-# ============================================================================
-# MAIN APPLICATION
-# ============================================================================
+    def _style_table_headers(self, ws, header_row, num_cols):
+        """Apply green background and white text to table headers"""
+        
+        green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
+        white_font = Font(color="FFFFFF", bold=True, size=11)
+        center_alignment = Alignment(horizontal="center", vertical="center")
+        
+        for col in range(1, num_cols + 1):
+            cell = ws.cell(row=header_row, column=col)
+            cell.fill = green_fill
+            cell.font = white_font
+            cell.alignment = center_alignment
 
-def main():
+    def _auto_adjust_columns(self, ws):
+        """Auto-adjust column widths based on content - handles merged cells"""
+        
+        # Get column letters and calculate max widths
+        column_widths = {}
+        
+        for row in ws.iter_rows():
+            for cell in row:
+                # Skip merged cells
+                if isinstance(cell, MergedCell):
+                    continue
+                    
+                column_letter = cell.column_letter
+                
+                try:
+                    # Calculate content length
+                    content_length = len(str(cell.value)) if cell.value is not None else 0
+                    
+                    # Update max width for this column
+                    if column_letter not in column_widths:
+                        column_widths[column_letter] = content_length
+                    else:
+                        column_widths[column_letter] = max(column_widths[column_letter], content_length)
+                        
+                except Exception:
+                    continue
+        
+        # Apply calculated widths
+        for column_letter, max_length in column_widths.items():
+            adjusted_width = min(max_length + 2, 50)  # Add padding, cap at 50
+            ws.column_dimensions[column_letter].width = adjusted_width
+
+
+    def on_export_details(self):
+        """Export Component Details view to Excel with styling"""
+        if self.tbl_details.rowCount() == 0:
+            QMessageBox.warning(self, "Warning", "No details data to export")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(self, "Save Details Excel", "", "Excel (*.xlsx)")
+        if not path:
+            return
+
+        try:
+            # Get data from details table
+            headers = [self.tbl_details.horizontalHeaderItem(i).text() for i in range(self.tbl_details.columnCount())]
+            data = []
+            
+            for r in range(self.tbl_details.rowCount()):
+                row = []
+                for c in range(self.tbl_details.columnCount()):
+                    it = self.tbl_details.item(r, c)
+                    row.append(it.text() if it else "")
+                data.append(row)
+
+            # Create DataFrame and export with custom styling
+            df = pd.DataFrame(data, columns=headers)
+            
+
+            
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Component Details"
+            
+            # Add DataFrame to worksheet
+            for r in dataframe_to_rows(df, index=False, header=True):
+                ws.append(r)
+            
+            # Style headers - Green background, white text
+            green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
+            white_font = Font(color="FFFFFF", bold=True, size=11)
+            center_alignment = Alignment(horizontal="center", vertical="center")
+            
+            # Apply header styling to first row
+            for col in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col)
+                cell.fill = green_fill
+                cell.font = white_font
+                cell.alignment = center_alignment
+            
+            # Auto-adjust column widths
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+                adjusted_width = min(max_length + 2, 50)
+                ws.column_dimensions[column_letter].width = adjusted_width
+            
+            wb.save(path)
+            self.log_msg(f"Details exported: {path}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+            self.log_msg(f"Details export failed: {e}")
+
+
+
+def run_app():
     app = QApplication(sys.argv)
     
-    print("\n" + "="*60)
-    print("  SECURE ONLINE EXAMINATION CLIENT")
-    print("="*60)
-    print(f"\n📡 Server: {SERVER_URL}")
-    print(f"🔐 API Token: {API_TOKEN[:20]}...")
-    print("\n⚠️  KIOSK MODE ENABLED - Full screen will be locked")
-    print("="*60 + "\n")
+    # Apply dark green theme to the entire application
+    apply_dark_green_theme(app)
     
-    login_window = LoginWindow()
-    login_window.show()
+    # Create and show the main window
+    w = App()
+    w.show()
+    
+    # Set window icon if desired
+    w.setWindowIcon(w.style().standardIcon(w.style().StandardPixmap.SP_ComputerIcon))
+    
     sys.exit(app.exec())
 
+# Optional: still run if executing directly
 if __name__ == "__main__":
-    main()
-
-
-
+    run_app()
