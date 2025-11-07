@@ -28,41 +28,38 @@ def detail(self, mpn: str, manufacturer: str) -> dict:
 
     # Extract ONLY DigiKey description from distributor table
     try:
-        # Look for DigiKey-specific description in distributor rows
-        distributor_rows = soup.find_all("tr", class_=re.compile(r'distributor|dist-row|row'))
+        # Find all table rows that might contain distributor info
+        all_rows = soup.find_all("tr")
         
-        for row in distributor_rows:
-            row_text = row.get_text().lower()
+        for row in all_rows:
+            # Get all text in this row
+            row_text = row.get_text()
             
-            # Check if this row contains DigiKey
-            if 'digikey' in row_text or 'digi-key' in row_text:
-                # Look for description cell in this row
-                desc_cell = row.find("td", class_=re.compile(r'description|desc|part-desc', re.I))
+            # Check if this row mentions DigiKey
+            if 'DigiKey' in row_text or 'DISTI # 497-' in row_text:
+                # Find all td cells in this row
+                cells = row.find_all("td")
                 
-                if desc_cell:
-                    desc_text = desc_cell.get_text(strip=True)
-                    # Clean up the description
-                    desc_text = desc_text.replace(mpn, "").strip()
+                for cell in cells:
+                    cell_text = cell.get_text(strip=True)
                     
-                    # Check if it matches DigiKey format (all caps, technical specs)
-                    if desc_text and len(desc_text) > 5 and desc_text.isupper():
-                        meta["digikey_description"] = desc_text
-                        break
-        
-        # Alternative: Look for DigiKey description in data attributes
-        if not meta["digikey_description"]:
-            digikey_sections = soup.find_all("div", attrs={"data-distributor": re.compile(r'digikey', re.I)})
-            for section in digikey_sections:
-                desc_elem = section.find(class_=re.compile(r'description', re.I))
-                if desc_elem:
-                    desc_text = desc_elem.get_text(strip=True)
-                    if desc_text and desc_text.isupper():
-                        meta["digikey_description"] = desc_text
-                        break
+                    # Look for pattern like "IC MCU 32BIT 512KB FLASH"
+                    # DigiKey descriptions start with "IC" and are in specific format
+                    if cell_text.startswith("IC ") and len(cell_text) > 10:
+                        # Extract just the description part (before "Min Qty" or other details)
+                        description = cell_text.split("Min Qty")[0].strip()
+                        description = description.split("Lead time")[0].strip()
+                        description = description.split("Container")[0].strip()
+                        description = description.split("RoHS")[0].strip()
                         
+                        meta["digikey_description"] = description
+                        break
+                
+                if meta["digikey_description"]:
+                    break
+                    
     except Exception as e:
         print(f"Error extracting DigiKey description: {e}")
-        pass
 
     # Extract from Part Data Attributes table (keep other fields)
     data_rows = soup.find_all("tr", class_="data-row")
@@ -132,33 +129,19 @@ def detail(self, mpn: str, manufacturer: str) -> dict:
 
     # Extract DigiKey stock
     try:
-        distributor_rows = soup.find_all("tr", class_=re.compile(r'distributor|dist-row|row'))
+        all_rows = soup.find_all("tr")
         
-        for row in distributor_rows:
-            row_text = row.get_text().lower()
+        for row in all_rows:
+            row_text = row.get_text()
             
-            if 'digikey' in row_text or 'digi-key' in row_text:
-                stock_patterns = [
-                    r'stock[:\s]+(\d[\d,]*)',
-                    r'in\s+stock[:\s]+(\d[\d,]*)',
-                    r'qty[:\s]+(\d[\d,]*)',
-                    r'(\d[\d,]+)\s+in\s+stock',
-                    r'available[:\s]+(\d[\d,]*)'
-                ]
-                
-                for pattern in stock_patterns:
-                    stock_match = re.search(pattern, row_text, re.I)
-                    if stock_match:
-                        stock_value = stock_match.group(1).replace(",", "")
-                        meta["stock"] = int(stock_value)
-                        break
-                
-                if meta["stock"] > 0:
+            if 'DigiKey' in row_text or 'DISTI # 497-' in row_text:
+                # Look for stock number pattern
+                stock_match = re.search(r'(\d{1,6})\s+In Stock', row_text, re.I)
+                if stock_match:
+                    meta["stock"] = int(stock_match.group(1))
                     break
                     
     except Exception as e:
         print(f"Error extracting DigiKey stock: {e}")
-        pass
 
     return meta
-
