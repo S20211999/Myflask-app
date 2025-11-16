@@ -1,5 +1,4 @@
-"""
-LibSienna Central Server - ENHANCED
+""" Central Server - ENHANCED
 Manages user authentication, standards, and footprint data
 With Library Database support
 """
