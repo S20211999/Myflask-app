@@ -1,1 +1,47 @@
 
+# Configuration
+$JAVAFX_SDK = "C:\javafx-sdk\lib"
+$JAVAFX_JMODS = "C:\javafx-jmods"
+$APP_NAME = "FabOutputGenerator"
+$MAIN_CLASS = "FabOutputGeneratorApp"
+$VERSION = "1.0"
+
+Write-Host "=== Building Fab Output Generator ===" -ForegroundColor Green
+
+# Step 1: Compile
+Write-Host "Compiling Java file..." -ForegroundColor Yellow
+javac --module-path $JAVAFX_SDK --add-modules javafx.controls FabOutputGeneratorApp.java
+if ($LASTEXITCODE -ne 0) { Write-Error "Compilation failed!"; exit 1 }
+
+# Step 2: Create manifest
+Write-Host "Creating manifest..." -ForegroundColor Yellow
+@"
+Manifest-Version: 1.0
+Main-Class: $MAIN_CLASS
+"@ | Out-File -FilePath MANIFEST.MF -Encoding ASCII
+
+# Step 3: Create JAR
+Write-Host "Creating JAR file..." -ForegroundColor Yellow
+jar cfm "$APP_NAME.jar" MANIFEST.MF *.class
+if ($LASTEXITCODE -ne 0) { Write-Error "JAR creation failed!"; exit 1 }
+
+# Step 4: Create EXE installer
+Write-Host "Creating EXE installer..." -ForegroundColor Yellow
+jpackage --type exe `
+    --input . `
+    --dest . `
+    --name $APP_NAME `
+    --main-jar "$APP_NAME.jar" `
+    --main-class $MAIN_CLASS `
+    --module-path $JAVAFX_JMODS `
+    --add-modules javafx.controls `
+    --win-shortcut `
+    --win-menu `
+    --app-version $VERSION `
+    --vendor "Sienna ECAD" `
+    --description "Fabrication Output README Generator"
+
+if ($LASTEXITCODE -ne 0) { Write-Error "jpackage failed!"; exit 1 }
+
+Write-Host "=== Build Complete! ===" -ForegroundColor Green
+Write-Host "Installer: $APP_NAME-$VERSION.exe" -ForegroundColor Cyan
