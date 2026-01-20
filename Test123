@@ -3,6 +3,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 from io import BytesIO
+import openpyxl
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime, timedelta
@@ -1358,172 +1359,56 @@ def debug_reschedules(project_id):
     return jsonify(result)
 
 
-
 @app.route('/api/projects/<int:project_id>/export-excel', methods=['GET'])
 @login_required
 def export_project_to_excel(project_id):
-    """Generate Excel with comprehensive debugging"""
+    """Generate Excel with stage-specific reschedule rows, clean weekly timeline, and correct Hold coloring"""
     try:
-        print(f"\n{'='*80}")
-        print(f"📋 STARTING EXCEL EXPORT FOR PROJECT {project_id}")
-        print(f"{'='*80}\n")
-        
         project = Project.query.get_or_404(project_id)
         stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
         
-        print(f"Project: {project.name}")
-        print(f"Total stages: {len(stages)}")
-        for s in stages:
-            print(f"   - Stage {s.id}: {s.name} ({s.start_date} to {s.end_date})")
-        
-        # Get working saturdays
+        # Parse Working Saturdays
         try:
             working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
         except:
             working_saturdays = set()
-        
-        print(f"\nWorking Saturdays: {working_saturdays}")
-        
+
         # ==========================================
-        # ✅ FIXED: Build reschedule map from ACTUAL rescheduled dates
+        # 1. PREPARE RESCHEDULE MAP (STAGE-WISE)
         # ==========================================
-        print(f"\n{'='*80}")
-        print(f"📜 LOADING RESCHEDULE HISTORY")
-        print(f"{'='*80}\n")
-        
-        # Get ALL reschedules ordered by time
-        daily_reschedules = DailyTaskRescheduleHistory.query.filter_by(
-            project_id=project_id
-        ).order_by(DailyTaskRescheduleHistory.rescheduled_at).all()
-        
-        stage_reschedules = ScheduleHistory.query.filter_by(
-            project_id=project_id
-        ).order_by(ScheduleHistory.rescheduled_at).all()
-        
-        print(f"Daily task reschedules: {len(daily_reschedules)}")
-        print(f"Stage-level reschedules: {len(stage_reschedules)}\n")
-        
-        # Collect all unique reschedule numbers
-        all_reschedule_numbers = set()
-        
-        for r in daily_reschedules:
-            if hasattr(r, 'reschedule_number') and r.reschedule_number:
-                all_reschedule_numbers.add(r.reschedule_number)
-        
-        for r in stage_reschedules:
-            if hasattr(r, 'reschedule_number') and r.reschedule_number:
-                all_reschedule_numbers.add(r.reschedule_number)
-        
-        # Sort them to get sequential order
-        sorted_reschedule_nums = sorted(all_reschedule_numbers)
-        
-        print(f"Found reschedule numbers: {sorted_reschedule_nums}")
-        
-        # Map global reschedule numbers to Excel rows (1, 2, 3, 4)
-        reschedule_num_map = {actual: idx + 1 for idx, actual in enumerate(sorted_reschedule_nums[:4])}
-        
-        print(f"Mapping: {reschedule_num_map}")
-        print(f"Example: Reschedule #1 → Excel row {reschedule_num_map.get(1, 'N/A')}")
-        print(f"Example: Reschedule #2 → Excel row {reschedule_num_map.get(2, 'N/A')}")
-        
-        # Initialize reschedule map
         stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
         
-        # ✅ FIXED: Process daily task reschedules - show ALL dates where tasks were moved TO
-        print(f"\n📄 Processing daily task reschedules...")
-        for task_reschedule in daily_reschedules:
-            if not hasattr(task_reschedule, 'reschedule_number') or not task_reschedule.reschedule_number:
-                print(f"   ⚠️ Skipping task reschedule without reschedule_number")
-                continue
-            
-            actual_num = task_reschedule.reschedule_number
-            if actual_num not in reschedule_num_map:
-                print(f"   ⚠️ Reschedule #{actual_num} not in map (only showing first 4)")
-                continue
-            
-            mapped_num = reschedule_num_map[actual_num]
-            
-            stage = ProjectStage.query.get(task_reschedule.stage_id)
-            if not stage:
-                continue
-            
+        for stage in stages:
             parts = stage.name.split('-')
             stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
             
-            # Use the NEW date (where it was rescheduled TO)
-            date_str = task_reschedule.new_date.strftime('%Y-%m-%d')
+            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id, 
+                stage_id=stage.id
+            ).all()
             
-            if date_str not in stage_reschedule_map[mapped_num]:
-                stage_reschedule_map[mapped_num][date_str] = []
+            unique_nums = sorted(list(set(r.reschedule_number for r in task_reschedules if r.reschedule_number)))
             
-            # ✅ ALWAYS append - don't check for duplicates yet
-            stage_reschedule_map[mapped_num][date_str].append(stage_abbr)
-            
-            print(f"   ✅ Mapped: Reschedule #{actual_num} → Row {mapped_num}, Date {date_str}, Stage {stage_abbr}")
-        
-        # Process stage-level reschedules (fallback)
-        print(f"\n📄 Processing stage-level reschedules...")
-        for reschedule_record in stage_reschedules:
-            if not hasattr(reschedule_record, 'reschedule_number') or not reschedule_record.reschedule_number:
-                continue
-            
-            actual_num = reschedule_record.reschedule_number
-            if actual_num not in reschedule_num_map:
-                continue
-            
-            mapped_num = reschedule_num_map[actual_num]
-            
-            stage = ProjectStage.query.get(reschedule_record.stage_id)
-            if not stage or not reschedule_record.new_date:
-                continue
-            
-            parts = stage.name.split('-')
-            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            
-            # Calculate all working days in the rescheduled range
-            new_start = reschedule_record.new_date
-            new_end = add_working_days(new_start, stage.duration_days - 1, False, working_saturdays)
-            
-            current_date = new_start
-            while current_date <= new_end:
-                if is_working_day(current_date, False, working_saturdays):
-                    date_str = current_date.strftime('%Y-%m-%d')
-                    if date_str not in stage_reschedule_map[mapped_num]:
-                        stage_reschedule_map[mapped_num][date_str] = []
-                    # ✅ ALWAYS append
-                    stage_reschedule_map[mapped_num][date_str].append(stage_abbr)
-                current_date += timedelta(days=1)
-        
-        # ✅ Remove duplicates AFTER all entries are added
-        print(f"\n🧹 Cleaning up duplicates...")
-        for row_num in range(1, 5):
-            for date_str in stage_reschedule_map[row_num]:
-                # Keep unique stage abbreviations
-                stage_reschedule_map[row_num][date_str] = list(set(stage_reschedule_map[row_num][date_str]))
-        
-        # Print verification summary
-        print(f"\n{'='*60}")
-        print(f"RESCHEDULE MAP VERIFICATION")
-        print(f"{'='*60}")
-        for row_num in range(1, 5):
-            total_dates = len(stage_reschedule_map[row_num])
-            total_stages = sum(len(stages) for stages in stage_reschedule_map[row_num].values())
-            print(f"\nReschedule Row {row_num}:")
-            print(f"   Total dates: {total_dates}")
-            print(f"   Total stage entries: {total_stages}")
-            if total_dates > 0:
-                sample_dates = sorted(stage_reschedule_map[row_num].keys())[:5]
-                for sample_date in sample_dates:
-                    stage_list = stage_reschedule_map[row_num][sample_date]
-                    print(f"     {sample_date}: {stage_list}")
-        print(f"{'='*60}\n")
-        
-        # Create workbook
+            for idx, r_num in enumerate(unique_nums):
+                target_row = idx + 1
+                if target_row > 4: continue
+                
+                event_tasks = [t for t in task_reschedules if t.reschedule_number == r_num]
+                for t in event_tasks:
+                    date_str = t.new_date.strftime('%Y-%m-%d')
+                    if date_str not in stage_reschedule_map[target_row]:
+                        stage_reschedule_map[target_row][date_str] = []
+                    if stage_abbr not in stage_reschedule_map[target_row][date_str]:
+                        stage_reschedule_map[target_row][date_str].append(stage_abbr)
+
+        # ==========================================
+        # 2. SETUP EXCEL & HEADERS
+        # ==========================================
         wb = Workbook()
         ws = wb.active
         ws.title = "Schedule_Tracker"
         
-        # Define styles
+        # Styles
         orange_header = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
         green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
@@ -1531,49 +1416,10 @@ def export_project_to_excel(project_id):
         cyan_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
         light_gray = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
         
-        thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
-        )
-        
-        medium_border = Border(
-            left=Side(style='medium'),
-            right=Side(style='medium'),
-            top=Side(style='medium'),
-            bottom=Side(style='medium')
-        )
-        
-        # ==========================================
-        # STAGE NAMES HEADER ROW
-        # ==========================================
-        current_row = 1
-        header_col = 1
-        
-        for stage in stages:
-            parts = stage.name.split('-')
-            stage_main = '-'.join(parts[:-1]).strip() if len(parts) > 1 else stage.name
-            stage_code = parts[-1].strip() if len(parts) > 1 else ''
-            
-            cell = ws.cell(current_row, header_col)
-            cell.value = stage_main
-            cell.font = Font(size=9, bold=False)
-            cell.alignment = Alignment(vertical='center', horizontal='left', wrap_text=True)
-            cell.border = thin_border
-            header_col += 1
-            
-            cell = ws.cell(current_row, header_col)
-            cell.value = stage_code
-            cell.font = Font(size=9, bold=False)
-            cell.alignment = Alignment(vertical='center', horizontal='left')
-            cell.border = thin_border
-            header_col += 1
-        
-        ws.row_dimensions[current_row].height = 25
-        current_row += 2
-        
-        # Generate date range
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        medium_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
+
+        # Timeline
         project_start = project.start_date
         project_end = project.end_date
         all_dates = []
@@ -1581,390 +1427,261 @@ def export_project_to_excel(project_id):
         while current_date <= project_end:
             all_dates.append(current_date)
             current_date += timedelta(days=1)
+
+        current_row = 1
         
-        print(f"\n📅 Date range: {project_start} to {project_end} ({len(all_dates)} total days)")
-        
-        # ==========================================
-        # PROJECT NAME AND DATE HEADER ROW
-        # ==========================================
-        ws.cell(current_row, 1, project.name).font = Font(size=12, bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
-        ws.cell(current_row, 1).fill = orange_header
-        ws.cell(current_row, 1).border = medium_border
-        
-        ws.cell(current_row, 2, "Date").font = Font(size=10, bold=True)
-        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
-        ws.cell(current_row, 2).fill = orange_header
-        ws.cell(current_row, 2).border = thin_border
-        
-        for idx, date in enumerate(all_dates):
-            cell = ws.cell(current_row, idx + 3, date.day)
-            cell.font = Font(size=9, bold=True)
-            cell.alignment = Alignment(vertical='center', horizontal='center')
-            cell.fill = orange_header
-            cell.border = thin_border
-        
-        ws.row_dimensions[current_row].height = 25
+        # Stage List
+        header_col = 1
+        for stage in stages:
+            parts = stage.name.split('-')
+            ws.cell(current_row, header_col, value='-'.join(parts[:-1]).strip()).border = thin_border
+            header_col += 1
+            ws.cell(current_row, header_col, value=parts[-1].strip()).border = thin_border
+            header_col += 1
+        current_row += 2
+
+        # Header: Project Name & Dates
+        ws.cell(current_row, 1, project.name).fill = orange_header
+        ws.cell(current_row, 2, "Date").fill = orange_header
+        for i, d in enumerate(all_dates):
+            ws.cell(current_row, i+3, d.day).fill = orange_header
+            ws.cell(current_row, i+3).border = thin_border
+            ws.cell(current_row, i+3).alignment = Alignment(horizontal='center')
         current_row += 1
-        
-        # ==========================================
-        # MONTH GROUPINGS ROW
-        # ==========================================
-        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-        
+
+        # Header: Months
         ws.cell(current_row, 1, "")
         ws.cell(current_row, 2, "")
-        
+        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
         last_month = None
-        month_start_col = 3
-        
-        for idx, date in enumerate(all_dates):
-            current_month = date.month
-            col_num = idx + 3
+        start_col = 3
+        for i, d in enumerate(all_dates):
+            col = i + 3
+            if last_month is None: last_month = d.month
             
-            if last_month is None:
-                last_month = current_month
-            
-            if last_month != current_month or idx == len(all_dates) - 1:
-                end_col = col_num - 1 if last_month != current_month else col_num
-                
-                if month_start_col <= end_col:
-                    if month_start_col < end_col:
-                        ws.merge_cells(start_row=current_row, start_column=month_start_col,
-                                     end_row=current_row, end_column=end_col)
-                    
-                    display_date = all_dates[idx - 1 if last_month != current_month else idx]
-                    cell = ws.cell(current_row, month_start_col, 
-                                 f"{month_names[display_date.month - 1]}-{str(display_date.day).zfill(2)}")
-                    cell.font = Font(size=9, bold=True)
-                    cell.alignment = Alignment(vertical='center', horizontal='center')
-                    cell.border = thin_border
-                
-                last_month = current_month
-                month_start_col = col_num
-        
-        ws.row_dimensions[current_row].height = 20
+            if d.month != last_month or i == len(all_dates) - 1:
+                end_col = col - 1 if d.month != last_month else col
+                if start_col <= end_col:
+                     ws.merge_cells(start_row=current_row, start_column=start_col, end_row=current_row, end_column=end_col)
+                     disp_date = all_dates[i-1] if d.month != last_month else d
+                     cell = ws.cell(current_row, start_col, f"{month_names[disp_date.month-1]}-{str(disp_date.day).zfill(2)}")
+                     cell.alignment = Alignment(horizontal='center')
+                     cell.border = thin_border
+                start_col = col
+                last_month = d.month
         current_row += 1
-        
-        # Set column widths
+
+        # Set Widths
         ws.column_dimensions['A'].width = 25
         ws.column_dimensions['B'].width = 15
-        for i in range(3, len(all_dates) + 3):
-            ws.column_dimensions[get_column_letter(i)].width = 15
-        
-        # ==========================================
-        # PLANNED ROW
-        # ==========================================
-        print(f"\n📅 Building PLANNED row...")
-        ws.cell(current_row, 1, "").fill = light_gray
-        ws.cell(current_row, 1).border = medium_border
-        
-        ws.cell(current_row, 2, "Planned").font = Font(size=10, bold=False)
-        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='left')
-        ws.cell(current_row, 2).border = thin_border
-        
+        for i in range(3, len(all_dates) + 5):
+            ws.column_dimensions[get_column_letter(i)].width = 3.5
+
+        # --- PLANNED ROW ---
+        ws.cell(current_row, 2, "Planned").border = thin_border
         planned_map = {}
         for stage in stages:
             if stage.start_date and stage.end_date:
                 parts = stage.name.split('-')
-                stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-                
-                current_date = stage.start_date
-                while current_date <= stage.end_date:
-                    if is_working_day(current_date, False, working_saturdays):
-                        date_str = current_date.strftime('%Y-%m-%d')
-                        if date_str not in planned_map:
-                            planned_map[date_str] = []
-                        planned_map[date_str].append(stage_abbr)
-                    current_date += timedelta(days=1)
-        
-        for idx, date in enumerate(all_dates):
-            day_of_week = date.weekday()
-            cell = ws.cell(current_row, idx + 3)
-            date_str = date.strftime('%Y-%m-%d')
-            
-            if day_of_week in [5, 6]:
+                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                d = stage.start_date
+                while d <= stage.end_date:
+                    if is_working_day(d, False, working_saturdays):
+                        ds = d.strftime('%Y-%m-%d')
+                        if ds not in planned_map: planned_map[ds] = []
+                        planned_map[ds].append(abbr)
+                    d += timedelta(days=1)
+                    
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            if d.weekday() in [5,6]: cell.fill = yellow_fill
+            ds = d.strftime('%Y-%m-%d')
+            if ds in planned_map:
+                cell.value = ','.join(sorted(set(planned_map[ds])))
                 cell.fill = yellow_fill
-            
-            if date_str in planned_map:
-                stage_abbrs = planned_map[date_str]
-                cell.value = ','.join(sorted(set(stage_abbrs)))
-                cell.fill = yellow_fill
+                cell.alignment = Alignment(text_rotation=90, horizontal='center', vertical='center')
                 cell.font = Font(size=7)
-                cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=0)
-            
             cell.border = thin_border
-        
         ws.row_dimensions[current_row].height = 60
         current_row += 1
-        
-        # ==========================================
-        # ✅ RESCHEDULE ROWS (1-4) - WITH DETAILED LOGGING
-        # ==========================================
-        print(f"\n{'='*80}")
-        print(f"📄 BUILDING RESCHEDULE ROWS IN EXCEL")
-        print(f"{'='*80}\n")
-        
-        for reschedule_num in range(1, 5):
-            print(f"\n🔍 Writing Reschedule-{reschedule_num} row to Excel...")
+
+        # --- RESCHEDULE ROWS (1-4) ---
+        for r_num in range(1, 5):
+            ws.cell(current_row, 2, f"Reschedule -{r_num}").border = thin_border
+            r_data = stage_reschedule_map.get(r_num, {})
             
-            ws.cell(current_row, 1, "").fill = light_gray
-            ws.cell(current_row, 1).border = medium_border
-            
-            ws.cell(current_row, 2, f"Reschedule -{reschedule_num}").font = Font(size=10)
-            ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='left')
-            ws.cell(current_row, 2).border = thin_border
-            
-            reschedule_dates = stage_reschedule_map.get(reschedule_num, {})
-            print(f"   Available dates in map: {len(reschedule_dates)}")
-            
-            cells_filled = 0
-            for idx, date in enumerate(all_dates):
-                day_of_week = date.weekday()
-                cell = ws.cell(current_row, idx + 3)
-                date_str = date.strftime('%Y-%m-%d')
-                
-                # Yellow fill for weekends
-                if day_of_week in [5, 6]:
+            for i, d in enumerate(all_dates):
+                cell = ws.cell(current_row, i+3)
+                if d.weekday() in [5,6]: cell.fill = yellow_fill
+                ds = d.strftime('%Y-%m-%d')
+                if ds in r_data:
+                    cell.value = ','.join(sorted(set(r_data[ds])))
                     cell.fill = yellow_fill
-                
-                # Check if this date has rescheduled stages
-                if date_str in reschedule_dates:
-                    stage_abbrs = reschedule_dates[date_str]
-                    cell.value = ','.join(sorted(set(stage_abbrs)))
-                    cell.fill = yellow_fill
+                    cell.alignment = Alignment(text_rotation=90, horizontal='center', vertical='center')
                     cell.font = Font(size=7)
-                    cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=0)
-                    cells_filled += 1
-                
                 cell.border = thin_border
-            
-            print(f"   ✅ Filled {cells_filled} cells in Excel for Reschedule-{reschedule_num}")
-            
             ws.row_dimensions[current_row].height = 20
             current_row += 1
-        
-        print(f"\n{'='*80}\n")
-        
-# ==========================================
-        # ACTUAL ROW
-        # ==========================================
-        print(f"\n✅ Building ACTUAL row...")
-        ws.cell(current_row, 1, "").fill = light_gray
-        ws.cell(current_row, 1).border = medium_border
-        
-        ws.cell(current_row, 2, "Actual").font = Font(size=10, bold=True)
-        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
+
+        # --- ACTUAL ROW ---
+        ws.cell(current_row, 2, "Actual").border = thin_border
         ws.cell(current_row, 2).fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
-        ws.cell(current_row, 2).border = thin_border
         
         actual_map = {}
         hold_dates_map = {}
         
-        # 1. Build Maps
         for stage in stages:
             parts = stage.name.split('-')
-            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
+            for t in tasks:
+                ds = t.scheduled_date.strftime('%Y-%m-%d')
+                if ds not in actual_map: actual_map[ds] = []
+                actual_map[ds].append((abbr, t.status))
+                if t.original_date and t.original_date != t.scheduled_date:
+                    hds = t.original_date.strftime('%Y-%m-%d')
+                    if hds not in hold_dates_map: hold_dates_map[hds] = []
+                    hold_dates_map[hds].append(abbr)
+                    
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            if d.weekday() in [5,6]: cell.fill = yellow_fill
+            ds = d.strftime('%Y-%m-%d')
             
-            daily_tasks = StageDailyTask.query.filter_by(stage_id=stage.id).order_by(
-                StageDailyTask.day_number
-            ).all()
-            
-            for task in daily_tasks:
-                date_str = task.scheduled_date.strftime('%Y-%m-%d')
-                if date_str not in actual_map:
-                    actual_map[date_str] = []
-                actual_map[date_str].append((stage_abbr, task.status))
-                
-                if task.original_date and task.original_date != task.scheduled_date:
-                    hold_date_str = task.original_date.strftime('%Y-%m-%d')
-                    if hold_date_str not in hold_dates_map:
-                        hold_dates_map[hold_date_str] = []
-                    hold_dates_map[hold_date_str].append(stage_abbr)
-        
-        # 2. Iterate Dates and Render
-        for idx, date in enumerate(all_dates):
-            day_of_week = date.weekday()
-            cell = ws.cell(current_row, idx + 3)
-            date_str = date.strftime('%Y-%m-%d')
-            
-            # Default Weekend Fill
-            if day_of_week in [5, 6]:
-                cell.fill = yellow_fill
-            
-            # --- FIXED LOGIC START ---
-            # Get Active stages for this date
-            active_data = actual_map.get(date_str, [])
-            active_abbrs = set(item[0] for item in active_data)
-            
-            # Get Hold stages for this date
-            hold_abbrs = set(hold_dates_map.get(date_str, []))
-            
-            # Filter Holds: Only show HOLD if the stage is NOT active on this date
-            # This prevents "SCH=HOLD" on days where SCH is actually running
-            real_holds = hold_abbrs - active_abbrs
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            real_holds = hold_abbrs - active_abbrs # Filter holds
             
             parts = []
-            
-            # Add Holds
-            if real_holds:
-                hold_str = ','.join(sorted(real_holds))
-                parts.append(f"{hold_str}=HOLD")
-                
-            # Add Actives
-            if active_abbrs:
-                parts.append(','.join(sorted(active_abbrs)))
+            if real_holds: parts.append(f"{','.join(sorted(real_holds))}=HOLD")
+            if active_abbrs: parts.append(','.join(sorted(active_abbrs)))
             
             cell.value = ','.join(parts)
-            
-            # Formatting/Coloring based on Filtered Data
-            if day_of_week not in [5, 6]: # Only color working days
-                if real_holds and not active_abbrs:
-                    cell.fill = orange_fill # Pure hold
-                elif real_holds and active_abbrs:
-                    cell.fill = orange_fill # Mixed
-                elif active_abbrs:
-                    # Color based on status of active tasks
-                    statuses = set(item[1] for item in active_data)
-                    if 'completed' in statuses:
-                        cell.fill = green_fill
-                    elif 'rescheduled' in statuses:
-                        cell.fill = cyan_fill
-                    else:
-                        cell.fill = yellow_fill
-            # --- FIXED LOGIC END ---
-
+            cell.alignment = Alignment(text_rotation=90, horizontal='center', vertical='center')
             cell.font = Font(size=7, bold=True)
-            cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=90)
             cell.border = thin_border
+            
+            # --- COLORING LOGIC FIX ---
+            if d.weekday() not in [5,6]:
+                # 1. If there is ANY valid hold, color Orange (High Priority)
+                if real_holds: 
+                    cell.fill = orange_fill
+                # 2. Else color based on active status
+                elif active_abbrs:
+                    stats = set(x[1] for x in active)
+                    if 'completed' in stats: cell.fill = green_fill
+                    elif 'rescheduled' in stats: cell.fill = cyan_fill
+                    else: cell.fill = yellow_fill
         
         ws.row_dimensions[current_row].height = 60
         current_row += 1
-        
+
         # ==========================================
-        # REMARKS ROW
+        # 3. REMARKS ROW (Specific Text)
         # ==========================================
         ws.cell(current_row, 1, "").fill = light_gray
         ws.cell(current_row, 1).border = medium_border
-        
-        ws.cell(current_row, 2, "Remarks").font = Font(size=10, italic=True)
+        ws.cell(current_row, 2, "Remarks").border = thin_border
+        ws.cell(current_row, 2).font = Font(size=10, italic=True)
         ws.cell(current_row, 2).alignment = Alignment(vertical='top', horizontal='left')
-        ws.cell(current_row, 2).border = thin_border
         
-        for stage in stages:
-            if not stage.start_date or not stage.end_date:
-                continue
-                
-            stage_duration_days = (stage.end_date - stage.start_date).days + 1
-            weeks_needed = max(1, stage_duration_days // 7)
+        for i, d in enumerate(all_dates):
+            ds = d.strftime('%Y-%m-%d')
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            real_holds = hold_abbrs - active_abbrs
             
-            for week_num in range(1, min(weeks_needed + 1, 4)):
-                week_day_offset = (stage_duration_days // weeks_needed) * week_num
-                week_date = stage.start_date + timedelta(days=week_day_offset)
-                
-                if week_date <= stage.end_date and week_date in all_dates:
-                    col_idx = all_dates.index(week_date) + 3
-                    cell = ws.cell(current_row, col_idx)
-                    
-                    ordinal = f"{week_num}{'st' if week_num == 1 else 'nd' if week_num == 2 else 'rd' if week_num == 3 else 'th'}"
-                    cell.value = f"{ordinal} Week"
-                    
-                    day_of_week = week_date.weekday()
-                    if day_of_week not in [5, 6]:
-                        cell.fill = yellow_fill
-                    
-                    cell.font = Font(size=7, bold=True)
-                    cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=0)
-        
-        for date_str, hold_stages in hold_dates_map.items():
-            date = datetime.strptime(date_str, '%Y-%m-%d').date()
-            if date in all_dates:
-                col_idx = all_dates.index(date) + 3
-                cell = ws.cell(current_row, col_idx)
-                
-                reason_found = False
+            cell = ws.cell(current_row, i+3)
+            if real_holds:
+                reason = "HOLD, waiting for issue tracker..."
                 for stage in stages:
-                    daily_tasks = StageDailyTask.query.filter_by(stage_id=stage.id).filter(
-                        StageDailyTask.original_date == date
-                    ).all()
-                    
-                    for task in daily_tasks:
-                        if task.rescheduled_reason:
-                            cell.value = task.rescheduled_reason
-                            reason_found = True
+                    parts = stage.name.split('-')
+                    abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                    if abbr in real_holds:
+                        task = StageDailyTask.query.filter_by(stage_id=stage.id, original_date=d).first()
+                        if task and task.rescheduled_reason:
+                            reason = task.rescheduled_reason
                             break
-                    if reason_found:
-                        break
-                
-                if not reason_found:
-                    cell.value = "HOLD, waiting for issue tracker and schematic from customer side"
-                
-                day_of_week = date.weekday()
-                if day_of_week not in [5, 6]:
-                    cell.fill = yellow_fill
-                
+                cell.value = reason
+                cell.alignment = Alignment(text_rotation=90, horizontal='left', vertical='top', wrap_text=True)
                 cell.font = Font(size=6, italic=True)
-                cell.alignment = Alignment(vertical='top', horizontal='left', wrap_text=True, text_rotation=0)
-        
-        for idx, date in enumerate(all_dates):
-            day_of_week = date.weekday()
-            cell = ws.cell(current_row, idx + 3)
+                # Ensure remarks for HOLD are also colored orange if it's a working day
+                if d.weekday() not in [5, 6]: cell.fill = orange_fill 
             
-            if day_of_week in [5, 6] and not cell.value:
-                cell.fill = yellow_fill
-            
-            if not cell.border or cell.border == Border():
-                cell.border = thin_border
-        
+            cell.border = thin_border
+            if d.weekday() in [5, 6] and not cell.value: cell.fill = yellow_fill
+
         ws.row_dimensions[current_row].height = 80
+        current_row += 1
+
+        # ==========================================
+        # 4. WEEKS ROW (Continuous Project Timeline)
+        # ==========================================
+        ws.cell(current_row, 1, "").fill = light_gray
+        ws.cell(current_row, 1).border = medium_border
+        ws.cell(current_row, 2, "Timeline").border = thin_border
+        
+        # Merge cells in 7-day blocks to create "1st Week", "2nd Week", etc.
+        current_date_idx = 0
+        week_count = 1
+        
+        while current_date_idx < len(all_dates):
+            start_col_idx = current_date_idx + 3
+            end_date_idx = min(current_date_idx + 6, len(all_dates) - 1)
+            end_col_idx = end_date_idx + 3
+            
+            ws.merge_cells(start_row=current_row, start_column=start_col_idx, 
+                         end_row=current_row, end_column=end_col_idx)
+            
+            cell = ws.cell(current_row, start_col_idx)
+            ordinal = f"{week_count}{'st' if week_count == 1 else 'nd' if week_count == 2 else 'rd' if week_count == 3 else 'th'}"
+            cell.value = f"{ordinal} Week"
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.font = Font(size=8, bold=True)
+            cell.fill = yellow_fill 
+            
+            for c in range(start_col_idx, end_col_idx + 1):
+                ws.cell(current_row, c).border = thin_border
+            
+            current_date_idx += 7
+            week_count += 1
+            
+        ws.row_dimensions[current_row].height = 20
         current_row += 2
         
-        # ==========================================
-        # LEGEND
-        # ==========================================
+        # Legend
         ws.cell(current_row, 1, "Hold").fill = orange_fill
-        ws.cell(current_row, 1).font = Font(size=10, bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 1).font = Font(bold=True)
+        ws.cell(current_row, 1).alignment = Alignment(horizontal='center')
         ws.cell(current_row, 1).border = thin_border
-        ws.cell(current_row, 2, "If project goes on hold from Customer").font = Font(size=9)
+        ws.cell(current_row, 2, "If project goes on hold").font = Font(size=9)
         current_row += 1
         
-        ws.cell(current_row, 1, "Changes").border = thin_border
-        ws.cell(current_row, 1).font = Font(size=10, bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 1, "Changes").font = Font(bold=True)
+        ws.cell(current_row, 1).alignment = Alignment(horizontal='center')
+        ws.cell(current_row, 1).border = thin_border
         ws.cell(current_row, 2, "from Customer").font = Font(size=9)
-        current_row += 1
         
-        ws.cell(current_row, 1, "Holidays").fill = yellow_fill
-        ws.cell(current_row, 1).font = Font(size=10, bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
-        ws.cell(current_row, 1).border = thin_border
-        
-        # Save to BytesIO
+        # Output
         excel_file = BytesIO()
         wb.save(excel_file)
         excel_file.seek(0)
-        
-        filename = f"{project.name}_Tracker_{datetime.now().strftime('%Y%m%d')}.xlsx"
-        
-        print(f"\n{'='*80}")
-        print(f"✅ EXCEL EXPORT COMPLETE")
-        print(f"{'='*80}\n")
         
         return send_file(
             excel_file,
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name=filename
+            download_name=f"{project.name}_Tracker.xlsx"
         )
         
     except Exception as e:
-        print(f"\n❌ ERROR IN EXCEL EXPORT:")
-        print(f"   {str(e)}")
-        import traceback
+        print(f"Export Error: {e}")
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
 
 @app.route('/api/projects/<int:project_id>/hold-dates', methods=['GET'])
 @login_required
@@ -2148,4 +1865,3 @@ def init_db():
 if __name__ == '__main__':
     init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
-
