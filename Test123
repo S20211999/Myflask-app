@@ -1,1 +1,2151 @@
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+from io import BytesIO
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime, timedelta
+from functools import wraps
+import secrets
+import json
+import traceback # Useful for the error handling in your code
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dashboard.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# ============================================================================
+# Database Models
+# ============================================================================
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(20), default='employee')  # admin, manager, employee
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Project(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    status = db.Column(db.String(20), default='active')
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    progress = db.Column(db.Integer, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    working_saturdays = db.Column(db.Text, default='[]')
+    current_reschedule_number = db.Column(db.Integer, default=0)  # ✅ ADD THIS LINE    # Store as JSON array
+
+class ProjectStage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    order = db.Column(db.Integer, nullable=False)
+    duration_days = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='pending')
+    progress = db.Column(db.Integer, default=0)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    manager_id = db.Column(db.Integer, db.ForeignKey('user.id'))  # ADD THIS LINE
+
+class ProjectMember(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Task(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'))
+    assigned_to = db.Column(db.Integer, db.ForeignKey('user.id'))
+    priority = db.Column(db.String(20), default='medium')  # low, medium, high
+    status = db.Column(db.String(20), default='pending')  # pending, in-progress, completed
+    deadline = db.Column(db.Date)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime)
+
+class ScheduleHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'))
+    reschedule_number = db.Column(db.Integer, default=1)  # ✅ ADD THIS
+    original_date = db.Column(db.Date)
+    new_date = db.Column(db.Date)
+    reason = db.Column(db.Text)
+    rescheduled_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    rescheduled_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ActivityLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    action = db.Column(db.String(200), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class StageDailyTask(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    day_number = db.Column(db.Integer, nullable=False)  # 1, 2, 3, etc.
+    scheduled_date = db.Column(db.Date, nullable=False)
+    original_date = db.Column(db.Date)  # Track if rescheduled
+    status = db.Column(db.String(20), default='pending')  # pending, completed, rescheduled
+    completed_at = db.Column(db.DateTime)
+    rescheduled_reason = db.Column(db.Text)
+    reschedule_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class DailyTaskRescheduleHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
+    task_id = db.Column(db.Integer, db.ForeignKey('stage_daily_task.id'), nullable=False)
+    day_number = db.Column(db.Integer, nullable=False)
+    reschedule_number = db.Column(db.Integer, default=1)  # ✅ ADD THIS
+    original_date = db.Column(db.Date, nullable=False)
+    new_date = db.Column(db.Date, nullable=False)
+    days_shifted = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.Text)
+    rescheduled_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    rescheduled_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class HoldDate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
+    hold_date = db.Column(db.Date, nullable=False)  # The date that became HOLD
+    reason = db.Column(db.Text)  # Why it's on hold
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
+# Default Stages Configuration
+# ============================================================================
+
+DEFAULT_STAGES = [
+    {'name': 'Foot prints - library - FP-LIB', 'order': 1, 'duration_days': 3},
+    {'name': 'Scrubbing - SCRB', 'order': 2, 'duration_days': 2},
+    {'name': 'Schematic - SCH', 'order': 3, 'duration_days': 7},
+    {'name': 'Length Matching - LM', 'order': 4, 'duration_days': 4},
+    {'name': 'Deliverables - DLBS', 'order': 5, 'duration_days': 3},
+    {'name': 'Placement - PLC', 'order': 6, 'duration_days': 5},  # Added comma
+    {'name': 'Placement - review - PLC-R', 'order': 7, 'duration_days': 3},  # Changed order to 7
+    {'name': 'Routing - RTNG', 'order': 8, 'duration_days': 2},  # Fixed syntax and order
+    {'name': 'Routing - Review - RTNG-R', 'order': 9, 'duration_days': 7},  # Changed order to 9
+    {'name': 'Post Screen - P-SI', 'order': 10, 'duration_days': 4},  # Changed order to 10
+    {'name': 'Fan out - FNT', 'order': 11, 'duration_days': 3},  # Changed order to 11
+    {'name': 'Silk Screen - SLK', 'order': 12, 'duration_days': 5},  # Added comma, changed order to 12
+    {'name': 'Approval - APRVL', 'order': 13, 'duration_days': 3},  # Changed order to 13
+    {'name': 'Fab setup - FB-STP', 'order': 14, 'duration_days': 5}  # Changed order to 14
+]
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def get_current_user():
+    if 'user_id' in session:
+        return User.query.get(session['user_id'])
+    return None
+
+def log_activity(action):
+    user = get_current_user()
+    if user:
+        log = ActivityLog(user_id=user.id, action=action)
+        db.session.add(log)
+        db.session.commit()
+
+def create_notification(user_id, message):
+    notification = Notification(user_id=user_id, message=message)
+    db.session.add(notification)
+    db.session.commit()
+
+def is_working_day(date, include_saturday=False, working_saturdays=None):
+    """Check if a date is a working day"""
+    if working_saturdays is None:
+        working_saturdays = set()
+        
+    weekday = date.weekday()
+    date_str = date.strftime('%Y-%m-%d')
+    
+    if weekday == 6:  # Sunday
+        return False
+    if weekday == 5:  # Saturday
+        return date_str in working_saturdays
+    return True
+
+def add_working_days(start_date, days, include_saturday=False, working_saturdays=None):
+    """Add working days to a date, properly handling working Saturdays"""
+    if working_saturdays is None:
+        working_saturdays = set()
+        
+    if days == 0:
+        return start_date
+        
+    current_date = start_date
+    direction = 1 if days > 0 else -1
+    days_remaining = abs(days)
+    
+    while days_remaining > 0:
+        current_date = current_date + timedelta(days=direction)
+        if is_working_day(current_date, include_saturday, working_saturdays):
+            days_remaining -= 1
+    
+    return current_date
+
+def get_next_working_day(date, include_saturday=False, working_saturdays=None):
+    """Get the next working day from a given date"""
+    if working_saturdays is None:
+        working_saturdays = set()
+    check_date = date
+    while not is_working_day(check_date, include_saturday, working_saturdays):
+        check_date = check_date + timedelta(days=1)
+    return check_date
+
+def calculate_stage_dates(project_start_date, stages_data, include_saturday=False, working_saturdays=None):
+    """Calculate start and end dates for each stage based on working days (excluding weekends)"""
+    
+    if working_saturdays is None:
+        working_saturdays = set()
+    
+    calculated_stages = []
+    current_date = get_next_working_day(project_start_date, False, working_saturdays)
+    
+    for stage_info in stages_data:
+        stage_start = stage_info.get('start_date')
+        
+        if stage_start:
+            # Custom start date provided
+            custom_start = datetime.strptime(stage_start, '%Y-%m-%d').date()
+            stage_start_date = get_next_working_day(custom_start, False, working_saturdays)
+        else:
+            # Use current date
+            stage_start_date = current_date
+        
+        # Calculate end date based on duration
+        duration = stage_info.get('duration_days', 1)
+        if duration > 0:
+            stage_end_date = add_working_days(stage_start_date, duration - 1, False, working_saturdays)
+        else:
+            stage_end_date = stage_start_date
+        
+        calculated_stages.append({
+            'name': stage_info['name'],
+            'order': stage_info['order'],
+            'duration_days': duration,
+            'start_date': stage_start_date,
+            'end_date': stage_end_date
+        })
+        
+        # If no custom start date, update current_date for next stage
+        if not stage_start:
+            current_date = add_working_days(stage_end_date, 1, False, working_saturdays)
+    
+    return calculated_stages
+
+def generate_daily_tasks_for_project(project_id, working_saturdays=None):
+    """Generate daily tasks for all stages in a project"""
+    if working_saturdays is None:
+        working_saturdays = set()
+    
+    project = Project.query.get(project_id)
+    if not project:
+        raise ValueError(f"Project {project_id} not found")
+    
+    stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+    
+    for stage in stages:
+        # Delete existing daily tasks for this stage (in case of regeneration)
+        StageDailyTask.query.filter_by(stage_id=stage.id).delete()
+        
+        if not stage.start_date or not stage.end_date:
+            continue
+        
+        # Generate daily tasks
+        current_date = stage.start_date
+        day_number = 1
+        
+        while current_date <= stage.end_date:
+            # Only create task for working days
+            if is_working_day(current_date, False, working_saturdays):
+                daily_task = StageDailyTask(
+                    stage_id=stage.id,
+                    project_id=project_id,
+                    day_number=day_number,
+                    scheduled_date=current_date,
+                    status='pending'
+                )
+                db.session.add(daily_task)
+                day_number += 1
+            
+            current_date = current_date + timedelta(days=1)
+    
+    # Don't commit here - let the caller handle the commit
+    db.session.flush()
+
+# ============================================================================
+# Routes
+# ============================================================================
+
+@app.route('/')
+@login_required
+def index():
+    return redirect(url_for('dashboard'))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and check_password_hash(user.password_hash, password):
+            session['user_id'] = user.id
+            session['username'] = user.username
+            return jsonify({'success': True})
+        
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+    
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    user = get_current_user()
+    return render_template('index.html', current_user=user)
+
+@app.route('/stage_popup.html')
+def stage_popup():
+    return render_template('stage_popup.html')
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
+
+@app.route('/api/default-stages', methods=['GET'])
+@login_required
+def get_default_stages():
+    """Return default stages for frontend"""
+    return jsonify(DEFAULT_STAGES)
+
+@app.route('/api/stats', methods=['GET'])
+@login_required
+def get_stats():
+    total_projects = Project.query.count()
+    active_projects = Project.query.filter_by(status='active').count()
+    total_tasks = Task.query.count()
+    completed_tasks = Task.query.filter_by(status='completed').count()
+    total_employees = User.query.filter_by(role='employee').count()
+    
+    return jsonify({
+        'total_projects': total_projects,
+        'active_projects': active_projects,
+        'total_tasks': total_tasks,
+        'completed_tasks': completed_tasks,
+        'total_employees': total_employees
+    })
+
+@app.route('/api/projects', methods=['GET', 'POST'])
+@login_required
+def projects():
+    if request.method == 'POST':
+        data = request.get_json()
+        user = get_current_user()
+        
+        try:
+            project_start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date() if data.get('start_date') else datetime.now().date()
+
+            include_saturday = data.get('include_saturday', False)
+            working_saturdays = set(data.get('working_saturdays', []))
+            
+            # Calculate stage dates based on duration
+            stages_data = data.get('stages', [])
+            calculated_stages = calculate_stage_dates(project_start_date, stages_data, include_saturday, working_saturdays)
+
+            # Calculate project end date from last stage
+            project_end_date = calculated_stages[-1]['end_date'] if calculated_stages else project_start_date
+            
+            project = Project(
+                name=data['name'],
+                description=data.get('description', ''),
+                start_date=project_start_date,
+                end_date=project_end_date,
+                created_by=user.id,
+                working_saturdays=json.dumps(list(working_saturdays))
+            )
+            db.session.add(project)
+            db.session.flush()
+
+
+            
+            # Add stages with calculated dates
+            for stage_data in calculated_stages:
+                stage = ProjectStage(
+                    project_id=project.id,
+                    name=stage_data['name'],
+                    order=stage_data['order'],
+                    duration_days=stage_data.get('duration_days', 0),
+                    start_date=stage_data['start_date'],
+                    end_date=stage_data['end_date'],
+                    manager_id=stage_data.get('manager_id')  # ADD THIS LINE
+                )
+                db.session.add(stage)
+                            
+            # Add project members
+            member_ids = data.get('members', [])
+            for member_id in member_ids:
+                member = ProjectMember(
+                    project_id=project.id,
+                    user_id=member_id
+                )
+                db.session.add(member)
+                create_notification(member_id, f"You have been added to job: {project.name}")
+            
+            db.session.commit()
+            
+        # ✅ NEW: Generate daily tasks immediately after project creation
+            try:
+                generate_daily_tasks_for_project(project.id, working_saturdays)
+                print(f"\u2714 Generated daily tasks for project {project.id}")
+            except Exception as e:
+                print(f"Warning: Could not generate daily tasks: {e}")            
+            log_activity(f"Created job: {project.name}")
+            
+            return jsonify({'success': True, 'id': project.id}), 201
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error creating project: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 400
+    
+    # GET - Return list of all projects
+    projects = Project.query.order_by(Project.created_at.desc()).all()
+    return jsonify([{
+        'id': p.id,
+        'name': p.name,
+        'description': p.description,
+        'status': p.status,
+        'progress': p.progress,
+        'start_date': p.start_date.isoformat() if p.start_date else None,
+        'end_date': p.end_date.isoformat() if p.end_date else None
+    } for p in projects])
+
+
+
+@app.route('/api/projects/<int:project_id>/details', methods=['GET'])
+@login_required
+def project_details(project_id):
+    project = Project.query.get_or_404(project_id)
+    stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+    tasks = Task.query.filter_by(project_id=project_id).all()
+    schedule_history = ScheduleHistory.query.filter_by(project_id=project_id).order_by(ScheduleHistory.rescheduled_at.desc()).all()
+    members = ProjectMember.query.filter_by(project_id=project_id).all()
+    
+    # Parse working Saturdays
+    try:
+        if project.working_saturdays:
+            working_saturdays = json.loads(project.working_saturdays)
+        else:
+            working_saturdays = []
+    except:
+        working_saturdays = []
+    
+    # Calculate task stats
+    task_stats = {
+        'pending': sum(1 for t in tasks if t.status == 'pending'),
+        'in-progress': sum(1 for t in tasks if t.status == 'in-progress'),
+        'completed': sum(1 for t in tasks if t.status == 'completed')
+    }
+    
+    # Calculate stage completion
+    completed_stages = sum(1 for s in stages if s.status == 'completed')
+    
+    return jsonify({
+        'id': project.id,
+        'name': project.name,
+        'description': project.description,
+        'status': project.status,
+        'progress': project.progress,
+        'start_date': project.start_date.isoformat() if project.start_date else None,
+        'end_date': project.end_date.isoformat() if project.end_date else None,
+        'saturdayWorkingDays': working_saturdays,
+        'stages': [{
+            'id': s.id,
+            'name': s.name,
+            'order': s.order,
+            'duration_days': s.duration_days,
+            'status': s.status,
+            'progress': s.progress,
+            'start_date': s.start_date.isoformat() if s.start_date else None,
+            'end_date': s.end_date.isoformat() if s.end_date else None
+        } for s in stages],
+        'members': [{
+            'id': User.query.get(m.user_id).id,
+            'username': User.query.get(m.user_id).username,
+            'email': User.query.get(m.user_id).email
+        } for m in members],
+        'task_stats': task_stats,
+        'stage_completion': {
+            'completed': completed_stages,
+            'total': len(stages)
+        },
+        'schedule_history': [{
+            'original_date': h.original_date.isoformat() if h.original_date else None,
+            'new_date': h.new_date.isoformat() if h.new_date else None,
+            'reason': h.reason,
+            'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+            'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M')
+        } for h in schedule_history]
+    })
+
+@app.route('/api/tasks', methods=['GET', 'POST'])
+@login_required
+def tasks():
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        try:
+            task = Task(
+                title=data['title'],
+                description=data.get('description', ''),
+                project_id=data.get('project_id'),
+                assigned_to=data.get('assigned_to'),
+                priority=data.get('priority', 'medium'),
+                deadline=datetime.strptime(data['deadline'], '%Y-%m-%d').date() if data.get('deadline') else None
+            )
+            db.session.add(task)
+            db.session.commit()
+            
+            log_activity(f"Created task: {task.title}")
+            
+            # Notify assigned user
+            if task.assigned_to:
+                create_notification(task.assigned_to, f"New task assigned: {task.title}")
+            
+            return jsonify({'success': True, 'id': task.id}), 201
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 400
+    
+    # GET
+    tasks = Task.query.order_by(Task.created_at.desc()).all()
+    return jsonify([{
+        'id': t.id,
+        'title': t.title,
+        'description': t.description,
+        'project': Project.query.get(t.project_id).name if t.project_id else None,
+        'assigned_to': User.query.get(t.assigned_to).username if t.assigned_to else None,
+        'priority': t.priority,
+        'status': t.status,
+        'deadline': t.deadline.isoformat() if t.deadline else None
+    } for t in tasks])
+
+@app.route('/api/tasks/<int:task_id>/status', methods=['PUT'])
+@login_required
+def update_task_status(task_id):
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json()
+    
+    task.status = data['status']
+    if data['status'] == 'completed':
+        task.completed_at = datetime.utcnow()
+    
+    db.session.commit()
+    log_activity(f"Updated task status: {task.title} to {task.status}")
+    
+    return jsonify({'success': True})
+
+@app.route('/api/employees', methods=['GET'])
+@login_required
+def employees():
+    users = User.query.all()
+    return jsonify([{
+        'id': u.id,
+        'username': u.username,
+        'email': u.email,
+        'role': u.role
+    } for u in users])
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def notifications():
+    user = get_current_user()
+    notifications = Notification.query.filter_by(user_id=user.id).order_by(Notification.created_at.desc()).limit(10).all()
+    
+    return jsonify([{
+        'id': n.id,
+        'message': n.message,
+        'is_read': n.is_read,
+        'created_at': n.created_at.strftime('%Y-%m-%d %H:%M')
+    } for n in notifications])
+
+@app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
+@login_required
+def mark_notification_read(notification_id):
+    notification = Notification.query.get_or_404(notification_id)
+    notification.is_read = True
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/activity-logs', methods=['GET'])
+@login_required
+def activity_logs():
+    logs = ActivityLog.query.order_by(ActivityLog.timestamp.desc()).limit(10).all()
+    
+    return jsonify([{
+        'user': User.query.get(l.user_id).username,
+        'action': l.action,
+        'timestamp': l.timestamp.strftime('%Y-%m-%d %H:%M')
+    } for l in logs])
+
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>', methods=['PUT'])
+@login_required
+def update_stage_status(project_id, stage_id):
+    stage = ProjectStage.query.get_or_404(stage_id)
+    data = request.get_json()
+    
+    old_status = stage.status
+    stage.status = data['status']
+    
+    # Update progress percentage
+    if stage.status == 'in-progress':
+        stage.progress = 50
+    elif stage.status == 'completed':
+        stage.progress = 100
+    else:
+        stage.progress = 0
+    
+    db.session.commit()
+    
+    # Update project progress
+    update_project_progress(project_id)
+    
+    log_activity(f"Updated stage '{stage.name}' status from {old_status} to {stage.status}")
+    
+    return jsonify({'success': True})
+
+def update_project_progress(project_id):
+    """Calculate and update project progress based on stages"""
+    stages = ProjectStage.query.filter_by(project_id=project_id).all()
+    
+    if not stages:
+        return
+    
+    total_progress = sum(stage.progress for stage in stages)
+    average_progress = total_progress // len(stages) if stages else 0
+    
+    project = Project.query.get(project_id)
+    project.progress = average_progress
+    
+    # Auto-update project status
+    completed_stages = sum(1 for s in stages if s.status == 'completed')
+    if completed_stages == len(stages):
+        project.status = 'completed'
+    elif any(s.status == 'in-progress' for s in stages):
+        project.status = 'active'
+    
+    db.session.commit()
+
+@app.route('/api/projects/<int:project_id>/reschedule', methods=['POST'])
+@login_required
+def reschedule_stage(project_id):
+    data = request.get_json()
+    stage_id = data.get('stage_id')
+    days = data.get('days', 0)
+    reason = data.get('reason', '')
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        project = Project.query.get_or_404(project_id)
+        stage = ProjectStage.query.get_or_404(stage_id)
+        
+        # ✅ INCREMENT GLOBAL RESCHEDULE COUNTER
+        project.current_reschedule_number += 1
+        global_reschedule_num = project.current_reschedule_number
+        
+        print(f"\n📋 RESCHEDULE REQUEST:")
+        print(f"   Stage: {stage.name}")
+        print(f"   Global Reschedule Number: {global_reschedule_num}")
+        
+        # Store EXACT original dates BEFORE any modifications
+        original_start_date = stage.start_date
+        original_end_date = stage.end_date
+        
+        print(f"   Original dates: {original_start_date} to {original_end_date}")
+        print(f"   Shift: {days} days")
+        
+        # Calculate which dates will become HOLD
+        if days != 0 and original_start_date and original_end_date:
+            # Get all original working dates
+            original_dates = set()
+            current = original_start_date
+            while current <= original_end_date:
+                if is_working_day(current, False, working_saturdays):
+                    original_dates.add(current)
+                current += timedelta(days=1)
+            
+            # Calculate new dates
+            new_start = add_working_days(original_start_date, days, False, working_saturdays)
+            new_end = add_working_days(original_end_date, days, False, working_saturdays)
+            
+            new_dates = set()
+            current = new_start
+            while current <= new_end:
+                if is_working_day(current, False, working_saturdays):
+                    new_dates.add(current)
+                current += timedelta(days=1)
+            
+            # HOLD dates = dates that were in original but NOT in new schedule
+            hold_dates = original_dates - new_dates
+            
+            print(f"   New dates: {new_start} to {new_end}")
+            print(f"   HOLD dates: {sorted(hold_dates)}")
+            
+            # Store each HOLD date in database
+            for hold_date in hold_dates:
+                hold_record = HoldDate(
+                    project_id=project_id,
+                    stage_id=stage_id,
+                    hold_date=hold_date,
+                    reason=reason if reason else f"Stage rescheduled by {abs(days)} day(s)",
+                    created_by=get_current_user().id
+                )
+                db.session.add(hold_record)
+                print(f"   ✅ Stored HOLD: {hold_date}")
+        
+        # Update stage dates
+        if days != 0:
+            if stage.start_date:
+                stage.start_date = add_working_days(stage.start_date, days, False, working_saturdays)
+            if stage.end_date:
+                stage.end_date = add_working_days(stage.end_date, days, False, working_saturdays)
+            
+            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
+            
+            # Move subsequent stages
+            subsequent_stages = ProjectStage.query.filter(
+                ProjectStage.project_id == project_id,
+                ProjectStage.order > stage.order,
+                ProjectStage.status != 'completed'
+            ).order_by(ProjectStage.order).all()
+            
+            for subsequent_stage in subsequent_stages:
+                if subsequent_stage.start_date:
+                    subsequent_stage.start_date = add_working_days(
+                        subsequent_stage.start_date, days, False, working_saturdays
+                    )
+                if subsequent_stage.end_date:
+                    subsequent_stage.end_date = add_working_days(
+                        subsequent_stage.end_date, days, False, working_saturdays
+                    )
+                print(f"   ↪️ Shifted subsequent stage: {subsequent_stage.name}")
+        
+        # ✅ CREATE HISTORY WITH GLOBAL RESCHEDULE NUMBER
+        history = ScheduleHistory(
+            project_id=project_id,
+            stage_id=stage_id,
+            reschedule_number=global_reschedule_num,  # ✅ Use global counter
+            original_date=original_start_date,
+            new_date=stage.start_date,
+            reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days)} day(s)",
+            rescheduled_by=get_current_user().id
+        )
+        db.session.add(history)
+        
+        print(f"   ✅ Created ScheduleHistory record: Reschedule #{global_reschedule_num}")
+        print(f"      Original: {original_start_date} → New: {stage.start_date}")
+        
+        # Update project end date
+        all_stages = ProjectStage.query.filter_by(project_id=project_id).all()
+        if all_stages:
+            latest_end = max(s.end_date for s in all_stages if s.end_date)
+            project.end_date = latest_end
+            project.working_saturdays = json.dumps(list(working_saturdays))
+        
+        # Regenerate daily tasks
+        generate_daily_tasks_for_project(project_id, working_saturdays)
+        
+        # ✅ COMMIT EVERYTHING
+        db.session.commit()
+        
+        # ✅ VERIFY the record was created
+        verification = ScheduleHistory.query.filter_by(
+            project_id=project_id,
+            stage_id=stage_id,
+            reschedule_number=global_reschedule_num
+        ).first()
+        
+        if verification:
+            print(f"   ✅ VERIFIED: ScheduleHistory record #{verification.id} exists in database")
+            print(f"      Reschedule number: {verification.reschedule_number}")
+        else:
+            print(f"   ⚠️ WARNING: ScheduleHistory record not found after commit!")
+        
+        log_activity(f"Rescheduled stage '{stage.name}' (Global Reschedule #{global_reschedule_num})")
+        
+        return jsonify({
+            'success': True,
+            'reschedule_number': global_reschedule_num,
+            'new_start': stage.start_date.isoformat() if stage.start_date else None,
+            'new_end': stage.end_date.isoformat() if stage.end_date else None
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/projects/<int:project_id>', methods=['DELETE'])
+@login_required
+def delete_project(project_id):
+    try:
+        project = Project.query.get_or_404(project_id)
+        project_name = project.name
+        
+        # Delete associated records first (foreign key constraints)
+        ProjectStage.query.filter_by(project_id=project_id).delete()
+        ProjectMember.query.filter_by(project_id=project_id).delete()
+        Task.query.filter_by(project_id=project_id).delete()
+        ScheduleHistory.query.filter_by(project_id=project_id).delete()
+        
+        # Delete the project
+        db.session.delete(project)
+        db.session.commit()
+        
+        log_activity(f"Deleted job: {project_name}")
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+    
+@app.route('/api/projects/<int:project_id>/update-saturdays', methods=['POST'])
+@login_required
+def update_saturdays(project_id):
+    """Update working Saturdays and recalculate all stage dates"""
+    data = request.get_json()
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        project = Project.query.get_or_404(project_id)
+        
+        # Save working Saturdays to database
+        project.working_saturdays = json.dumps(list(working_saturdays))
+        
+        # Get all stages ordered by their order field
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Recalculate all stage dates from project start
+        current_date = get_next_working_day(project.start_date, False, working_saturdays)
+        
+        for stage in stages:
+            # Set start date
+            stage.start_date = current_date
+            
+            # Calculate end date based on duration
+            if stage.duration_days > 0:
+                stage.end_date = add_working_days(current_date, stage.duration_days - 1, False, working_saturdays)
+            else:
+                stage.end_date = current_date
+            
+            # Next stage starts the next working day after THIS stage ends
+            current_date = add_working_days(stage.end_date, 1, False, working_saturdays)
+        
+        # Update project end date
+        if stages:
+            latest_end = max(s.end_date for s in stages if s.end_date)
+            project.end_date = latest_end
+        
+        db.session.commit()
+        
+        log_activity(f"Updated working Saturdays for project '{project.name}'")
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating Saturdays: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+    
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks', methods=['GET'])
+@login_required
+def get_stage_daily_tasks(project_id, stage_id):
+    """Get all daily tasks for a stage"""
+    try:
+        tasks = StageDailyTask.query.filter_by(
+            project_id=project_id,
+            stage_id=stage_id
+        ).order_by(StageDailyTask.day_number).all()
+        
+        return jsonify([{
+            'id': t.id,
+            'day_number': t.day_number,
+            'scheduled_date': t.scheduled_date.isoformat(),
+            'original_date': t.original_date.isoformat() if t.original_date else None,
+            'status': t.status,
+            'completed_at': t.completed_at.strftime('%Y-%m-%d %H:%M') if t.completed_at else None,
+            'rescheduled_reason': t.rescheduled_reason,
+            'is_rescheduled': t.original_date is not None
+        } for t in tasks])
+    except Exception as e:
+        print(f"Error loading daily tasks: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/complete', methods=['PUT'])
+@login_required
+def complete_daily_task(project_id, stage_id, task_id):
+    """Mark a daily task as completed"""
+    task = StageDailyTask.query.get_or_404(task_id)
+    task.status = 'completed'
+    task.completed_at = datetime.utcnow()
+    db.session.commit()
+    
+    log_activity(f"Completed day {task.day_number} of stage")
+    return jsonify({'success': True})
+
+
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/reschedule', methods=['POST'])
+@login_required
+def reschedule_daily_task(project_id, stage_id, task_id):
+    data = request.get_json()
+    days_to_shift = data.get('days', 0)
+    reason = data.get('reason', '')
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        task = StageDailyTask.query.get_or_404(task_id)
+        stage = ProjectStage.query.get_or_404(stage_id)
+        project = Project.query.get_or_404(project_id)
+        
+        # PREVENT RESCHEDULING COMPLETED TASKS
+        if task.status == 'completed':
+            return jsonify({'error': 'Cannot reschedule a completed task'}), 400
+        
+        # ✅ INCREMENT GLOBAL RESCHEDULE COUNTER
+        project.current_reschedule_number += 1
+        global_reschedule_num = project.current_reschedule_number
+        
+        # ✅ INCREMENT TASK-LEVEL RESCHEDULE COUNT (for tracking)
+        task.reschedule_count = (task.reschedule_count or 0) + 1
+        
+        # Store EXACT original date BEFORE any changes
+        original_date = task.original_date if task.original_date else task.scheduled_date
+        
+        if not task.original_date:
+            task.original_date = task.scheduled_date
+        
+        # Calculate new date
+        new_date = add_working_days(task.scheduled_date, days_to_shift, False, working_saturdays)
+        
+        task.scheduled_date = new_date
+        task.status = 'rescheduled'
+        task.rescheduled_reason = reason
+        
+        print(f"\n📋 DAILY TASK RESCHEDULE:")
+        print(f"   Stage: {stage.name}, Day {task.day_number}")
+        print(f"   Global Reschedule Number: {global_reschedule_num}")
+        print(f"   Original: {original_date} → New: {new_date}")
+        print(f"   Task Reschedule count: {task.reschedule_count}")
+        
+        # ✅ CREATE DAILY TASK HISTORY WITH GLOBAL NUMBER
+        task_history = DailyTaskRescheduleHistory(
+            project_id=project_id,
+            stage_id=stage_id,
+            task_id=task.id,
+            day_number=task.day_number,
+            reschedule_number=global_reschedule_num,  # ✅ Use global counter
+            original_date=original_date,
+            new_date=new_date,
+            days_shifted=abs(days_to_shift),
+            reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days_to_shift)} day(s)",
+            rescheduled_by=get_current_user().id
+        )
+        db.session.add(task_history)
+        
+        # ✅ ALSO CREATE STAGE-LEVEL HISTORY (for Excel export)
+        stage_history = ScheduleHistory(
+            project_id=project_id,
+            stage_id=stage_id,
+            reschedule_number=global_reschedule_num,  # ✅ Use same global number
+            original_date=stage.start_date,
+            new_date=new_date,
+            reason=f"Daily task reschedule: Day {task.day_number}",
+            rescheduled_by=get_current_user().id
+        )
+        db.session.add(stage_history)
+        
+        print(f"   ✅ Created histories with global reschedule #{global_reschedule_num}")
+        
+        # UPDATE SUBSEQUENT NON-COMPLETED TASKS
+        all_stage_tasks = StageDailyTask.query.filter_by(
+            stage_id=stage_id
+        ).filter(
+            StageDailyTask.day_number > task.day_number,
+            StageDailyTask.status != 'completed'
+        ).order_by(StageDailyTask.day_number).all()
+        
+        for subsequent_task in all_stage_tasks:
+            subsequent_task.reschedule_count = (subsequent_task.reschedule_count or 0) + 1
+            
+            subsequent_original = subsequent_task.original_date if subsequent_task.original_date else subsequent_task.scheduled_date
+            
+            if not subsequent_task.original_date:
+                subsequent_task.original_date = subsequent_task.scheduled_date
+            
+            subsequent_new_date = add_working_days(
+                subsequent_task.scheduled_date, 
+                days_to_shift, 
+                False, 
+                working_saturdays
+            )
+            
+            subsequent_task.scheduled_date = subsequent_new_date
+            subsequent_task.status = 'rescheduled'
+            if not subsequent_task.rescheduled_reason:
+                subsequent_task.rescheduled_reason = f"Auto-shifted due to Day {task.day_number} reschedule"
+            
+            subsequent_history = DailyTaskRescheduleHistory(
+                project_id=project_id,
+                stage_id=stage_id,
+                task_id=subsequent_task.id,
+                day_number=subsequent_task.day_number,
+                reschedule_number=global_reschedule_num,  # ✅ Same global number
+                original_date=subsequent_original,
+                new_date=subsequent_new_date,
+                days_shifted=abs(days_to_shift),
+                reason=f"Auto-reschedule due to Day {task.day_number}",
+                rescheduled_by=get_current_user().id
+            )
+            db.session.add(subsequent_history)
+        
+        # Update stage dates based on actual task dates
+        all_tasks_in_stage = StageDailyTask.query.filter_by(stage_id=stage_id).order_by(
+            StageDailyTask.day_number
+        ).all()
+        
+        if all_tasks_in_stage:
+            stage.start_date = min(t.scheduled_date for t in all_tasks_in_stage)
+            stage.end_date = max(t.scheduled_date for t in all_tasks_in_stage)
+            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
+        
+        # ✅ COMMIT
+        db.session.commit()
+        
+        # ✅ VERIFY
+        verification = DailyTaskRescheduleHistory.query.filter_by(
+            project_id=project_id,
+            task_id=task_id,
+            reschedule_number=global_reschedule_num
+        ).first()
+        
+        if verification:
+            print(f"   ✅ VERIFIED: Daily task history record exists")
+        else:
+            print(f"   ⚠️ WARNING: History record not found!")
+        
+        log_activity(f"Rescheduled day {task.day_number} of stage '{stage.name}' (Global Reschedule #{global_reschedule_num})")
+        
+        return jsonify({
+            'success': True,
+            'new_date': new_date.isoformat(),
+            'reschedule_count': task.reschedule_count,
+            'global_reschedule_number': global_reschedule_num
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/projects/<int:project_id>/generate-daily-tasks', methods=['POST'])
+@login_required
+def generate_daily_tasks(project_id):
+    """Generate daily tasks for all stages in a project"""
+    try:
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        
+        for stage in stages:
+            # Delete existing daily tasks for this stage
+            StageDailyTask.query.filter_by(stage_id=stage.id).delete()
+            
+            if not stage.start_date or not stage.end_date:
+                continue
+            
+            # Generate daily tasks
+            current_date = stage.start_date
+            day_number = 1
+            
+            while current_date <= stage.end_date:
+                # Only create task for working days
+                if is_working_day(current_date, False, working_saturdays):
+                    daily_task = StageDailyTask(
+                        stage_id=stage.id,
+                        project_id=project_id,
+                        day_number=day_number,
+                        scheduled_date=current_date,
+                        status='pending'
+                    )
+                    db.session.add(daily_task)
+                    day_number += 1
+                
+                current_date = current_date + timedelta(days=1)
+        
+        db.session.commit()
+        log_activity(f"Generated daily tasks for project '{project.name}'")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/projects/<int:project_id>/reschedule-history', methods=['GET'])
+@login_required
+def get_reschedule_history(project_id):
+    """Get reschedule history for a project"""
+    history = ScheduleHistory.query.filter_by(project_id=project_id).order_by(
+        ScheduleHistory.rescheduled_at.desc()
+    ).all()
+    
+    return jsonify([{
+        'stage_id': h.stage_id,
+        'stage_name': ProjectStage.query.get(h.stage_id).name if h.stage_id else 'Unknown',
+        'original_date': h.original_date.isoformat() if h.original_date else None,
+        'new_date': h.new_date.isoformat() if h.new_date else None,
+        'days_shifted': (h.new_date - h.original_date).days if h.new_date and h.original_date else 0,
+        'direction': 'forward' if (h.new_date and h.original_date and h.new_date > h.original_date) else 'backward',
+        'reason': h.reason,
+        'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+        'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M')
+    } for h in history])
+
+@app.route('/api/projects/<int:project_id>/complete-reschedule-history', methods=['GET'])
+@login_required
+def get_complete_reschedule_history(project_id):
+    """Get ALL reschedule history - both stage-level and daily task reschedules"""
+    
+    # Force a database commit to ensure all records are visible
+    db.session.commit()
+    
+    # Stage-level reschedules
+    stage_history = ScheduleHistory.query.filter_by(
+        project_id=project_id
+    ).order_by(ScheduleHistory.rescheduled_at.desc()).all()
+    
+    # Daily task reschedules
+    task_history = DailyTaskRescheduleHistory.query.filter_by(
+        project_id=project_id
+    ).order_by(DailyTaskRescheduleHistory.rescheduled_at.desc()).all()
+    
+    print(f"\n=== Complete Reschedule History for Project {project_id} ===")
+    print(f"Stage-level reschedules: {len(stage_history)}")
+    print(f"Daily task reschedules: {len(task_history)}")
+    
+    combined = []
+    
+    # Add stage reschedules
+    for h in stage_history:
+        stage = ProjectStage.query.get(h.stage_id) if h.stage_id else None
+        record = {
+            'type': 'stage',
+            'stage_id': h.stage_id,
+            'stage_name': stage.name if stage else 'Unknown',
+            'day_number': None,
+            'original_date': h.original_date.isoformat() if h.original_date else None,
+            'new_date': h.new_date.isoformat() if h.new_date else None,
+            'days_shifted': abs((h.new_date - h.original_date).days) if h.new_date and h.original_date else 0,
+            'direction': 'forward' if (h.new_date and h.original_date and h.new_date > h.original_date) else 'backward',
+            'reason': h.reason or 'No reason provided',
+            'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+            'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M') if h.rescheduled_at else None
+        }
+        combined.append(record)
+        print(f"  âœ“ Stage: {record['stage_name']}, {record['original_date']} â†’ {record['new_date']}")
+    
+    # Add daily task reschedules
+    for h in task_history:
+        stage = ProjectStage.query.get(h.stage_id) if h.stage_id else None
+        record = {
+            'type': 'daily_task',
+            'stage_id': h.stage_id,
+            'stage_name': stage.name if stage else 'Unknown',
+            'day_number': h.day_number,
+            'original_date': h.original_date.isoformat() if h.original_date else None,
+            'new_date': h.new_date.isoformat() if h.new_date else None,
+            'days_shifted': abs(h.days_shifted),
+            'direction': 'forward' if h.days_shifted > 0 else 'backward',
+            'reason': h.reason or 'No reason provided',
+            'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+            'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M') if h.rescheduled_at else None
+        }
+        combined.append(record)
+        print(f"  âœ“ Daily Task: {record['stage_name']} Day {record['day_number']}, {record['original_date']} â†’ {record['new_date']}")
+    
+    # Sort by reschedule time (most recent first)
+    combined.sort(key=lambda x: x['rescheduled_at'] if x['rescheduled_at'] else '', reverse=True)
+    
+    print(f"Total records returned: {len(combined)}")
+    print("=" * 60 + "\n")
+    
+    return jsonify(combined)
+
+
+@app.route('/api/projects/<int:project_id>/export-data', methods=['GET'])
+@login_required
+def get_project_export_data(project_id):
+    """Get complete project data optimized for Excel export"""
+    try:
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Get working saturdays
+        try:
+            working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        except:
+            working_saturdays = set()
+        
+        # Get all daily tasks for all stages
+        stage_data = []
+        for stage in stages:
+            daily_tasks = StageDailyTask.query.filter_by(
+                stage_id=stage.id
+            ).order_by(StageDailyTask.day_number).all()
+            
+            stage_data.append({
+                'id': stage.id,
+                'name': stage.name,
+                'order': stage.order,
+                'duration_days': stage.duration_days,
+                'status': stage.status,
+                'start_date': stage.start_date.isoformat() if stage.start_date else None,
+                'end_date': stage.end_date.isoformat() if stage.end_date else None,
+                'daily_tasks': [{
+                    'id': t.id,
+                    'day_number': t.day_number,
+                    'scheduled_date': t.scheduled_date.isoformat(),
+                    'original_date': t.original_date.isoformat() if t.original_date else None,
+                    'status': t.status,
+                    'is_rescheduled': t.original_date is not None,
+                    'rescheduled_reason': t.rescheduled_reason
+                } for t in daily_tasks]
+            })
+        
+        # Get complete reschedule history
+        stage_history = ScheduleHistory.query.filter_by(project_id=project_id).all()
+        task_history = DailyTaskRescheduleHistory.query.filter_by(project_id=project_id).all()
+        
+        return jsonify({
+            'project': {
+                'id': project.id,
+                'name': project.name,
+                'start_date': project.start_date.isoformat() if project.start_date else None,
+                'end_date': project.end_date.isoformat() if project.end_date else None,
+                'working_saturdays': list(working_saturdays)
+            },
+            'stages': stage_data,
+            'reschedule_history': {
+                'stages': [{
+                    'stage_id': h.stage_id,
+                    'stage_name': ProjectStage.query.get(h.stage_id).name if h.stage_id else 'Unknown',
+                    'original_date': h.original_date.isoformat() if h.original_date else None,
+                    'new_date': h.new_date.isoformat() if h.new_date else None,
+                    'reason': h.reason,
+                    'rescheduled_at': h.rescheduled_at.isoformat() if h.rescheduled_at else None
+                } for h in stage_history],
+                'daily_tasks': [{
+                    'stage_id': h.stage_id,
+                    'stage_name': ProjectStage.query.get(h.stage_id).name if h.stage_id else 'Unknown',
+                    'day_number': h.day_number,
+                    'original_date': h.original_date.isoformat() if h.original_date else None,
+                    'new_date': h.new_date.isoformat() if h.new_date else None,
+                    'days_shifted': h.days_shifted,
+                    'reason': h.reason,
+                    'rescheduled_at': h.rescheduled_at.isoformat() if h.rescheduled_at else None
+                } for h in task_history]
+            }
+        })
+    except Exception as e:
+        print(f"Error in export-data endpoint: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/projects/<int:project_id>/debug-reschedules', methods=['GET'])
+@login_required
+def debug_reschedules(project_id):
+    """Debug endpoint to see all reschedule history"""
+    
+    # Get all stage-level reschedules
+    stage_reschedules = ScheduleHistory.query.filter_by(
+        project_id=project_id
+    ).order_by(ScheduleHistory.stage_id, ScheduleHistory.reschedule_number).all()
+    
+    # Get all daily task reschedules
+    task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+        project_id=project_id
+    ).order_by(DailyTaskRescheduleHistory.stage_id, DailyTaskRescheduleHistory.day_number).all()
+    
+    result = {
+        'stage_reschedules': [{
+            'id': r.id,
+            'stage_id': r.stage_id,
+            'stage_name': ProjectStage.query.get(r.stage_id).name if r.stage_id else 'Unknown',
+            'reschedule_number': r.reschedule_number,
+            'original_date': r.original_date.isoformat() if r.original_date else None,
+            'new_date': r.new_date.isoformat() if r.new_date else None,
+            'reason': r.reason,
+            'rescheduled_at': r.rescheduled_at.isoformat() if r.rescheduled_at else None
+        } for r in stage_reschedules],
+        'task_reschedules': [{
+            'id': r.id,
+            'stage_id': r.stage_id,
+            'stage_name': ProjectStage.query.get(r.stage_id).name if r.stage_id else 'Unknown',
+            'day_number': r.day_number,
+            'reschedule_number': r.reschedule_number if hasattr(r, 'reschedule_number') else None,
+            'original_date': r.original_date.isoformat() if r.original_date else None,
+            'new_date': r.new_date.isoformat() if r.new_date else None,
+            'rescheduled_at': r.rescheduled_at.isoformat() if r.rescheduled_at else None
+        } for r in task_reschedules],
+        'total_stage_reschedules': len(stage_reschedules),
+        'total_task_reschedules': len(task_reschedules)
+    }
+    
+    return jsonify(result)
+
+
+
+@app.route('/api/projects/<int:project_id>/export-excel', methods=['GET'])
+@login_required
+def export_project_to_excel(project_id):
+    """Generate Excel with comprehensive debugging"""
+    try:
+        print(f"\n{'='*80}")
+        print(f"📋 STARTING EXCEL EXPORT FOR PROJECT {project_id}")
+        print(f"{'='*80}\n")
+        
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        print(f"Project: {project.name}")
+        print(f"Total stages: {len(stages)}")
+        for s in stages:
+            print(f"   - Stage {s.id}: {s.name} ({s.start_date} to {s.end_date})")
+        
+        # Get working saturdays
+        try:
+            working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        except:
+            working_saturdays = set()
+        
+        print(f"\nWorking Saturdays: {working_saturdays}")
+        
+        # ==========================================
+        # ✅ FIXED: Build reschedule map from ACTUAL rescheduled dates
+        # ==========================================
+        print(f"\n{'='*80}")
+        print(f"📜 LOADING RESCHEDULE HISTORY")
+        print(f"{'='*80}\n")
+        
+        # Get ALL reschedules ordered by time
+        daily_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+            project_id=project_id
+        ).order_by(DailyTaskRescheduleHistory.rescheduled_at).all()
+        
+        stage_reschedules = ScheduleHistory.query.filter_by(
+            project_id=project_id
+        ).order_by(ScheduleHistory.rescheduled_at).all()
+        
+        print(f"Daily task reschedules: {len(daily_reschedules)}")
+        print(f"Stage-level reschedules: {len(stage_reschedules)}\n")
+        
+        # Collect all unique reschedule numbers
+        all_reschedule_numbers = set()
+        
+        for r in daily_reschedules:
+            if hasattr(r, 'reschedule_number') and r.reschedule_number:
+                all_reschedule_numbers.add(r.reschedule_number)
+        
+        for r in stage_reschedules:
+            if hasattr(r, 'reschedule_number') and r.reschedule_number:
+                all_reschedule_numbers.add(r.reschedule_number)
+        
+        # Sort them to get sequential order
+        sorted_reschedule_nums = sorted(all_reschedule_numbers)
+        
+        print(f"Found reschedule numbers: {sorted_reschedule_nums}")
+        
+        # Map global reschedule numbers to Excel rows (1, 2, 3, 4)
+        reschedule_num_map = {actual: idx + 1 for idx, actual in enumerate(sorted_reschedule_nums[:4])}
+        
+        print(f"Mapping: {reschedule_num_map}")
+        print(f"Example: Reschedule #1 → Excel row {reschedule_num_map.get(1, 'N/A')}")
+        print(f"Example: Reschedule #2 → Excel row {reschedule_num_map.get(2, 'N/A')}")
+        
+        # Initialize reschedule map
+        stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        # ✅ FIXED: Process daily task reschedules - show ALL dates where tasks were moved TO
+        print(f"\n📄 Processing daily task reschedules...")
+        for task_reschedule in daily_reschedules:
+            if not hasattr(task_reschedule, 'reschedule_number') or not task_reschedule.reschedule_number:
+                print(f"   ⚠️ Skipping task reschedule without reschedule_number")
+                continue
+            
+            actual_num = task_reschedule.reschedule_number
+            if actual_num not in reschedule_num_map:
+                print(f"   ⚠️ Reschedule #{actual_num} not in map (only showing first 4)")
+                continue
+            
+            mapped_num = reschedule_num_map[actual_num]
+            
+            stage = ProjectStage.query.get(task_reschedule.stage_id)
+            if not stage:
+                continue
+            
+            parts = stage.name.split('-')
+            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            # Use the NEW date (where it was rescheduled TO)
+            date_str = task_reschedule.new_date.strftime('%Y-%m-%d')
+            
+            if date_str not in stage_reschedule_map[mapped_num]:
+                stage_reschedule_map[mapped_num][date_str] = []
+            
+            # ✅ ALWAYS append - don't check for duplicates yet
+            stage_reschedule_map[mapped_num][date_str].append(stage_abbr)
+            
+            print(f"   ✅ Mapped: Reschedule #{actual_num} → Row {mapped_num}, Date {date_str}, Stage {stage_abbr}")
+        
+        # Process stage-level reschedules (fallback)
+        print(f"\n📄 Processing stage-level reschedules...")
+        for reschedule_record in stage_reschedules:
+            if not hasattr(reschedule_record, 'reschedule_number') or not reschedule_record.reschedule_number:
+                continue
+            
+            actual_num = reschedule_record.reschedule_number
+            if actual_num not in reschedule_num_map:
+                continue
+            
+            mapped_num = reschedule_num_map[actual_num]
+            
+            stage = ProjectStage.query.get(reschedule_record.stage_id)
+            if not stage or not reschedule_record.new_date:
+                continue
+            
+            parts = stage.name.split('-')
+            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            # Calculate all working days in the rescheduled range
+            new_start = reschedule_record.new_date
+            new_end = add_working_days(new_start, stage.duration_days - 1, False, working_saturdays)
+            
+            current_date = new_start
+            while current_date <= new_end:
+                if is_working_day(current_date, False, working_saturdays):
+                    date_str = current_date.strftime('%Y-%m-%d')
+                    if date_str not in stage_reschedule_map[mapped_num]:
+                        stage_reschedule_map[mapped_num][date_str] = []
+                    # ✅ ALWAYS append
+                    stage_reschedule_map[mapped_num][date_str].append(stage_abbr)
+                current_date += timedelta(days=1)
+        
+        # ✅ Remove duplicates AFTER all entries are added
+        print(f"\n🧹 Cleaning up duplicates...")
+        for row_num in range(1, 5):
+            for date_str in stage_reschedule_map[row_num]:
+                # Keep unique stage abbreviations
+                stage_reschedule_map[row_num][date_str] = list(set(stage_reschedule_map[row_num][date_str]))
+        
+        # Print verification summary
+        print(f"\n{'='*60}")
+        print(f"RESCHEDULE MAP VERIFICATION")
+        print(f"{'='*60}")
+        for row_num in range(1, 5):
+            total_dates = len(stage_reschedule_map[row_num])
+            total_stages = sum(len(stages) for stages in stage_reschedule_map[row_num].values())
+            print(f"\nReschedule Row {row_num}:")
+            print(f"   Total dates: {total_dates}")
+            print(f"   Total stage entries: {total_stages}")
+            if total_dates > 0:
+                sample_dates = sorted(stage_reschedule_map[row_num].keys())[:5]
+                for sample_date in sample_dates:
+                    stage_list = stage_reschedule_map[row_num][sample_date]
+                    print(f"     {sample_date}: {stage_list}")
+        print(f"{'='*60}\n")
+        
+        # Create workbook
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Schedule_Tracker"
+        
+        # Define styles
+        orange_header = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+        orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        cyan_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        light_gray = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        medium_border = Border(
+            left=Side(style='medium'),
+            right=Side(style='medium'),
+            top=Side(style='medium'),
+            bottom=Side(style='medium')
+        )
+        
+        # ==========================================
+        # STAGE NAMES HEADER ROW
+        # ==========================================
+        current_row = 1
+        header_col = 1
+        
+        for stage in stages:
+            parts = stage.name.split('-')
+            stage_main = '-'.join(parts[:-1]).strip() if len(parts) > 1 else stage.name
+            stage_code = parts[-1].strip() if len(parts) > 1 else ''
+            
+            cell = ws.cell(current_row, header_col)
+            cell.value = stage_main
+            cell.font = Font(size=9, bold=False)
+            cell.alignment = Alignment(vertical='center', horizontal='left', wrap_text=True)
+            cell.border = thin_border
+            header_col += 1
+            
+            cell = ws.cell(current_row, header_col)
+            cell.value = stage_code
+            cell.font = Font(size=9, bold=False)
+            cell.alignment = Alignment(vertical='center', horizontal='left')
+            cell.border = thin_border
+            header_col += 1
+        
+        ws.row_dimensions[current_row].height = 25
+        current_row += 2
+        
+        # Generate date range
+        project_start = project.start_date
+        project_end = project.end_date
+        all_dates = []
+        current_date = project_start
+        while current_date <= project_end:
+            all_dates.append(current_date)
+            current_date += timedelta(days=1)
+        
+        print(f"\n📅 Date range: {project_start} to {project_end} ({len(all_dates)} total days)")
+        
+        # ==========================================
+        # PROJECT NAME AND DATE HEADER ROW
+        # ==========================================
+        ws.cell(current_row, 1, project.name).font = Font(size=12, bold=True)
+        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 1).fill = orange_header
+        ws.cell(current_row, 1).border = medium_border
+        
+        ws.cell(current_row, 2, "Date").font = Font(size=10, bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 2).fill = orange_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        for idx, date in enumerate(all_dates):
+            cell = ws.cell(current_row, idx + 3, date.day)
+            cell.font = Font(size=9, bold=True)
+            cell.alignment = Alignment(vertical='center', horizontal='center')
+            cell.fill = orange_header
+            cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        current_row += 1
+        
+        # ==========================================
+        # MONTH GROUPINGS ROW
+        # ==========================================
+        month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+        
+        ws.cell(current_row, 1, "")
+        ws.cell(current_row, 2, "")
+        
+        last_month = None
+        month_start_col = 3
+        
+        for idx, date in enumerate(all_dates):
+            current_month = date.month
+            col_num = idx + 3
+            
+            if last_month is None:
+                last_month = current_month
+            
+            if last_month != current_month or idx == len(all_dates) - 1:
+                end_col = col_num - 1 if last_month != current_month else col_num
+                
+                if month_start_col <= end_col:
+                    if month_start_col < end_col:
+                        ws.merge_cells(start_row=current_row, start_column=month_start_col,
+                                     end_row=current_row, end_column=end_col)
+                    
+                    display_date = all_dates[idx - 1 if last_month != current_month else idx]
+                    cell = ws.cell(current_row, month_start_col, 
+                                 f"{month_names[display_date.month - 1]}-{str(display_date.day).zfill(2)}")
+                    cell.font = Font(size=9, bold=True)
+                    cell.alignment = Alignment(vertical='center', horizontal='center')
+                    cell.border = thin_border
+                
+                last_month = current_month
+                month_start_col = col_num
+        
+        ws.row_dimensions[current_row].height = 20
+        current_row += 1
+        
+        # Set column widths
+        ws.column_dimensions['A'].width = 25
+        ws.column_dimensions['B'].width = 15
+        for i in range(3, len(all_dates) + 3):
+            ws.column_dimensions[get_column_letter(i)].width = 15
+        
+        # ==========================================
+        # PLANNED ROW
+        # ==========================================
+        print(f"\n📅 Building PLANNED row...")
+        ws.cell(current_row, 1, "").fill = light_gray
+        ws.cell(current_row, 1).border = medium_border
+        
+        ws.cell(current_row, 2, "Planned").font = Font(size=10, bold=False)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='left')
+        ws.cell(current_row, 2).border = thin_border
+        
+        planned_map = {}
+        for stage in stages:
+            if stage.start_date and stage.end_date:
+                parts = stage.name.split('-')
+                stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                
+                current_date = stage.start_date
+                while current_date <= stage.end_date:
+                    if is_working_day(current_date, False, working_saturdays):
+                        date_str = current_date.strftime('%Y-%m-%d')
+                        if date_str not in planned_map:
+                            planned_map[date_str] = []
+                        planned_map[date_str].append(stage_abbr)
+                    current_date += timedelta(days=1)
+        
+        for idx, date in enumerate(all_dates):
+            day_of_week = date.weekday()
+            cell = ws.cell(current_row, idx + 3)
+            date_str = date.strftime('%Y-%m-%d')
+            
+            if day_of_week in [5, 6]:
+                cell.fill = yellow_fill
+            
+            if date_str in planned_map:
+                stage_abbrs = planned_map[date_str]
+                cell.value = ','.join(sorted(set(stage_abbrs)))
+                cell.fill = yellow_fill
+                cell.font = Font(size=7)
+                cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=0)
+            
+            cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 60
+        current_row += 1
+        
+        # ==========================================
+        # ✅ RESCHEDULE ROWS (1-4) - WITH DETAILED LOGGING
+        # ==========================================
+        print(f"\n{'='*80}")
+        print(f"📄 BUILDING RESCHEDULE ROWS IN EXCEL")
+        print(f"{'='*80}\n")
+        
+        for reschedule_num in range(1, 5):
+            print(f"\n🔍 Writing Reschedule-{reschedule_num} row to Excel...")
+            
+            ws.cell(current_row, 1, "").fill = light_gray
+            ws.cell(current_row, 1).border = medium_border
+            
+            ws.cell(current_row, 2, f"Reschedule -{reschedule_num}").font = Font(size=10)
+            ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='left')
+            ws.cell(current_row, 2).border = thin_border
+            
+            reschedule_dates = stage_reschedule_map.get(reschedule_num, {})
+            print(f"   Available dates in map: {len(reschedule_dates)}")
+            
+            cells_filled = 0
+            for idx, date in enumerate(all_dates):
+                day_of_week = date.weekday()
+                cell = ws.cell(current_row, idx + 3)
+                date_str = date.strftime('%Y-%m-%d')
+                
+                # Yellow fill for weekends
+                if day_of_week in [5, 6]:
+                    cell.fill = yellow_fill
+                
+                # Check if this date has rescheduled stages
+                if date_str in reschedule_dates:
+                    stage_abbrs = reschedule_dates[date_str]
+                    cell.value = ','.join(sorted(set(stage_abbrs)))
+                    cell.fill = yellow_fill
+                    cell.font = Font(size=7)
+                    cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=0)
+                    cells_filled += 1
+                
+                cell.border = thin_border
+            
+            print(f"   ✅ Filled {cells_filled} cells in Excel for Reschedule-{reschedule_num}")
+            
+            ws.row_dimensions[current_row].height = 20
+            current_row += 1
+        
+        print(f"\n{'='*80}\n")
+        
+# ==========================================
+        # ACTUAL ROW
+        # ==========================================
+        print(f"\n✅ Building ACTUAL row...")
+        ws.cell(current_row, 1, "").fill = light_gray
+        ws.cell(current_row, 1).border = medium_border
+        
+        ws.cell(current_row, 2, "Actual").font = Font(size=10, bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 2).fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        ws.cell(current_row, 2).border = thin_border
+        
+        actual_map = {}
+        hold_dates_map = {}
+        
+        # 1. Build Maps
+        for stage in stages:
+            parts = stage.name.split('-')
+            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            daily_tasks = StageDailyTask.query.filter_by(stage_id=stage.id).order_by(
+                StageDailyTask.day_number
+            ).all()
+            
+            for task in daily_tasks:
+                date_str = task.scheduled_date.strftime('%Y-%m-%d')
+                if date_str not in actual_map:
+                    actual_map[date_str] = []
+                actual_map[date_str].append((stage_abbr, task.status))
+                
+                if task.original_date and task.original_date != task.scheduled_date:
+                    hold_date_str = task.original_date.strftime('%Y-%m-%d')
+                    if hold_date_str not in hold_dates_map:
+                        hold_dates_map[hold_date_str] = []
+                    hold_dates_map[hold_date_str].append(stage_abbr)
+        
+        # 2. Iterate Dates and Render
+        for idx, date in enumerate(all_dates):
+            day_of_week = date.weekday()
+            cell = ws.cell(current_row, idx + 3)
+            date_str = date.strftime('%Y-%m-%d')
+            
+            # Default Weekend Fill
+            if day_of_week in [5, 6]:
+                cell.fill = yellow_fill
+            
+            # --- FIXED LOGIC START ---
+            # Get Active stages for this date
+            active_data = actual_map.get(date_str, [])
+            active_abbrs = set(item[0] for item in active_data)
+            
+            # Get Hold stages for this date
+            hold_abbrs = set(hold_dates_map.get(date_str, []))
+            
+            # Filter Holds: Only show HOLD if the stage is NOT active on this date
+            # This prevents "SCH=HOLD" on days where SCH is actually running
+            real_holds = hold_abbrs - active_abbrs
+            
+            parts = []
+            
+            # Add Holds
+            if real_holds:
+                hold_str = ','.join(sorted(real_holds))
+                parts.append(f"{hold_str}=HOLD")
+                
+            # Add Actives
+            if active_abbrs:
+                parts.append(','.join(sorted(active_abbrs)))
+            
+            cell.value = ','.join(parts)
+            
+            # Formatting/Coloring based on Filtered Data
+            if day_of_week not in [5, 6]: # Only color working days
+                if real_holds and not active_abbrs:
+                    cell.fill = orange_fill # Pure hold
+                elif real_holds and active_abbrs:
+                    cell.fill = orange_fill # Mixed
+                elif active_abbrs:
+                    # Color based on status of active tasks
+                    statuses = set(item[1] for item in active_data)
+                    if 'completed' in statuses:
+                        cell.fill = green_fill
+                    elif 'rescheduled' in statuses:
+                        cell.fill = cyan_fill
+                    else:
+                        cell.fill = yellow_fill
+            # --- FIXED LOGIC END ---
+
+            cell.font = Font(size=7, bold=True)
+            cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=90)
+            cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 60
+        current_row += 1
+        
+        # ==========================================
+        # REMARKS ROW
+        # ==========================================
+        ws.cell(current_row, 1, "").fill = light_gray
+        ws.cell(current_row, 1).border = medium_border
+        
+        ws.cell(current_row, 2, "Remarks").font = Font(size=10, italic=True)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='top', horizontal='left')
+        ws.cell(current_row, 2).border = thin_border
+        
+        for stage in stages:
+            if not stage.start_date or not stage.end_date:
+                continue
+                
+            stage_duration_days = (stage.end_date - stage.start_date).days + 1
+            weeks_needed = max(1, stage_duration_days // 7)
+            
+            for week_num in range(1, min(weeks_needed + 1, 4)):
+                week_day_offset = (stage_duration_days // weeks_needed) * week_num
+                week_date = stage.start_date + timedelta(days=week_day_offset)
+                
+                if week_date <= stage.end_date and week_date in all_dates:
+                    col_idx = all_dates.index(week_date) + 3
+                    cell = ws.cell(current_row, col_idx)
+                    
+                    ordinal = f"{week_num}{'st' if week_num == 1 else 'nd' if week_num == 2 else 'rd' if week_num == 3 else 'th'}"
+                    cell.value = f"{ordinal} Week"
+                    
+                    day_of_week = week_date.weekday()
+                    if day_of_week not in [5, 6]:
+                        cell.fill = yellow_fill
+                    
+                    cell.font = Font(size=7, bold=True)
+                    cell.alignment = Alignment(vertical='center', horizontal='center', text_rotation=0)
+        
+        for date_str, hold_stages in hold_dates_map.items():
+            date = datetime.strptime(date_str, '%Y-%m-%d').date()
+            if date in all_dates:
+                col_idx = all_dates.index(date) + 3
+                cell = ws.cell(current_row, col_idx)
+                
+                reason_found = False
+                for stage in stages:
+                    daily_tasks = StageDailyTask.query.filter_by(stage_id=stage.id).filter(
+                        StageDailyTask.original_date == date
+                    ).all()
+                    
+                    for task in daily_tasks:
+                        if task.rescheduled_reason:
+                            cell.value = task.rescheduled_reason
+                            reason_found = True
+                            break
+                    if reason_found:
+                        break
+                
+                if not reason_found:
+                    cell.value = "HOLD, waiting for issue tracker and schematic from customer side"
+                
+                day_of_week = date.weekday()
+                if day_of_week not in [5, 6]:
+                    cell.fill = yellow_fill
+                
+                cell.font = Font(size=6, italic=True)
+                cell.alignment = Alignment(vertical='top', horizontal='left', wrap_text=True, text_rotation=0)
+        
+        for idx, date in enumerate(all_dates):
+            day_of_week = date.weekday()
+            cell = ws.cell(current_row, idx + 3)
+            
+            if day_of_week in [5, 6] and not cell.value:
+                cell.fill = yellow_fill
+            
+            if not cell.border or cell.border == Border():
+                cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 80
+        current_row += 2
+        
+        # ==========================================
+        # LEGEND
+        # ==========================================
+        ws.cell(current_row, 1, "Hold").fill = orange_fill
+        ws.cell(current_row, 1).font = Font(size=10, bold=True)
+        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 1).border = thin_border
+        ws.cell(current_row, 2, "If project goes on hold from Customer").font = Font(size=9)
+        current_row += 1
+        
+        ws.cell(current_row, 1, "Changes").border = thin_border
+        ws.cell(current_row, 1).font = Font(size=10, bold=True)
+        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 2, "from Customer").font = Font(size=9)
+        current_row += 1
+        
+        ws.cell(current_row, 1, "Holidays").fill = yellow_fill
+        ws.cell(current_row, 1).font = Font(size=10, bold=True)
+        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
+        ws.cell(current_row, 1).border = thin_border
+        
+        # Save to BytesIO
+        excel_file = BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+        
+        filename = f"{project.name}_Tracker_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        
+        print(f"\n{'='*80}")
+        print(f"✅ EXCEL EXPORT COMPLETE")
+        print(f"{'='*80}\n")
+        
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+        
+    except Exception as e:
+        print(f"\n❌ ERROR IN EXCEL EXPORT:")
+        print(f"   {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/projects/<int:project_id>/hold-dates', methods=['GET'])
+@login_required
+def get_hold_dates(project_id):
+    """Get all HOLD dates for a project"""
+    hold_dates = HoldDate.query.filter_by(project_id=project_id).order_by(
+        HoldDate.hold_date
+    ).all()
+    
+    return jsonify([{
+        'id': h.id,
+        'stage_id': h.stage_id,
+        'stage_name': ProjectStage.query.get(h.stage_id).name if h.stage_id else 'Unknown',
+        'hold_date': h.hold_date.isoformat(),
+        'reason': h.reason,
+        'created_by': User.query.get(h.created_by).username if h.created_by else 'Unknown',
+        'created_at': h.created_at.strftime('%Y-%m-%d %H:%M')
+    } for h in hold_dates])   
+# ============================================================================
+# Initialize Database & Create Default User
+# ============================================================================
+
+def init_db():
+    with app.app_context():
+        db.create_all()
+        
+        try:
+            from sqlalchemy import inspect, text
+            inspector = inspect(db.engine)
+
+
+            # ==========================================
+            # ADD GLOBAL RESCHEDULE COUNTER TO PROJECT
+            # ==========================================
+            project_columns = [col['name'] for col in inspector.get_columns('project')]
+            if 'current_reschedule_number' not in project_columns:
+                print("[INFO] Adding current_reschedule_number to project table...")
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project ADD COLUMN current_reschedule_number INTEGER DEFAULT 0"))
+                    conn.commit()
+                print("[SUCCESS] Added current_reschedule_number column")
+
+            
+            # ==========================================
+            # 1. SCHEDULE_HISTORY TABLE (Stage-level reschedules)
+            # ==========================================
+            schedule_history_columns = [col['name'] for col in inspector.get_columns('schedule_history')]
+            if 'reschedule_number' not in schedule_history_columns:
+                print("[WARNING] Adding reschedule_number column to schedule_history...")
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE schedule_history ADD COLUMN reschedule_number INTEGER DEFAULT 1"))
+                    conn.commit()
+                print("[SUCCESS] Added reschedule_number column to schedule_history")
+            
+            # CRITICAL: Backfill existing records with sequential numbers
+            existing_records = ScheduleHistory.query.all()
+            if existing_records:
+                print(f"[INFO] Checking {len(existing_records)} existing reschedule records...")
+                
+                # Group by project_id and stage_id
+                from collections import defaultdict
+                grouped = defaultdict(list)
+                
+                for record in existing_records:
+                    key = (record.project_id, record.stage_id)
+                    grouped[key].append(record)
+                
+                # Number them sequentially per stage
+                for (proj_id, stage_id), records in grouped.items():
+                    records.sort(key=lambda r: r.rescheduled_at)
+                    for idx, record in enumerate(records, 1):
+                        if not record.reschedule_number or record.reschedule_number == 0:
+                            record.reschedule_number = idx
+                            print(f"  [UPDATE] Record ID {record.id} set to reschedule #{idx}")
+                
+                db.session.commit()
+                print("[SUCCESS] Backfilled reschedule numbers for stage-level reschedules")
+            
+            # ==========================================
+            # 2. STAGE_DAILY_TASK TABLE (Add reschedule_count)
+            # ==========================================
+            if inspector.has_table('stage_daily_task'):
+                task_columns = [col['name'] for col in inspector.get_columns('stage_daily_task')]
+                if 'reschedule_count' not in task_columns:
+                    print("[WARNING] Adding reschedule_count column to stage_daily_task...")
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE stage_daily_task ADD COLUMN reschedule_count INTEGER DEFAULT 0"))
+                        conn.commit()
+                    print("[SUCCESS] Added reschedule_count column to stage_daily_task")
+            else:
+                db.create_all()
+                print("✅ Created stage_daily_task table")
+            
+            # ==========================================
+            # 3. DAILY_TASK_RESCHEDULE_HISTORY TABLE (Add reschedule_number)
+            # ==========================================
+            if inspector.has_table('daily_task_reschedule_history'):
+                history_columns = [col['name'] for col in inspector.get_columns('daily_task_reschedule_history')]
+                if 'reschedule_number' not in history_columns:
+                    print("[WARNING] Adding reschedule_number column to daily_task_reschedule_history...")
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE daily_task_reschedule_history ADD COLUMN reschedule_number INTEGER DEFAULT 1"))
+                        conn.commit()
+                    print("[SUCCESS] Added reschedule_number column to daily_task_reschedule_history")
+                
+                # Backfill existing daily task reschedule records
+                existing_task_history = DailyTaskRescheduleHistory.query.all()
+                if existing_task_history:
+                    print(f"[INFO] Backfilling {len(existing_task_history)} daily task reschedule records...")
+                    
+                    from collections import defaultdict
+                    task_grouped = defaultdict(list)
+                    
+                    for record in existing_task_history:
+                        key = (record.project_id, record.task_id)
+                        task_grouped[key].append(record)
+                    
+                    for (proj_id, task_id), records in task_grouped.items():
+                        records.sort(key=lambda r: r.rescheduled_at)
+                        for idx, record in enumerate(records, 1):
+                            if not hasattr(record, 'reschedule_number') or not record.reschedule_number or record.reschedule_number == 0:
+                                record.reschedule_number = idx
+                                print(f"  [UPDATE] Task history ID {record.id} set to reschedule #{idx}")
+                    
+                    db.session.commit()
+                    print("[SUCCESS] Backfilled reschedule numbers for daily task reschedules")
+            else:
+                print("⚠️  daily_task_reschedule_history table missing, creating...")
+                db.create_all()
+                print("✅ Created daily_task_reschedule_history table")
+            
+            # ==========================================
+            # 4. PROJECT TABLE (working_saturdays)
+            # ==========================================
+            columns = [col['name'] for col in inspector.get_columns('project')]
+            if 'working_saturdays' not in columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project ADD COLUMN working_saturdays TEXT DEFAULT '[]'"))
+                    conn.commit()
+                print("✅ Added working_saturdays column to project")
+            
+            # ==========================================
+            # 5. PROJECT_STAGE TABLE (manager_id)
+            # ==========================================
+            stage_columns = [col['name'] for col in inspector.get_columns('project_stage')]
+            if 'manager_id' not in stage_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project_stage ADD COLUMN manager_id INTEGER"))
+                    conn.commit()
+                print("✅ Added manager_id column to project_stage")
+            
+            # ==========================================
+            # 6. HOLD_DATE TABLE
+            # ==========================================
+            if not inspector.has_table('hold_date'):
+                print("⚠️  hold_date table missing, creating...")
+                db.create_all()
+                print("✅ Created hold_date table")
+            
+            print("\n" + "="*60)
+            print("✅ DATABASE INITIALIZATION COMPLETE")
+            print("="*60 + "\n")
+            
+        except Exception as e:
+            print(f"❌ Error during database initialization: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Create default admin user if not exists
+        if not User.query.filter_by(username='admin').first():
+            admin = User(
+                username='admin',
+                email='admin@example.com',
+                password_hash=generate_password_hash('admin123'),
+                role='admin'
+            )
+            db.session.add(admin)
+            db.session.commit()
+            print("✅ Default admin user created (username: admin, password: admin123)")
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True, host='0.0.0.0', port=5000)
 
