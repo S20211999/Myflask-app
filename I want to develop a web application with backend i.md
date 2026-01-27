@@ -1,2725 +1,6795 @@
-<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" style="height:64px;margin-right:32px"/>
-
-# I want to develop a web application with backend in JavaScript and frontend in html ,css, JavaScript and database to store data i want this tool to plan projects effectively and managers can assign daily task to employees and visually view the progress and evaluate the status of the project i want it to be user-friendly add the extra features to make effective
-
-Here's a comprehensive plan for developing your project management web application with a modern JavaScript stack:
-
-## Recommended Tech Stack
-
-**Backend:** Node.js with Express.js provides the perfect foundation for your JavaScript backend, offering a non-blocking, event-driven architecture ideal for real-time applications. **Frontend:** HTML5, CSS3, and vanilla JavaScript (or React.js for enhanced component reusability). **Database:** PostgreSQL is recommended for task management applications due to its robust ACID compliance, complex query support, and excellent handling of relational data like user-task-project relationships. MongoDB can be considered if you need extreme flexibility in data structure. **Real-time Communication:** Socket.io for instant task updates, notifications, and live progress tracking.[^1_1][^1_2][^1_3][^1_4][^1_5][^1_6]
-
-## Application Architecture
-
-Implement a **3-tier layered architecture** to separate concerns and ensure maintainability:[^1_7][^1_1]
-
-**Controller Layer:** Handles HTTP requests, routing, and user authentication. **Service Layer:** Contains all business logic for task assignment, project planning, and status calculations. **Data Access Layer:** Manages database operations and queries.[^1_2][^1_8]
-
-Structure your project with clear folder organization separating routes, controllers, services, models, and utilities to improve collaboration and code navigation.[^1_8][^1_1]
-
-## Core Features
-
-**User Management:** Role-based access control (Admin, Manager, Employee) with secure JWT authentication. Manager and employee dashboards with different permission levels.
-
-**Project Planning:** Create projects with milestones, deadlines, and budget tracking. Assign project managers and team members. Project templates for recurring workflows.
-
-**Task Management:** Daily task assignment with priority levels (High, Medium, Low). Task dependencies to link related tasks. Subtask support for breaking down complex work. Due dates, time estimates, and actual time tracking. Attachments, comments, and @mentions for collaboration.[^1_9][^1_10]
-
-**Visual Progress Tracking:** **Kanban Board View:** Drag-and-drop interface with customizable columns (To Do, In Progress, Review, Done). **Gantt Chart View:** Timeline visualization with task dependencies and critical path highlighting. **Calendar View:** Monthly/weekly task overview with color-coding by priority. **Dashboard Charts:** Use Chart.js for quick, elegant visualizations - progress bars, pie charts for task distribution, and line graphs for velocity tracking. For advanced custom visualizations, D3.js offers unlimited flexibility.[^1_11][^1_10][^1_12][^1_13][^1_14][^1_15][^1_9]
-
-**Status Evaluation:** Real-time project health indicators (On Track, At Risk, Delayed). Burndown charts showing work remaining vs. time. Completion percentage auto-calculated from task status. Performance metrics per employee (tasks completed, average completion time).[^1_11]
-
-## Enhanced Features for Effectiveness
-
-**Real-time Notifications:** Socket.io-powered instant updates when tasks are assigned, modified, or completed. Browser push notifications for urgent tasks. Daily digest emails summarizing assignments.[^1_4][^1_6]
-
-**Collaboration Tools:** In-app messaging and team chat. File sharing with version control. Activity timeline showing all project changes. @mentions in comments with notifications.[^1_10][^1_9]
-
-**Automation:** Recurring task templates. Automatic task reassignment on employee unavailability. Smart deadline warnings before due dates. Workflow automation (e.g., move to "Review" when marked complete).
-
-**Reporting \& Analytics:** Exportable reports (PDF, Excel) with custom date ranges. Team productivity analytics. Project cost tracking vs. budget. Time-tracking integration for accurate estimates.
-
-**Mobile Responsiveness:** Fully responsive CSS grid/flexbox layout. Touch-optimized interfaces for mobile task updates. Progressive Web App (PWA) capabilities for offline access.
-
-**Integrations:** Calendar sync (Google Calendar, Outlook). Slack/Teams integration for notifications. Third-party time-tracking tools. Export to project management standards (CSV, JSON).
-
-## Database Schema Highlights
-
-Design your PostgreSQL schema with these key tables: Users (id, name, email, role, password_hash), Projects (id, name, description, start_date, end_date, status, manager_id), Tasks (id, project_id, title, description, assigned_to, priority, status, due_date, estimated_hours), Comments, Attachments, and Activity_logs. Use foreign keys and indexes for optimal query performance.[^1_3][^1_5]
-
-## Implementation Best Practices
-
-Follow the **Single Responsibility Principle** - each module should handle one specific functionality. Minimize global variables and encapsulate logic within modules. Implement proper **environment variable management** using dotenv for configuration. Use async/await for clean asynchronous code handling. Apply input validation and sanitization on all user inputs. Implement comprehensive error handling with proper HTTP status codes.[^1_1][^1_2][^1_8]
-
-## User Experience Enhancements
-
-**Intuitive Navigation:** Sidebar with quick access to projects, tasks, calendar, and reports. Breadcrumb navigation for deep project hierarchies. Global search across projects, tasks, and people.
-
-**Drag-and-Drop Interface:** Reorder tasks by priority. Move tasks between project phases. Assign tasks by dragging to employee avatars.
-
-**Keyboard Shortcuts:** Quick task creation (Ctrl+N). Navigate between views (Ctrl+1/2/3). Mark tasks complete (Ctrl+Enter).
-
-**Customization:** Theme selection (light/dark mode). Customizable dashboard widgets. Personalized notification preferences.
-
-This architecture provides a scalable, maintainable foundation for your project management tool while delivering the visual feedback and ease-of-use that managers and employees need for effective collaboration.[^1_2][^1_9][^1_1][^1_11]
-<span style="display:none">[^1_16][^1_17][^1_18][^1_19][^1_20]</span>
-
-<div align="center">⁂</div>
-
-[^1_1]: https://blog.logrocket.com/node-js-project-architecture-best-practices/
-
-[^1_2]: https://www.simform.com/blog/node-js-architecture-best-practices/
-
-[^1_3]: https://estuary.dev/blog/postgresql-vs-mongodb/
-
-[^1_4]: https://codesignal.com/learn/courses/building-a-full-featured-to-do-list-application-1/lessons/real-time-updates-with-socketio
-
-[^1_5]: https://www.integrate.io/blog/mongodb-vs-postgresql/
-
-[^1_6]: https://dev.to/novu/sending-real-time-notifications-with-socketio-in-nodejs-1l5j
-
-[^1_7]: https://github.com/goldbergyoni/nodebestpractices
-
-[^1_8]: https://dev.to/shadid12/how-to-architect-a-node-js-project-from-ground-up-1n22
-
-[^1_9]: https://www.octalsoftware.com/blog/task-management-software-development
-
-[^1_10]: https://dhtmlx.com/blog/effective-task-management-dhtmlx-javascript-kanban-list-widgets/
-
-[^1_11]: https://thedigitalprojectmanager.com/tools/project-dashboard-software/
-
-[^1_12]: https://dev.to/okoye_ndidiamaka_5e3b7d30/bringing-data-to-life-how-to-create-interactive-visualizations-with-d3js-and-chartjs-3g4p
-
-[^1_13]: https://www.geeksforgeeks.org/javascript/javascript-libraries-for-data-visualization/
-
-[^1_14]: https://navyuginfo.com/d3-js-chartjs-use/
-
-[^1_15]: https://www.chartjs.org
-
-[^1_16]: https://www.scoutapm.com/blog/nodejs-architecture-and-12-best-practices-for-nodejs-development
-
-[^1_17]: https://webandcrafts.com/blog/nodejs-architecture
-
-[^1_18]: https://www.metricfire.com/blog/top-8-open-source-dashboards/
-
-[^1_19]: https://d3js.org
-
-[^1_20]: https://www.reddit.com/r/d3js/comments/1n3e1a4/moving_beyond_basics_whats_the_best_stack_for/
-
-
----
-
-# Yes create and give me code
-
-Here's a complete, production-ready project management web application with all the code you need:
-
-## Project Structure
-
-```
-project-manager/
-├── server/
-│   ├── config/
-│   │   └── database.js
-│   ├── models/
-│   │   ├── User.js
-│   │   ├── Project.js
-│   │   ├── Task.js
-│   │   └── Comment.js
-│   ├── middleware/
-│   │   └── auth.js
-│   ├── routes/
-│   │   ├── auth.js
-│   │   ├── projects.js
-│   │   └── tasks.js
-│   └── server.js
-├── public/
-│   ├── css/
-│   │   └── style.css
-│   ├── js/
-│   │   ├── app.js
-│   │   ├── dashboard.js
-│   │   ├── kanban.js
-│   │   └── charts.js
-│   ├── index.html
-│   ├── dashboard.html
-│   ├── projects.html
-│   └── kanban.html
-├── package.json
-└── .env
-```
-
-
-## 1. package.json
-
-```json
-{
-  "name": "project-manager",
-  "version": "1.0.0",
-  "description": "Project Management Application",
-  "main": "server/server.js",
-  "scripts": {
-    "start": "node server/server.js",
-    "dev": "nodemon server/server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.2",
-    "pg": "^8.11.3",
-    "pg-hstore": "^2.3.4",
-    "sequelize": "^6.35.0",
-    "bcryptjs": "^2.4.3",
-    "jsonwebtoken": "^9.0.2",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "socket.io": "^4.6.2"
-  },
-  "devDependencies": {
-    "nodemon": "^3.0.2"
-  }
-}
-```
-
-
-## 2. .env
-
-```env
-PORT=3000
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=project_manager
-DB_USER=postgres
-DB_PASSWORD=your_password
-JWT_SECRET=your_jwt_secret_key_here_change_in_production
-NODE_ENV=development
-```
-
-
-## 3. server/config/database.js
-
-```javascript
-const { Sequelize } = require('sequelize');
-require('dotenv').config();
-
-const sequelize = new Sequelize(
-  process.env.DB_NAME,
-  process.env.DB_USER,
-  process.env.DB_PASSWORD,
-  {
-    host: process.env.DB_HOST,
-    port: process.env.DB_PORT,
-    dialect: 'postgres',
-    logging: false,
-    pool: {
-      max: 5,
-      min: 0,
-      acquire: 30000,
-      idle: 10000
-    }
-  }
-);
-
-module.exports = sequelize;
-```
-
-
-## 4. server/models/User.js
-
-```javascript
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-const bcrypt = require('bcryptjs');
-
-const User = sequelize.define('User', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  name: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  email: {
-    type: DataTypes.STRING,
-    allowNull: false,
-    unique: true,
-    validate: {
-      isEmail: true
-    }
-  },
-  password: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  role: {
-    type: DataTypes.ENUM('admin', 'manager', 'employee'),
-    defaultValue: 'employee'
-  },
-  avatar: {
-    type: DataTypes.STRING,
-    defaultValue: 'https://ui-avatars.com/api/?name=User'
-  },
-  isActive: {
-    type: DataTypes.BOOLEAN,
-    defaultValue: true
-  }
-}, {
-  hooks: {
-    beforeCreate: async (user) => {
-      if (user.password) {
-        user.password = await bcrypt.hash(user.password, 10);
-      }
-    },
-    beforeUpdate: async (user) => {
-      if (user.changed('password')) {
-        user.password = await bcrypt.hash(user.password, 10);
-      }
-    }
-  }
-});
-
-User.prototype.comparePassword = async function(candidatePassword) {
-  return await bcrypt.compare(candidatePassword, this.password);
-};
-
-module.exports = User;
-```
-
-
-## 5. server/models/Project.js
-
-```javascript
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-
-const Project = sequelize.define('Project', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  name: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  description: {
-    type: DataTypes.TEXT
-  },
-  status: {
-    type: DataTypes.ENUM('planning', 'active', 'on-hold', 'completed', 'cancelled'),
-    defaultValue: 'planning'
-  },
-  priority: {
-    type: DataTypes.ENUM('low', 'medium', 'high', 'critical'),
-    defaultValue: 'medium'
-  },
-  startDate: {
-    type: DataTypes.DATE
-  },
-  endDate: {
-    type: DataTypes.DATE
-  },
-  budget: {
-    type: DataTypes.DECIMAL(10, 2),
-    defaultValue: 0
-  },
-  progress: {
-    type: DataTypes.INTEGER,
-    defaultValue: 0,
-    validate: {
-      min: 0,
-      max: 100
-    }
-  }
-});
-
-module.exports = Project;
-```
-
-
-## 6. server/models/Task.js
-
-```javascript
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-
-const Task = sequelize.define('Task', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  title: {
-    type: DataTypes.STRING,
-    allowNull: false
-  },
-  description: {
-    type: DataTypes.TEXT
-  },
-  status: {
-    type: DataTypes.ENUM('todo', 'in-progress', 'review', 'completed'),
-    defaultValue: 'todo'
-  },
-  priority: {
-    type: DataTypes.ENUM('low', 'medium', 'high', 'critical'),
-    defaultValue: 'medium'
-  },
-  dueDate: {
-    type: DataTypes.DATE
-  },
-  estimatedHours: {
-    type: DataTypes.DECIMAL(5, 2),
-    defaultValue: 0
-  },
-  actualHours: {
-    type: DataTypes.DECIMAL(5, 2),
-    defaultValue: 0
-  },
-  tags: {
-    type: DataTypes.ARRAY(DataTypes.STRING),
-    defaultValue: []
-  }
-});
-
-module.exports = Task;
-```
-
-
-## 7. server/models/Comment.js
-
-```javascript
-const { DataTypes } = require('sequelize');
-const sequelize = require('../config/database');
-
-const Comment = sequelize.define('Comment', {
-  id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
-    primaryKey: true
-  },
-  content: {
-    type: DataTypes.TEXT,
-    allowNull: false
-  },
-  mentions: {
-    type: DataTypes.ARRAY(DataTypes.UUID),
-    defaultValue: []
-  }
-});
-
-module.exports = Comment;
-```
-
-
-## 8. server/middleware/auth.js
-
-```javascript
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-
-const auth = async (req, res, next) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+from openpyxl.utils import get_column_letter
+from io import BytesIO
+import openpyxl
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+from datetime import datetime, timedelta
+from functools import wraps
+import secrets
+import json
+import traceback # Useful for the error handling in your code
+
+app = Flask(__name__)
+app.secret_key = secrets.token_hex(32)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///dashboard.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+db = SQLAlchemy(app)
+
+# ============================================================================
+# Database Models
+# ============================================================================
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(20), default='employee')  # admin, manager, employee
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Project(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    status = db.Column(db.String(20), default='active')
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    progress = db.Column(db.Integer, default=0)
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    working_saturdays = db.Column(db.Text, default='[]')
+    current_reschedule_number = db.Column(db.Integer, default=0)  # âœ… ADD THIS LINE    # Store as JSON array
+
+class ProjectStage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    order = db.Column(db.Integer, nullable=False)
+    duration_days = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='pending')
+    progress = db.Column(db.Integer, default=0)
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    manager_id = db.Column(db.Integer, db.ForeignKey('user.id'))  # ADD THIS LINE
+
+class ProjectMember(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    added_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Task(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'))
+    assigned_to = db.Column(db.Integer, db.ForeignKey('user.id'))
+    priority = db.Column(db.String(20), default='medium')  # low, medium, high
+    status = db.Column(db.String(20), default='pending')  # pending, in-progress, completed
+    deadline = db.Column(db.Date)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime)
+
+class ScheduleHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'))
+    reschedule_number = db.Column(db.Integer, default=1)  # âœ… ADD THIS
+    original_date = db.Column(db.Date)
+    new_date = db.Column(db.Date)
+    reason = db.Column(db.Text)
+    rescheduled_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    rescheduled_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class Notification(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    is_read = db.Column(db.Boolean, default=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class ActivityLog(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    action = db.Column(db.String(200), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
+class StageDailyTask(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    day_number = db.Column(db.Integer, nullable=False)  # 1, 2, 3, etc.
+    scheduled_date = db.Column(db.Date, nullable=False)
+    original_date = db.Column(db.Date)  # Track if rescheduled
+    status = db.Column(db.String(20), default='pending')  # pending, completed, rescheduled
+    completed_at = db.Column(db.DateTime)
+    rescheduled_reason = db.Column(db.Text)
+    reschedule_count = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+class DailyTaskRescheduleHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
+    task_id = db.Column(db.Integer, db.ForeignKey('stage_daily_task.id'), nullable=False)
+    day_number = db.Column(db.Integer, nullable=False)
+    reschedule_number = db.Column(db.Integer, default=1)  # âœ… ADD THIS
+    original_date = db.Column(db.Date, nullable=False)
+    new_date = db.Column(db.Date, nullable=False)
+    days_shifted = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.Text)
+    rescheduled_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    rescheduled_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class HoldDate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
+    stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
+    hold_date = db.Column(db.Date, nullable=False)  # The date that became HOLD
+    reason = db.Column(db.Text)  # Why it's on hold
+    created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ============================================================================
+# Default Stages Configuration
+# ============================================================================
+
+DEFAULT_STAGES = [
+    {'name': 'Foot prints - library - FP-LIB', 'order': 1, 'duration_days': 3},
+    {'name': 'Scrubbing - SCRB', 'order': 2, 'duration_days': 2},
+    {'name': 'Schematic - SCH', 'order': 3, 'duration_days': 7},
+    {'name': 'Length Matching - LM', 'order': 4, 'duration_days': 4},
+    {'name': 'Deliverables - DLBS', 'order': 5, 'duration_days': 3},
+    {'name': 'Placement - PLC', 'order': 6, 'duration_days': 5},  # Added comma
+    {'name': 'Placement - review - PLC-R', 'order': 7, 'duration_days': 3},  # Changed order to 7
+    {'name': 'Routing - RTNG', 'order': 8, 'duration_days': 2},  # Fixed syntax and order
+    {'name': 'Routing - Review - RTNG-R', 'order': 9, 'duration_days': 7},  # Changed order to 9
+    {'name': 'Post Screen - P-SI', 'order': 10, 'duration_days': 4},  # Changed order to 10
+    {'name': 'Fan out - FNT', 'order': 11, 'duration_days': 3},  # Changed order to 11
+    {'name': 'Silk Screen - SLK', 'order': 12, 'duration_days': 5},  # Added comma, changed order to 12
+    {'name': 'Approval - APRVL', 'order': 13, 'duration_days': 3},  # Changed order to 13
+    {'name': 'Fab setup - FB-STP', 'order': 14, 'duration_days': 5}  # Changed order to 14
+]
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated_function
+
+def get_current_user():
+    if 'user_id' in session:
+        return User.query.get(session['user_id'])
+    return None
+
+def log_activity(action):
+    user = get_current_user()
+    if user:
+        log = ActivityLog(user_id=user.id, action=action)
+        db.session.add(log)
+        db.session.commit()
+
+def create_notification(user_id, message):
+    notification = Notification(user_id=user_id, message=message)
+    db.session.add(notification)
+    db.session.commit()
+
+def is_working_day(date, include_saturday=False, working_saturdays=None):
+    """Check if a date is a working day"""
+    if working_saturdays is None:
+        working_saturdays = set()
+        
+    weekday = date.weekday()
+    date_str = date.strftime('%Y-%m-%d')
     
-    if (!token) {
-      return res.status(401).json({ error: 'Authentication required' });
-    }
+    if weekday == 6:  # Sunday
+        return False
+    if weekday == 5:  # Saturday
+        return date_str in working_saturdays
+    return True
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findByPk(decoded.id);
-
-    if (!user || !user.isActive) {
-      return res.status(401).json({ error: 'Invalid authentication' });
-    }
-
-    req.user = user;
-    req.token = token;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid authentication' });
-  }
-};
-
-const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({ error: 'Access denied' });
-    }
-    next();
-  };
-};
-
-module.exports = { auth, authorize };
-```
-
-
-## 9. server/routes/auth.js
-
-```javascript
-const express = require('express');
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
-const { auth } = require('../middleware/auth');
-
-const router = express.Router();
-
-// Register
-router.post('/register', async (req, res) => {
-  try {
-    const { name, email, password, role } = req.body;
-
-    const existingUser = await User.findOne({ where: { email } });
-    if (existingUser) {
-      return res.status(400).json({ error: 'Email already registered' });
-    }
-
-    const user = await User.create({ name, email, password, role: role || 'employee' });
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.status(201).json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar
-      },
-      token
-    });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Login
-router.post('/login', async (req, res) => {
-  try {
-    const { email, password } = req.body;
-
-    const user = await User.findOne({ where: { email } });
-    if (!user || !(await user.comparePassword(password))) {
-      return res.status(401).json({ error: 'Invalid credentials' });
-    }
-
-    if (!user.isActive) {
-      return res.status(401).json({ error: 'Account is inactive' });
-    }
-
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
-
-    res.json({
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        avatar: user.avatar
-      },
-      token
-    });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Get current user
-router.get('/me', auth, async (req, res) => {
-  res.json({
-    id: req.user.id,
-    name: req.user.name,
-    email: req.user.email,
-    role: req.user.role,
-    avatar: req.user.avatar
-  });
-});
-
-// Get all users (for assignment dropdowns)
-router.get('/users', auth, async (req, res) => {
-  try {
-    const users = await User.findAll({
-      where: { isActive: true },
-      attributes: ['id', 'name', 'email', 'role', 'avatar']
-    });
-    res.json(users);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-module.exports = router;
-```
-
-
-## 10. server/routes/projects.js
-
-```javascript
-const express = require('express');
-const Project = require('../models/Project');
-const Task = require('../models/Task');
-const User = require('../models/User');
-const { auth, authorize } = require('../middleware/auth');
-
-const router = express.Router();
-
-// Get all projects
-router.get('/', auth, async (req, res) => {
-  try {
-    const projects = await Project.findAll({
-      include: [
-        { model: User, as: 'manager', attributes: ['id', 'name', 'email', 'avatar'] },
-        { model: Task, as: 'tasks' }
-      ],
-      order: [['createdAt', 'DESC']]
-    });
-    res.json(projects);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Get single project
-router.get('/:id', auth, async (req, res) => {
-  try {
-    const project = await Project.findByPk(req.params.id, {
-      include: [
-        { model: User, as: 'manager', attributes: ['id', 'name', 'email', 'avatar'] },
-        {
-          model: Task,
-          as: 'tasks',
-          include: [
-            { model: User, as: 'assignedTo', attributes: ['id', 'name', 'avatar'] },
-            { model: User, as: 'createdBy', attributes: ['id', 'name'] }
-          ]
-        }
-      ]
-    });
-
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-
-    res.json(project);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Create project
-router.post('/', auth, authorize('admin', 'manager'), async (req, res) => {
-  try {
-    const project = await Project.create({
-      ...req.body,
-      managerId: req.user.id
-    });
-    res.status(201).json(project);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Update project
-router.put('/:id', auth, authorize('admin', 'manager'), async (req, res) => {
-  try {
-    const project = await Project.findByPk(req.params.id);
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-
-    await project.update(req.body);
-    res.json(project);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Delete project
-router.delete('/:id', auth, authorize('admin', 'manager'), async (req, res) => {
-  try {
-    const project = await Project.findByPk(req.params.id);
-    if (!project) {
-      return res.status(404).json({ error: 'Project not found' });
-    }
-
-    await project.destroy();
-    res.json({ message: 'Project deleted successfully' });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Get project statistics
-router.get('/:id/stats', auth, async (req, res) => {
-  try {
-    const tasks = await Task.findAll({ where: { projectId: req.params.id } });
+def add_working_days(start_date, days, include_saturday=False, working_saturdays=None):
+    """Add working days to a date, properly handling working Saturdays"""
+    if working_saturdays is None:
+        working_saturdays = set()
+        
+    if days == 0:
+        return start_date
+        
+    current_date = start_date
+    direction = 1 if days > 0 else -1
+    days_remaining = abs(days)
     
-    const stats = {
-      total: tasks.length,
-      todo: tasks.filter(t => t.status === 'todo').length,
-      inProgress: tasks.filter(t => t.status === 'in-progress').length,
-      review: tasks.filter(t => t.status === 'review').length,
-      completed: tasks.filter(t => t.status === 'completed').length,
-      overdue: tasks.filter(t => t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'completed').length
-    };
-
-    res.json(stats);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-module.exports = router;
-```
-
-
-## 11. server/routes/tasks.js
-
-```javascript
-const express = require('express');
-const Task = require('../models/Task');
-const User = require('../models/User');
-const Comment = require('../models/Comment');
-const { auth } = require('../middleware/auth');
-
-const router = express.Router();
-
-// Get all tasks
-router.get('/', auth, async (req, res) => {
-  try {
-    const { projectId, status, assignedToId } = req.query;
-    const where = {};
+    while days_remaining > 0:
+        current_date = current_date + timedelta(days=direction)
+        if is_working_day(current_date, include_saturday, working_saturdays):
+            days_remaining -= 1
     
-    if (projectId) where.projectId = projectId;
-    if (status) where.status = status;
-    if (assignedToId) where.assignedToId = assignedToId;
+    return current_date
 
-    const tasks = await Task.findAll({
-      where,
-      include: [
-        { model: User, as: 'assignedTo', attributes: ['id', 'name', 'avatar'] },
-        { model: User, as: 'createdBy', attributes: ['id', 'name'] }
-      ],
-      order: [['createdAt', 'DESC']]
-    });
+def get_next_working_day(date, include_saturday=False, working_saturdays=None):
+    """Get the next working day from a given date"""
+    if working_saturdays is None:
+        working_saturdays = set()
+    check_date = date
+    while not is_working_day(check_date, include_saturday, working_saturdays):
+        check_date = check_date + timedelta(days=1)
+    return check_date
 
-    res.json(tasks);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Create task
-router.post('/', auth, async (req, res) => {
-  try {
-    const task = await Task.create({
-      ...req.body,
-      createdById: req.user.id
-    });
-
-    const taskWithRelations = await Task.findByPk(task.id, {
-      include: [
-        { model: User, as: 'assignedTo', attributes: ['id', 'name', 'avatar'] },
-        { model: User, as: 'createdBy', attributes: ['id', 'name'] }
-      ]
-    });
-
-    // Emit socket event
-    req.app.get('io').emit('task:created', taskWithRelations);
+def calculate_stage_dates(project_start_date, stages_data, include_saturday=False, working_saturdays=None):
+    """Calculate start and end dates for each stage based on working days (excluding weekends)"""
     
-    res.status(201).json(taskWithRelations);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Update task
-router.put('/:id', auth, async (req, res) => {
-  try {
-    const task = await Task.findByPk(req.params.id);
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    await task.update(req.body);
+    if working_saturdays is None:
+        working_saturdays = set()
     
-    const updatedTask = await Task.findByPk(task.id, {
-      include: [
-        { model: User, as: 'assignedTo', attributes: ['id', 'name', 'avatar'] },
-        { model: User, as: 'createdBy', attributes: ['id', 'name'] }
-      ]
-    });
-
-    // Emit socket event
-    req.app.get('io').emit('task:updated', updatedTask);
+    calculated_stages = []
+    current_date = get_next_working_day(project_start_date, False, working_saturdays)
     
-    res.json(updatedTask);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Delete task
-router.delete('/:id', auth, async (req, res) => {
-  try {
-    const task = await Task.findByPk(req.params.id);
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    await task.destroy();
+    for stage_info in stages_data:
+        stage_start = stage_info.get('start_date')
+        
+        if stage_start:
+            # Custom start date provided
+            custom_start = datetime.strptime(stage_start, '%Y-%m-%d').date()
+            stage_start_date = get_next_working_day(custom_start, False, working_saturdays)
+        else:
+            # Use current date
+            stage_start_date = current_date
+        
+        # Calculate end date based on duration
+        duration = stage_info.get('duration_days', 1)
+        if duration > 0:
+            stage_end_date = add_working_days(stage_start_date, duration - 1, False, working_saturdays)
+        else:
+            stage_end_date = stage_start_date
+        
+        calculated_stages.append({
+            'name': stage_info['name'],
+            'order': stage_info['order'],
+            'duration_days': duration,
+            'start_date': stage_start_date,
+            'end_date': stage_end_date
+        })
+        
+        # If no custom start date, update current_date for next stage
+        if not stage_start:
+            current_date = add_working_days(stage_end_date, 1, False, working_saturdays)
     
-    // Emit socket event
-    req.app.get('io').emit('task:deleted', { id: req.params.id });
+    return calculated_stages
+
+def generate_daily_tasks_for_project(project_id, working_saturdays=None):
+    """Generate daily tasks for all stages in a project"""
+    if working_saturdays is None:
+        working_saturdays = set()
     
-    res.json({ message: 'Task deleted successfully' });
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-// Add comment to task
-router.post('/:id/comments', auth, async (req, res) => {
-  try {
-    const task = await Task.findByPk(req.params.id);
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    const comment = await Comment.create({
-      ...req.body,
-      taskId: req.params.id,
-      userId: req.user.id
-    });
-
-    const commentWithUser = await Comment.findByPk(comment.id, {
-      include: [{ model: User, as: 'user', attributes: ['id', 'name', 'avatar'] }]
-    });
-
-    res.status(201).json(commentWithUser);
-  } catch (error) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-module.exports = router;
-```
-
-
-## 12. server/server.js
-
-```javascript
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const cors = require('cors');
-const path = require('path');
-require('dotenv').config();
-
-const sequelize = require('./config/database');
-const User = require('./models/User');
-const Project = require('./models/Project');
-const Task = require('./models/Task');
-const Comment = require('./models/Comment');
-
-const authRoutes = require('./routes/auth');
-const projectRoutes = require('./routes/projects');
-const taskRoutes = require('./routes/tasks');
-
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST", "PUT", "DELETE"]
-  }
-});
-
-// Middleware
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, '../public')));
-
-// Store io instance
-app.set('io', io);
-
-// Define relationships
-User.hasMany(Project, { foreignKey: 'managerId', as: 'managedProjects' });
-Project.belongsTo(User, { foreignKey: 'managerId', as: 'manager' });
-
-Project.hasMany(Task, { foreignKey: 'projectId', as: 'tasks' });
-Task.belongsTo(Project, { foreignKey: 'projectId', as: 'project' });
-
-User.hasMany(Task, { foreignKey: 'assignedToId', as: 'assignedTasks' });
-Task.belongsTo(User, { foreignKey: 'assignedToId', as: 'assignedTo' });
-
-User.hasMany(Task, { foreignKey: 'createdById', as: 'createdTasks' });
-Task.belongsTo(User, { foreignKey: 'createdById', as: 'createdBy' });
-
-Task.hasMany(Comment, { foreignKey: 'taskId', as: 'comments' });
-Comment.belongsTo(Task, { foreignKey: 'taskId', as: 'task' });
-
-User.hasMany(Comment, { foreignKey: 'userId', as: 'comments' });
-Comment.belongsTo(User, { foreignKey: 'userId', as: 'user' });
-
-// Routes
-app.use('/api/auth', authRoutes);
-app.use('/api/projects', projectRoutes);
-app.use('/api/tasks', taskRoutes);
-
-// Socket.io connection
-io.on('connection', (socket) => {
-  console.log('New client connected');
-
-  socket.on('disconnect', () => {
-    console.log('Client disconnected');
-  });
-});
-
-// Serve HTML files
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, '../public/index.html'));
-});
-
-// Initialize database and start server
-const PORT = process.env.PORT || 3000;
-
-sequelize.sync({ alter: true }).then(() => {
-  console.log('Database synchronized');
-  server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-  });
-}).catch(err => {
-  console.error('Unable to connect to database:', err);
-});
-```
-
-
-## 13. public/index.html
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Project Manager - Login</title>
-    <link rel="stylesheet" href="css/style.css">
-</head>
-<body class="login-page">
-    <div class="login-container">
-        <div class="login-card">
-            <h1>Project Manager</h1>
-            <p class="subtitle">Manage projects, assign tasks, track progress</p>
+    project = Project.query.get(project_id)
+    if not project:
+        raise ValueError(f"Project {project_id} not found")
+    
+    stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+    
+    for stage in stages:
+        # Delete existing daily tasks for this stage (in case of regeneration)
+        StageDailyTask.query.filter_by(stage_id=stage.id).delete()
+        
+        if not stage.start_date or not stage.end_date:
+            continue
+        
+        # Generate daily tasks
+        current_date = stage.start_date
+        day_number = 1
+        
+        while current_date <= stage.end_date:
+            # Only create task for working days
+            if is_working_day(current_date, False, working_saturdays):
+                daily_task = StageDailyTask(
+                    stage_id=stage.id,
+                    project_id=project_id,
+                    day_number=day_number,
+                    scheduled_date=current_date,
+                    status='pending'
+                )
+                db.session.add(daily_task)
+                day_number += 1
             
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="login">Login</button>
-                <button class="tab-btn" data-tab="register">Register</button>
-            </div>
+            current_date = current_date + timedelta(days=1)
+    
+    # Don't commit here - let the caller handle the commit
+    db.session.flush()
 
-            <!-- Login Form -->
-            <form id="loginForm" class="auth-form active">
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="loginEmail" required>
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="loginPassword" required>
-                </div>
-                <button type="submit" class="btn btn-primary btn-block">Login</button>
-            </form>
+# ============================================================================
+# Routes
+# ============================================================================
 
-            <!-- Register Form -->
-            <form id="registerForm" class="auth-form">
-                <div class="form-group">
-                    <label>Full Name</label>
-                    <input type="text" id="registerName" required>
-                </div>
-                <div class="form-group">
-                    <label>Email</label>
-                    <input type="email" id="registerEmail" required>
-                </div>
-                <div class="form-group">
-                    <label>Password</label>
-                    <input type="password" id="registerPassword" required>
-                </div>
-                <div class="form-group">
-                    <label>Role</label>
-                    <select id="registerRole">
-                        <option value="employee">Employee</option>
-                        <option value="manager">Manager</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                </div>
-                <button type="submit" class="btn btn-primary btn-block">Register</button>
-            </form>
+@app.route('/')
+@login_required
+def index():
+    return redirect(url_for('dashboard'))
 
-            <div id="errorMessage" class="error-message"></div>
-        </div>
-    </div>
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        if user and check_password_hash(user.password_hash, password):
+            session['user_id'] = user.id
+            session['username'] = user.username
+            return jsonify({'success': True})
+        
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+    
+    return render_template('login.html')
 
-    <script src="js/app.js"></script>
-</body>
-</html>
-```
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    user = get_current_user()
+    return render_template('index.html', current_user=user)
+
+@app.route('/stage_popup.html')
+def stage_popup():
+    return render_template('stage_popup.html')
+
+# ============================================================================
+# API Endpoints
+# ============================================================================
+
+@app.route('/api/default-stages', methods=['GET'])
+@login_required
+def get_default_stages():
+    """Return default stages for frontend"""
+    return jsonify(DEFAULT_STAGES)
+
+@app.route('/api/stats', methods=['GET'])
+@login_required
+def get_stats():
+    total_projects = Project.query.count()
+    active_projects = Project.query.filter_by(status='active').count()
+    total_tasks = Task.query.count()
+    completed_tasks = Task.query.filter_by(status='completed').count()
+    total_employees = User.query.filter_by(role='employee').count()
+    
+    return jsonify({
+        'total_projects': total_projects,
+        'active_projects': active_projects,
+        'total_tasks': total_tasks,
+        'completed_tasks': completed_tasks,
+        'total_employees': total_employees
+    })
+
+@app.route('/api/projects', methods=['GET', 'POST'])
+@login_required
+def projects():
+    if request.method == 'POST':
+        data = request.get_json()
+        user = get_current_user()
+        
+        try:
+            project_start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date() if data.get('start_date') else datetime.now().date()
+
+            include_saturday = data.get('include_saturday', False)
+            working_saturdays = set(data.get('working_saturdays', []))
+            
+            # Calculate stage dates based on duration
+            stages_data = data.get('stages', [])
+            calculated_stages = calculate_stage_dates(project_start_date, stages_data, include_saturday, working_saturdays)
+
+            # Calculate project end date from last stage
+            project_end_date = calculated_stages[-1]['end_date'] if calculated_stages else project_start_date
+            
+            project = Project(
+                name=data['name'],
+                description=data.get('description', ''),
+                start_date=project_start_date,
+                end_date=project_end_date,
+                created_by=user.id,
+                working_saturdays=json.dumps(list(working_saturdays))
+            )
+            db.session.add(project)
+            db.session.flush()
 
 
-## 14. public/dashboard.html
+            
+            # Add stages with calculated dates
+            for stage_data in calculated_stages:
+                stage = ProjectStage(
+                    project_id=project.id,
+                    name=stage_data['name'],
+                    order=stage_data['order'],
+                    duration_days=stage_data.get('duration_days', 0),
+                    start_date=stage_data['start_date'],
+                    end_date=stage_data['end_date'],
+                    manager_id=stage_data.get('manager_id')  # ADD THIS LINE
+                )
+                db.session.add(stage)
+                            
+            # Add project members
+            member_ids = data.get('members', [])
+            for member_id in member_ids:
+                member = ProjectMember(
+                    project_id=project.id,
+                    user_id=member_id
+                )
+                db.session.add(member)
+                create_notification(member_id, f"You have been added to job: {project.name}")
+            
+            db.session.commit()
+            
+        # âœ… NEW: Generate daily tasks immediately after project creation
+            try:
+                generate_daily_tasks_for_project(project.id, working_saturdays)
+                print(f"\u2714 Generated daily tasks for project {project.id}")
+            except Exception as e:
+                print(f"Warning: Could not generate daily tasks: {e}")            
+            log_activity(f"Created job: {project.name}")
+            
+            return jsonify({'success': True, 'id': project.id}), 201
+        except Exception as e:
+            db.session.rollback()
+            print(f"Error creating project: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return jsonify({'error': str(e)}), 400
+    
+    # GET - Return list of all projects
+    projects = Project.query.order_by(Project.created_at.desc()).all()
+    return jsonify([{
+        'id': p.id,
+        'name': p.name,
+        'description': p.description,
+        'status': p.status,
+        'progress': p.progress,
+        'start_date': p.start_date.isoformat() if p.start_date else None,
+        'end_date': p.end_date.isoformat() if p.end_date else None
+    } for p in projects])
 
-```html
-<!DOCTYPE html>
+
+
+@app.route('/api/projects/<int:project_id>/details', methods=['GET'])
+@login_required
+def project_details(project_id):
+    project = Project.query.get_or_404(project_id)
+    stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+    tasks = Task.query.filter_by(project_id=project_id).all()
+    schedule_history = ScheduleHistory.query.filter_by(project_id=project_id).order_by(ScheduleHistory.rescheduled_at.desc()).all()
+    members = ProjectMember.query.filter_by(project_id=project_id).all()
+    
+    # Parse working Saturdays
+    try:
+        if project.working_saturdays:
+            working_saturdays = json.loads(project.working_saturdays)
+        else:
+            working_saturdays = []
+    except:
+        working_saturdays = []
+    
+    # Calculate task stats
+    task_stats = {
+        'pending': sum(1 for t in tasks if t.status == 'pending'),
+        'in-progress': sum(1 for t in tasks if t.status == 'in-progress'),
+        'completed': sum(1 for t in tasks if t.status == 'completed')
+    }
+    
+    # Calculate stage completion
+    completed_stages = sum(1 for s in stages if s.status == 'completed')
+    
+    return jsonify({
+        'id': project.id,
+        'name': project.name,
+        'description': project.description,
+        'status': project.status,
+        'progress': project.progress,
+        'start_date': project.start_date.isoformat() if project.start_date else None,
+        'end_date': project.end_date.isoformat() if project.end_date else None,
+        'saturdayWorkingDays': working_saturdays,
+        'stages': [{
+            'id': s.id,
+            'name': s.name,
+            'order': s.order,
+            'duration_days': s.duration_days,
+            'status': s.status,
+            'progress': s.progress,
+            'start_date': s.start_date.isoformat() if s.start_date else None,
+            'end_date': s.end_date.isoformat() if s.end_date else None
+        } for s in stages],
+        'members': [{
+            'id': User.query.get(m.user_id).id,
+            'username': User.query.get(m.user_id).username,
+            'email': User.query.get(m.user_id).email
+        } for m in members],
+        'task_stats': task_stats,
+        'stage_completion': {
+            'completed': completed_stages,
+            'total': len(stages)
+        },
+        'schedule_history': [{
+            'original_date': h.original_date.isoformat() if h.original_date else None,
+            'new_date': h.new_date.isoformat() if h.new_date else None,
+            'reason': h.reason,
+            'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+            'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M')
+        } for h in schedule_history]
+    })
+
+@app.route('/api/tasks', methods=['GET', 'POST'])
+@login_required
+def tasks():
+    if request.method == 'POST':
+        data = request.get_json()
+        
+        try:
+            task = Task(
+                title=data['title'],
+                description=data.get('description', ''),
+                project_id=data.get('project_id'),
+                assigned_to=data.get('assigned_to'),
+                priority=data.get('priority', 'medium'),
+                deadline=datetime.strptime(data['deadline'], '%Y-%m-%d').date() if data.get('deadline') else None
+            )
+            db.session.add(task)
+            db.session.commit()
+            
+            log_activity(f"Created task: {task.title}")
+            
+            # Notify assigned user
+            if task.assigned_to:
+                create_notification(task.assigned_to, f"New task assigned: {task.title}")
+            
+            return jsonify({'success': True, 'id': task.id}), 201
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({'error': str(e)}), 400
+    
+    # GET
+    tasks = Task.query.order_by(Task.created_at.desc()).all()
+    return jsonify([{
+        'id': t.id,
+        'title': t.title,
+        'description': t.description,
+        'project': Project.query.get(t.project_id).name if t.project_id else None,
+        'assigned_to': User.query.get(t.assigned_to).username if t.assigned_to else None,
+        'priority': t.priority,
+        'status': t.status,
+        'deadline': t.deadline.isoformat() if t.deadline else None
+    } for t in tasks])
+
+@app.route('/api/tasks/<int:task_id>/status', methods=['PUT'])
+@login_required
+def update_task_status(task_id):
+    task = Task.query.get_or_404(task_id)
+    data = request.get_json()
+    
+    task.status = data['status']
+    if data['status'] == 'completed':
+        task.completed_at = datetime.utcnow()
+    
+    db.session.commit()
+    log_activity(f"Updated task status: {task.title} to {task.status}")
+    
+    return jsonify({'success': True})
+
+@app.route('/api/employees', methods=['GET'])
+@login_required
+def employees():
+    users = User.query.all()
+    return jsonify([{
+        'id': u.id,
+        'username': u.username,
+        'email': u.email,
+        'role': u.role
+    } for u in users])
+
+@app.route('/api/notifications', methods=['GET'])
+@login_required
+def notifications():
+    user = get_current_user()
+    notifications = Notification.query.filter_by(user_id=user.id).order_by(Notification.created_at.desc()).limit(10).all()
+    
+    return jsonify([{
+        'id': n.id,
+        'message': n.message,
+        'is_read': n.is_read,
+        'created_at': n.created_at.strftime('%Y-%m-%d %H:%M')
+    } for n in notifications])
+
+@app.route('/api/notifications/<int:notification_id>/read', methods=['PUT'])
+@login_required
+def mark_notification_read(notification_id):
+    notification = Notification.query.get_or_404(notification_id)
+    notification.is_read = True
+    db.session.commit()
+    return jsonify({'success': True})
+
+@app.route('/api/activity-logs', methods=['GET'])
+@login_required
+def activity_logs():
+    logs = ActivityLog.query.order_by(ActivityLog.timestamp.desc()).limit(10).all()
+    
+    return jsonify([{
+        'user': User.query.get(l.user_id).username,
+        'action': l.action,
+        'timestamp': l.timestamp.strftime('%Y-%m-%d %H:%M')
+    } for l in logs])
+
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>', methods=['PUT'])
+@login_required
+def update_stage_status(project_id, stage_id):
+    stage = ProjectStage.query.get_or_404(stage_id)
+    data = request.get_json()
+    
+    old_status = stage.status
+    stage.status = data['status']
+    
+    # Update progress percentage
+    if stage.status == 'in-progress':
+        stage.progress = 50
+    elif stage.status == 'completed':
+        stage.progress = 100
+    else:
+        stage.progress = 0
+    
+    db.session.commit()
+    
+    # Update project progress
+    update_project_progress(project_id)
+    
+    log_activity(f"Updated stage '{stage.name}' status from {old_status} to {stage.status}")
+    
+    return jsonify({'success': True})
+
+def update_project_progress(project_id):
+    """Calculate and update project progress based on stages"""
+    stages = ProjectStage.query.filter_by(project_id=project_id).all()
+    
+    if not stages:
+        return
+    
+    total_progress = sum(stage.progress for stage in stages)
+    average_progress = total_progress // len(stages) if stages else 0
+    
+    project = Project.query.get(project_id)
+    project.progress = average_progress
+    
+    # Auto-update project status
+    completed_stages = sum(1 for s in stages if s.status == 'completed')
+    if completed_stages == len(stages):
+        project.status = 'completed'
+    elif any(s.status == 'in-progress' for s in stages):
+        project.status = 'active'
+    
+    db.session.commit()
+
+@app.route('/api/projects/<int:project_id>/reschedule', methods=['POST'])
+@login_required
+def reschedule_stage(project_id):
+    data = request.get_json()
+    stage_id = data.get('stage_id')
+    days = data.get('days', 0)
+    reason = data.get('reason', '')
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        project = Project.query.get_or_404(project_id)
+        stage = ProjectStage.query.get_or_404(stage_id)
+        
+        # ✅ INCREMENT GLOBAL RESCHEDULE COUNTER
+        project.current_reschedule_number += 1
+        global_reschedule_num = project.current_reschedule_number
+        
+        print(f"\n📋 RESCHEDULE REQUEST:")
+        print(f"   Stage: {stage.name}")
+        print(f"   Global Reschedule Number: {global_reschedule_num}")
+        
+        # Store EXACT original dates BEFORE any modifications
+        original_start_date = stage.start_date
+        original_end_date = stage.end_date
+        
+        print(f"   Original dates: {original_start_date} to {original_end_date}")
+        print(f"   Shift: {days} days")
+        
+        # Calculate which dates will become HOLD
+        if days != 0 and original_start_date and original_end_date:
+            # Get all original working dates
+            original_dates = set()
+            current = original_start_date
+            while current <= original_end_date:
+                if is_working_day(current, False, working_saturdays):
+                    original_dates.add(current)
+                current += timedelta(days=1)
+            
+            # Calculate new dates
+            new_start = add_working_days(original_start_date, days, False, working_saturdays)
+            new_end = add_working_days(original_end_date, days, False, working_saturdays)
+            
+            new_dates = set()
+            current = new_start
+            while current <= new_end:
+                if is_working_day(current, False, working_saturdays):
+                    new_dates.add(current)
+                current += timedelta(days=1)
+            
+            # HOLD dates = dates that were in original but NOT in new schedule
+            hold_dates = original_dates - new_dates
+            
+            print(f"   New dates: {new_start} to {new_end}")
+            print(f"   HOLD dates: {sorted(hold_dates)}")
+            
+            # Store each HOLD date in database
+            for hold_date in hold_dates:
+                hold_record = HoldDate(
+                    project_id=project_id,
+                    stage_id=stage_id,
+                    hold_date=hold_date,
+                    reason=reason if reason else f"Stage rescheduled by {abs(days)} day(s)",
+                    created_by=get_current_user().id
+                )
+                db.session.add(hold_record)
+                print(f"   ✅ Stored HOLD: {hold_date}")
+        
+        # Update stage dates
+        if days != 0:
+            if stage.start_date:
+                stage.start_date = add_working_days(stage.start_date, days, False, working_saturdays)
+            if stage.end_date:
+                stage.end_date = add_working_days(stage.end_date, days, False, working_saturdays)
+            
+            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
+            
+            # Move subsequent stages
+            subsequent_stages = ProjectStage.query.filter(
+                ProjectStage.project_id == project_id,
+                ProjectStage.order > stage.order,
+                ProjectStage.status != 'completed'
+            ).order_by(ProjectStage.order).all()
+            
+            for subsequent_stage in subsequent_stages:
+                if subsequent_stage.start_date:
+                    subsequent_stage.start_date = add_working_days(
+                        subsequent_stage.start_date, days, False, working_saturdays
+                    )
+                if subsequent_stage.end_date:
+                    subsequent_stage.end_date = add_working_days(
+                        subsequent_stage.end_date, days, False, working_saturdays
+                    )
+                print(f"   ↪️ Shifted subsequent stage: {subsequent_stage.name}")
+        
+        # ✅ CREATE HISTORY WITH GLOBAL RESCHEDULE NUMBER
+        history = ScheduleHistory(
+            project_id=project_id,
+            stage_id=stage_id,
+            reschedule_number=global_reschedule_num,  # ✅ Use global counter
+            original_date=original_start_date,
+            new_date=stage.start_date,
+            reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days)} day(s)",
+            rescheduled_by=get_current_user().id
+        )
+        db.session.add(history)
+        
+        print(f"   ✅ Created ScheduleHistory record: Reschedule #{global_reschedule_num}")
+        print(f"      Original: {original_start_date} → New: {stage.start_date}")
+        
+        # Update project end date
+        all_stages = ProjectStage.query.filter_by(project_id=project_id).all()
+        if all_stages:
+            latest_end = max(s.end_date for s in all_stages if s.end_date)
+            project.end_date = latest_end
+            project.working_saturdays = json.dumps(list(working_saturdays))
+        
+        # Regenerate daily tasks
+        generate_daily_tasks_for_project(project_id, working_saturdays)
+        
+        # ✅ COMMIT EVERYTHING
+        db.session.commit()
+        
+        # ✅ VERIFY the record was created
+        verification = ScheduleHistory.query.filter_by(
+            project_id=project_id,
+            stage_id=stage_id,
+            reschedule_number=global_reschedule_num
+        ).first()
+        
+        if verification:
+            print(f"   ✅ VERIFIED: ScheduleHistory record #{verification.id} exists in database")
+            print(f"      Reschedule number: {verification.reschedule_number}")
+        else:
+            print(f"   ⚠️ WARNING: ScheduleHistory record not found after commit!")
+        
+        log_activity(f"Rescheduled stage '{stage.name}' (Global Reschedule #{global_reschedule_num})")
+        
+        return jsonify({
+            'success': True,
+            'reschedule_number': global_reschedule_num,
+            'new_start': stage.start_date.isoformat() if stage.start_date else None,
+            'new_end': stage.end_date.isoformat() if stage.end_date else None
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+    
+@app.route('/api/projects/<int:project_id>', methods=['DELETE'])
+@login_required
+def delete_project(project_id):
+    try:
+        project = Project.query.get_or_404(project_id)
+        project_name = project.name
+        
+        # Delete associated records first (foreign key constraints)
+        ProjectStage.query.filter_by(project_id=project_id).delete()
+        ProjectMember.query.filter_by(project_id=project_id).delete()
+        Task.query.filter_by(project_id=project_id).delete()
+        ScheduleHistory.query.filter_by(project_id=project_id).delete()
+        
+        # Delete the project
+        db.session.delete(project)
+        db.session.commit()
+        
+        log_activity(f"Deleted job: {project_name}")
+        
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+    
+@app.route('/api/projects/<int:project_id>/update-saturdays', methods=['POST'])
+@login_required
+def update_saturdays(project_id):
+    """Update working Saturdays and recalculate all stage dates"""
+    data = request.get_json()
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        project = Project.query.get_or_404(project_id)
+        
+        # Save working Saturdays to database
+        project.working_saturdays = json.dumps(list(working_saturdays))
+        
+        # Get all stages ordered by their order field
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Recalculate all stage dates from project start
+        current_date = get_next_working_day(project.start_date, False, working_saturdays)
+        
+        for stage in stages:
+            # Set start date
+            stage.start_date = current_date
+            
+            # Calculate end date based on duration
+            if stage.duration_days > 0:
+                stage.end_date = add_working_days(current_date, stage.duration_days - 1, False, working_saturdays)
+            else:
+                stage.end_date = current_date
+            
+            # Next stage starts the next working day after THIS stage ends
+            current_date = add_working_days(stage.end_date, 1, False, working_saturdays)
+        
+        # Update project end date
+        if stages:
+            latest_end = max(s.end_date for s in stages if s.end_date)
+            project.end_date = latest_end
+        
+        db.session.commit()
+        
+        log_activity(f"Updated working Saturdays for project '{project.name}'")
+        
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating Saturdays: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+    
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks', methods=['GET'])
+@login_required
+def get_stage_daily_tasks(project_id, stage_id):
+    """Get all daily tasks for a stage"""
+    try:
+        tasks = StageDailyTask.query.filter_by(
+            project_id=project_id,
+            stage_id=stage_id
+        ).order_by(StageDailyTask.day_number).all()
+        
+        return jsonify([{
+            'id': t.id,
+            'day_number': t.day_number,
+            'scheduled_date': t.scheduled_date.isoformat(),
+            'original_date': t.original_date.isoformat() if t.original_date else None,
+            'status': t.status,
+            'completed_at': t.completed_at.strftime('%Y-%m-%d %H:%M') if t.completed_at else None,
+            'rescheduled_reason': t.rescheduled_reason,
+            'is_rescheduled': t.original_date is not None
+        } for t in tasks])
+    except Exception as e:
+        print(f"Error loading daily tasks: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    
+
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/complete', methods=['PUT'])
+@login_required
+def complete_daily_task(project_id, stage_id, task_id):
+    """Mark a daily task as completed"""
+    task = StageDailyTask.query.get_or_404(task_id)
+    task.status = 'completed'
+    task.completed_at = datetime.utcnow()
+    db.session.commit()
+    
+    log_activity(f"Completed day {task.day_number} of stage")
+    return jsonify({'success': True})
+
+
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/reschedule', methods=['POST'])
+@login_required
+def reschedule_daily_task(project_id, stage_id, task_id):
+    data = request.get_json()
+    days_to_shift = data.get('days', 0)
+    reason = data.get('reason', '')
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        task = StageDailyTask.query.get_or_404(task_id)
+        stage = ProjectStage.query.get_or_404(stage_id)
+        project = Project.query.get_or_404(project_id)
+        
+        # PREVENT RESCHEDULING COMPLETED TASKS
+        if task.status == 'completed':
+            return jsonify({'error': 'Cannot reschedule a completed task'}), 400
+        
+        # ✅ INCREMENT GLOBAL RESCHEDULE COUNTER
+        project.current_reschedule_number += 1
+        global_reschedule_num = project.current_reschedule_number
+        
+        # ✅ INCREMENT TASK-LEVEL RESCHEDULE COUNT (for tracking)
+        task.reschedule_count = (task.reschedule_count or 0) + 1
+        
+        # Store EXACT original date BEFORE any changes
+        original_date = task.original_date if task.original_date else task.scheduled_date
+        
+        if not task.original_date:
+            task.original_date = task.scheduled_date
+        
+        # Calculate new date
+        new_date = add_working_days(task.scheduled_date, days_to_shift, False, working_saturdays)
+        
+        task.scheduled_date = new_date
+        task.status = 'rescheduled'
+        task.rescheduled_reason = reason
+        
+        print(f"\n📋 DAILY TASK RESCHEDULE:")
+        print(f"   Stage: {stage.name}, Day {task.day_number}")
+        print(f"   Global Reschedule Number: {global_reschedule_num}")
+        print(f"   Original: {original_date} → New: {new_date}")
+        print(f"   Task Reschedule count: {task.reschedule_count}")
+        
+        # ✅ CREATE DAILY TASK HISTORY WITH GLOBAL NUMBER
+        task_history = DailyTaskRescheduleHistory(
+            project_id=project_id,
+            stage_id=stage_id,
+            task_id=task.id,
+            day_number=task.day_number,
+            reschedule_number=global_reschedule_num,  # ✅ Use global counter
+            original_date=original_date,
+            new_date=new_date,
+            days_shifted=abs(days_to_shift),
+            reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days_to_shift)} day(s)",
+            rescheduled_by=get_current_user().id
+        )
+        db.session.add(task_history)
+        
+        # ✅ ALSO CREATE STAGE-LEVEL HISTORY (for Excel export)
+        stage_history = ScheduleHistory(
+            project_id=project_id,
+            stage_id=stage_id,
+            reschedule_number=global_reschedule_num,  # ✅ Use same global number
+            original_date=stage.start_date,
+            new_date=new_date,
+            reason=f"Daily task reschedule: Day {task.day_number}",
+            rescheduled_by=get_current_user().id
+        )
+        db.session.add(stage_history)
+        
+        print(f"   ✅ Created histories with global reschedule #{global_reschedule_num}")
+        
+        # UPDATE SUBSEQUENT NON-COMPLETED TASKS
+        all_stage_tasks = StageDailyTask.query.filter_by(
+            stage_id=stage_id
+        ).filter(
+            StageDailyTask.day_number > task.day_number,
+            StageDailyTask.status != 'completed'
+        ).order_by(StageDailyTask.day_number).all()
+        
+        for subsequent_task in all_stage_tasks:
+            subsequent_task.reschedule_count = (subsequent_task.reschedule_count or 0) + 1
+            
+            subsequent_original = subsequent_task.original_date if subsequent_task.original_date else subsequent_task.scheduled_date
+            
+            if not subsequent_task.original_date:
+                subsequent_task.original_date = subsequent_task.scheduled_date
+            
+            subsequent_new_date = add_working_days(
+                subsequent_task.scheduled_date, 
+                days_to_shift, 
+                False, 
+                working_saturdays
+            )
+            
+            subsequent_task.scheduled_date = subsequent_new_date
+            subsequent_task.status = 'rescheduled'
+            if not subsequent_task.rescheduled_reason:
+                subsequent_task.rescheduled_reason = f"Auto-shifted due to Day {task.day_number} reschedule"
+            
+            subsequent_history = DailyTaskRescheduleHistory(
+                project_id=project_id,
+                stage_id=stage_id,
+                task_id=subsequent_task.id,
+                day_number=subsequent_task.day_number,
+                reschedule_number=global_reschedule_num,  # ✅ Same global number
+                original_date=subsequent_original,
+                new_date=subsequent_new_date,
+                days_shifted=abs(days_to_shift),
+                reason=f"Auto-reschedule due to Day {task.day_number}",
+                rescheduled_by=get_current_user().id
+            )
+            db.session.add(subsequent_history)
+        
+        # Update stage dates based on actual task dates
+        all_tasks_in_stage = StageDailyTask.query.filter_by(stage_id=stage_id).order_by(
+            StageDailyTask.day_number
+        ).all()
+        
+        if all_tasks_in_stage:
+            stage.start_date = min(t.scheduled_date for t in all_tasks_in_stage)
+            stage.end_date = max(t.scheduled_date for t in all_tasks_in_stage)
+            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
+        
+        # ✅ COMMIT
+        db.session.commit()
+        
+        # ✅ VERIFY
+        verification = DailyTaskRescheduleHistory.query.filter_by(
+            project_id=project_id,
+            task_id=task_id,
+            reschedule_number=global_reschedule_num
+        ).first()
+        
+        if verification:
+            print(f"   ✅ VERIFIED: Daily task history record exists")
+        else:
+            print(f"   ⚠️ WARNING: History record not found!")
+        
+        log_activity(f"Rescheduled day {task.day_number} of stage '{stage.name}' (Global Reschedule #{global_reschedule_num})")
+        
+        return jsonify({
+            'success': True,
+            'new_date': new_date.isoformat(),
+            'reschedule_count': task.reschedule_count,
+            'global_reschedule_number': global_reschedule_num
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+    
+@app.route('/api/projects/<int:project_id>/generate-daily-tasks', methods=['POST'])
+@login_required
+def generate_daily_tasks(project_id):
+    """Generate daily tasks for all stages in a project"""
+    try:
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        
+        for stage in stages:
+            # Delete existing daily tasks for this stage
+            StageDailyTask.query.filter_by(stage_id=stage.id).delete()
+            
+            if not stage.start_date or not stage.end_date:
+                continue
+            
+            # Generate daily tasks
+            current_date = stage.start_date
+            day_number = 1
+            
+            while current_date <= stage.end_date:
+                # Only create task for working days
+                if is_working_day(current_date, False, working_saturdays):
+                    daily_task = StageDailyTask(
+                        stage_id=stage.id,
+                        project_id=project_id,
+                        day_number=day_number,
+                        scheduled_date=current_date,
+                        status='pending'
+                    )
+                    db.session.add(daily_task)
+                    day_number += 1
+                
+                current_date = current_date + timedelta(days=1)
+        
+        db.session.commit()
+        log_activity(f"Generated daily tasks for project '{project.name}'")
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/projects/<int:project_id>/reschedule-history', methods=['GET'])
+@login_required
+def get_reschedule_history(project_id):
+    """Get reschedule history for a project"""
+    history = ScheduleHistory.query.filter_by(project_id=project_id).order_by(
+        ScheduleHistory.rescheduled_at.desc()
+    ).all()
+    
+    return jsonify([{
+        'stage_id': h.stage_id,
+        'stage_name': ProjectStage.query.get(h.stage_id).name if h.stage_id else 'Unknown',
+        'original_date': h.original_date.isoformat() if h.original_date else None,
+        'new_date': h.new_date.isoformat() if h.new_date else None,
+        'days_shifted': (h.new_date - h.original_date).days if h.new_date and h.original_date else 0,
+        'direction': 'forward' if (h.new_date and h.original_date and h.new_date > h.original_date) else 'backward',
+        'reason': h.reason,
+        'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+        'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M')
+    } for h in history])
+
+@app.route('/api/projects/<int:project_id>/complete-reschedule-history', methods=['GET'])
+@login_required
+def get_complete_reschedule_history(project_id):
+    """Get ALL reschedule history - both stage-level and daily task reschedules"""
+    
+    # Force a database commit to ensure all records are visible
+    db.session.commit()
+    
+    # Stage-level reschedules
+    stage_history = ScheduleHistory.query.filter_by(
+        project_id=project_id
+    ).order_by(ScheduleHistory.rescheduled_at.desc()).all()
+    
+    # Daily task reschedules
+    task_history = DailyTaskRescheduleHistory.query.filter_by(
+        project_id=project_id
+    ).order_by(DailyTaskRescheduleHistory.rescheduled_at.desc()).all()
+    
+    print(f"\n=== Complete Reschedule History for Project {project_id} ===")
+    print(f"Stage-level reschedules: {len(stage_history)}")
+    print(f"Daily task reschedules: {len(task_history)}")
+    
+    combined = []
+    
+    # Add stage reschedules
+    for h in stage_history:
+        stage = ProjectStage.query.get(h.stage_id) if h.stage_id else None
+        record = {
+            'type': 'stage',
+            'stage_id': h.stage_id,
+            'stage_name': stage.name if stage else 'Unknown',
+            'day_number': None,
+            'original_date': h.original_date.isoformat() if h.original_date else None,
+            'new_date': h.new_date.isoformat() if h.new_date else None,
+            'days_shifted': abs((h.new_date - h.original_date).days) if h.new_date and h.original_date else 0,
+            'direction': 'forward' if (h.new_date and h.original_date and h.new_date > h.original_date) else 'backward',
+            'reason': h.reason or 'No reason provided',
+            'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+            'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M') if h.rescheduled_at else None
+        }
+        combined.append(record)
+        print(f"  ✔️ Stage: {record['stage_name']}, {record['original_date']} → {record['new_date']}")
+    
+    # Add daily task reschedules
+    for h in task_history:
+        stage = ProjectStage.query.get(h.stage_id) if h.stage_id else None
+        record = {
+            'type': 'daily_task',
+            'stage_id': h.stage_id,
+            'stage_name': stage.name if stage else 'Unknown',
+            'day_number': h.day_number,
+            'original_date': h.original_date.isoformat() if h.original_date else None,
+            'new_date': h.new_date.isoformat() if h.new_date else None,
+            'days_shifted': abs(h.days_shifted),
+            'direction': 'forward' if h.days_shifted > 0 else 'backward',
+            'reason': h.reason or 'No reason provided',
+            'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
+            'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M') if h.rescheduled_at else None
+        }
+        combined.append(record)
+        print(f"  ✔️ Daily Task: {record['stage_name']} Day {record['day_number']}, {record['original_date']} → {record['new_date']}")
+    
+    # Sort by reschedule time (most recent first)
+    combined.sort(key=lambda x: x['rescheduled_at'] if x['rescheduled_at'] else '', reverse=True)
+    
+    print(f"Total records returned: {len(combined)}")
+    print("=" * 60 + "\n")
+    
+    return jsonify(combined)
+
+@app.route('/api/projects/<int:project_id>/export-excel', methods=['GET'])
+@login_required
+def export_project_to_excel(project_id):
+    """Generate Excel with stage-specific reschedule rows, clean weekly timeline, and correct Hold coloring"""
+    try:
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Parse Working Saturdays
+        try:
+            working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        except:
+            working_saturdays = set()
+
+        # ==========================================
+        # 1. PREPARE RESCHEDULE MAP (STAGE-WISE)
+        # ==========================================
+        stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        for stage in stages:
+            parts = stage.name.split('-')
+            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id, 
+                stage_id=stage.id
+            ).all()
+            
+            unique_nums = sorted(list(set(r.reschedule_number for r in task_reschedules if r.reschedule_number)))
+            
+            for idx, r_num in enumerate(unique_nums):
+                target_row = idx + 1
+                if target_row > 4: continue
+                
+                event_tasks = [t for t in task_reschedules if t.reschedule_number == r_num]
+                for t in event_tasks:
+                    date_str = t.new_date.strftime('%Y-%m-%d')
+                    if date_str not in stage_reschedule_map[target_row]:
+                        stage_reschedule_map[target_row][date_str] = []
+                    if stage_abbr not in stage_reschedule_map[target_row][date_str]:
+                        stage_reschedule_map[target_row][date_str].append(stage_abbr)
+
+        # ==========================================
+        # 2. SETUP EXCEL & HEADERS
+        # ==========================================
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Schedule_Tracker"
+        
+        # Styles
+        gray_header = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        light_blue_header = PatternFill(start_color="B4C7E7", end_color="B4C7E7", fill_type="solid")
+        orange_header = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+        orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        cyan_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        light_gray = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        medium_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
+
+        # Timeline
+        project_start = project.start_date
+        project_end = project.end_date
+        all_dates = []
+        current_date = project_start
+        while current_date <= project_end:
+            all_dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        if not all_dates:
+            return jsonify({'error': 'No dates in project range'}), 400
+
+        current_row = 1
+
+        # Set Widths
+        ws.column_dimensions['A'].width = 28
+        ws.column_dimensions['B'].width = 28
+        ws.column_dimensions['C'].width = 28
+        ws.column_dimensions['D'].width = 28
+        ws.column_dimensions['E'].width = 28
+        for i in range(6, len(all_dates) + 10):
+            ws.column_dimensions[get_column_letter(i)].width = 15
+
+        # ==========================================
+        # STAGE DETAILS TABLE (TOP SECTION)
+        # ==========================================
+        # Organize stages into rows - each stage takes up a full cell
+        stage_list = []
+        for stage in stages:
+            parts = stage.name.split('-')
+            if len(parts) >= 2:
+                # Get everything before the last hyphen as category
+                category = '-'.join(parts[:-1]).strip()
+                abbr = parts[-1].strip()
+                stage_list.append(f"{category} -{abbr}")
+            else:
+                stage_list.append(stage.name)
+        
+        # Create table with stages distributed across columns
+        max_cols = 5  # A, B, C, D, E
+        table_row = current_row
+        col_idx = 0
+        
+        for stage_text in stage_list:
+            col = col_idx + 1  # Column A=1, B=2, etc.
+            
+            cell = ws.cell(table_row, col, value=stage_text)
+            cell.fill = white_fill
+            cell.border = thin_border
+            cell.font = Font(size=10, bold=True)
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            
+            col_idx += 1
+            if col_idx >= max_cols:
+                col_idx = 0
+                table_row += 1
+        
+        # Move to next row after table
+        if col_idx > 0:
+            table_row += 1
+        
+        current_row = table_row + 2  # Add spacing after stage table
+
+        # ==========================================
+        # HEADER ROW 1: Month-Year header (merged across all date columns)
+        # ==========================================
+        ws.cell(current_row, 1, value="")
+        ws.cell(current_row, 1).border = thin_border
+        
+        ws.cell(current_row, 2, value="")
+        ws.cell(current_row, 2).fill = gray_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        # Merge cells for month-year header
+        start_col = 3
+        end_col = len(all_dates) + 2
+        ws.merge_cells(start_row=current_row, start_column=start_col, end_row=current_row, end_column=end_col)
+        
+        # Set month-year text (e.g., "Jan-31")
+        month_year_text = all_dates[0].strftime('%b-%y')
+        cell = ws.cell(current_row, start_col, value=month_year_text)
+        cell.fill = orange_header
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.font = Font(bold=True, size=11)
+        
+        header_row_1 = current_row
+        current_row += 1
+
+        # ==========================================
+        # HEADER ROW 2: Day numbers with light blue background
+        # ==========================================
+        ws.cell(current_row, 1, value="")
+        ws.cell(current_row, 1).border = thin_border
+        
+        ws.cell(current_row, 2, value="")
+        ws.cell(current_row, 2).fill = gray_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3, value=d.day)
+            cell.fill = light_blue_header
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.font = Font(bold=True, size=11)
+        
+        header_row_2 = current_row
+        current_row += 1
+
+        # ==========================================
+        # Merge A and B for Project Name and "Date"
+        # ==========================================
+        # Merge for Project Name
+        ws.merge_cells(start_row=header_row_1, start_column=1, end_row=header_row_2, end_column=1)
+        ws.cell(header_row_1, 1, value=project.name)
+        ws.cell(header_row_1, 1).fill = light_blue_header
+        ws.cell(header_row_1, 1).border = thin_border
+        ws.cell(header_row_1, 1).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(header_row_1, 1).font = Font(bold=True, size=12)
+        
+        # Merge for "Date"
+        ws.merge_cells(start_row=header_row_1, start_column=2, end_row=header_row_2, end_column=2)
+        ws.cell(header_row_1, 2, value="Date")
+        ws.cell(header_row_1, 2).fill = light_blue_header
+        ws.cell(header_row_1, 2).border = thin_border
+        ws.cell(header_row_1, 2).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(header_row_1, 2).font = Font(bold=True, size=11)
+
+        # --- PLANNED ROW ---
+        ws.cell(current_row, 1, value="").border = thin_border
+        ws.cell(current_row, 2, value="Planned").border = thin_border
+        ws.cell(current_row, 2).font = Font(bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+        
+        planned_map = {}
+        for stage in stages:
+            if stage.start_date and stage.end_date:
+                parts = stage.name.split('-')
+                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                d = stage.start_date
+                while d <= stage.end_date:
+                    if is_working_day(d, False, working_saturdays):
+                        ds = d.strftime('%Y-%m-%d')
+                        if ds not in planned_map: 
+                            planned_map[ds] = []
+                        planned_map[ds].append(abbr)
+                    d += timedelta(days=1)
+                    
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            ds = d.strftime('%Y-%m-%d')
+            
+            # Check if weekend
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if ds in planned_map:
+                cell.value = ','.join(sorted(set(planned_map[ds])))
+                cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+                cell.font = Font(size=9, bold=True)
+            
+            # Apply yellow fill for weekends
+            if is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            
+            cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 40
+        current_row += 1
+
+        # --- RESCHEDULE ROWS (1-4) ---
+        for r_num in range(1, 5):
+            ws.cell(current_row, 1, value="").border = thin_border
+            ws.cell(current_row, 2, value=f"Reschedule -{r_num}").border = thin_border
+            ws.cell(current_row, 2).font = Font(bold=True)
+            ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+            
+            r_data = stage_reschedule_map.get(r_num, {})
+            
+            for i, d in enumerate(all_dates):
+                cell = ws.cell(current_row, i+3)
+                ds = d.strftime('%Y-%m-%d')
+                
+                # Check if weekend
+                is_sunday = d.weekday() == 6
+                is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+                
+                if ds in r_data:
+                    cell.value = ','.join(sorted(set(r_data[ds])))
+                    cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+                    cell.font = Font(size=9, bold=True)
+                
+                # Apply yellow fill for weekends
+                if is_sunday or is_non_working_saturday:
+                    cell.fill = yellow_fill
+                
+                cell.border = thin_border
+            
+            ws.row_dimensions[current_row].height = 30
+            current_row += 1
+
+        # --- ACTUAL ROW ---
+        ws.cell(current_row, 1, value="").border = thin_border
+        ws.cell(current_row, 2, value="Actual").border = thin_border
+        ws.cell(current_row, 2).fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        ws.cell(current_row, 2).font = Font(bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+        
+        actual_map = {}
+        hold_dates_map = {}
+        
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
+            for t in tasks:
+                ds = t.scheduled_date.strftime('%Y-%m-%d')
+                if ds not in actual_map: 
+                    actual_map[ds] = []
+                actual_map[ds].append((abbr, t.status))
+                
+                if t.original_date and t.original_date != t.scheduled_date:
+                    hds = t.original_date.strftime('%Y-%m-%d')
+                    if hds not in hold_dates_map: 
+                        hold_dates_map[hds] = []
+                    hold_dates_map[hds].append(abbr)
+                    
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            ds = d.strftime('%Y-%m-%d')
+            
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            real_holds = hold_abbrs - active_abbrs
+            
+            parts = []
+            if real_holds: 
+                parts.append(f"{','.join(sorted(real_holds))}=HOLD")
+            if active_abbrs: 
+                parts.append(','.join(sorted(active_abbrs)))
+            
+            if parts:
+                cell.value = ','.join(parts)
+            
+            cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+            cell.font = Font(size=9, bold=True)
+            cell.border = thin_border
+            
+            # Coloring logic - Check weekends first
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill  # Yellow for weekends
+            elif real_holds: 
+                cell.fill = orange_fill
+            elif active_abbrs:
+                stats = set(x[1] for x in active)
+                if 'completed' in stats: 
+                    cell.fill = green_fill
+                elif 'rescheduled' in stats: 
+                    cell.fill = cyan_fill
+        
+        ws.row_dimensions[current_row].height = 40
+        current_row += 1
+
+        # ==========================================
+        # REMARKS ROW
+        # ==========================================
+        ws.cell(current_row, 1, value="").border = thin_border
+        
+        ws.cell(current_row, 2, value="Remarks").border = thin_border
+        ws.cell(current_row, 2).font = Font(size=10, italic=True, bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
+        
+        for i, d in enumerate(all_dates):
+            ds = d.strftime('%Y-%m-%d')
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            real_holds = hold_abbrs - active_abbrs
+            
+            cell = ws.cell(current_row, i+3)
+            
+            # Check if weekend
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if real_holds:
+                reason = "Waiting for issue tracker"
+                for stage in stages:
+                    parts = stage.name.split('-')
+                    abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                    if abbr in real_holds:
+                        task = StageDailyTask.query.filter_by(stage_id=stage.id, original_date=d).first()
+                        if task and task.rescheduled_reason:
+                            reason = task.rescheduled_reason
+                            break
+                
+                cell.value = reason
+                cell.alignment = Alignment(text_rotation=0, horizontal='left', vertical='top', wrap_text=True)
+                cell.font = Font(size=9)
+            elif is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            
+            cell.border = thin_border
+
+        ws.row_dimensions[current_row].height = 60
+        current_row += 1
+
+        current_row += 2
+        
+        # ==========================================
+        # LEGEND TABLE
+        # ==========================================
+        # Row 1: Hold
+        cell_a1 = ws.cell(current_row, 1, value="")
+        cell_a1.fill = orange_fill
+        cell_a1.border = thin_border
+        
+        cell_b1 = ws.cell(current_row, 2, value="Hold")
+        cell_b1.border = thin_border
+        cell_b1.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b1.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
+        cell_c1 = ws.cell(current_row, 3, value="If project goes on hold from Customer")
+        cell_c1.border = thin_border
+        cell_c1.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        cell_c1.font = Font(size=10)
+        # Add border to the last cell in merged range
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        current_row += 1
+        
+        # Row 2: Changes
+        cell_a2 = ws.cell(current_row, 1, value="")
+        cell_a2.border = thin_border
+        
+        cell_b2 = ws.cell(current_row, 2, value="Changes")
+        cell_b2.border = thin_border
+        cell_b2.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b2.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
+        cell_c2 = ws.cell(current_row, 3, value="")
+        cell_c2.border = thin_border
+        # Add border to the last cell in merged range
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        current_row += 1
+        
+        # Row 3: Holidays
+        cell_a3 = ws.cell(current_row, 1, value="")
+        cell_a3.fill = yellow_fill
+        cell_a3.border = thin_border
+        
+        cell_b3 = ws.cell(current_row, 2, value="Holidays")
+        cell_b3.border = thin_border
+        cell_b3.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b3.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
+        cell_c3 = ws.cell(current_row, 3, value="")
+        cell_c3.border = thin_border
+        # Add border to the last cell in merged range
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        
+        # Output
+        excel_file = BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+        
+        return send_file(
+            excel_file,
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=f"{project.name}_Tracker.xlsx"
+        )
+        
+    except Exception as e:
+        print(f"Export Error: {e}")
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/projects/<int:project_id>/hold-dates', methods=['GET'])
+@login_required
+def get_hold_dates(project_id):
+    """Get all HOLD dates for a project"""
+    hold_dates = HoldDate.query.filter_by(project_id=project_id).order_by(
+        HoldDate.hold_date
+    ).all()
+    
+    return jsonify([{
+        'id': h.id,
+        'stage_id': h.stage_id,
+        'stage_name': ProjectStage.query.get(h.stage_id).name if h.stage_id else 'Unknown',
+        'hold_date': h.hold_date.isoformat(),
+        'reason': h.reason,
+        'created_by': User.query.get(h.created_by).username if h.created_by else 'Unknown',
+        'created_at': h.created_at.strftime('%Y-%m-%d %H:%M')
+    } for h in hold_dates])   
+# ============================================================================
+# Initialize Database & Create Default User
+# ============================================================================
+
+def init_db():
+    with app.app_context():
+        db.create_all()
+        
+        try:
+            from sqlalchemy import inspect, text
+            inspector = inspect(db.engine)
+
+
+            # ==========================================
+            # ADD GLOBAL RESCHEDULE COUNTER TO PROJECT
+            # ==========================================
+            project_columns = [col['name'] for col in inspector.get_columns('project')]
+            if 'current_reschedule_number' not in project_columns:
+                print("[INFO] Adding current_reschedule_number to project table...")
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project ADD COLUMN current_reschedule_number INTEGER DEFAULT 0"))
+                    conn.commit()
+                print("[SUCCESS] Added current_reschedule_number column")
+
+            
+            # ==========================================
+            # 1. SCHEDULE_HISTORY TABLE (Stage-level reschedules)
+            # ==========================================
+            schedule_history_columns = [col['name'] for col in inspector.get_columns('schedule_history')]
+            if 'reschedule_number' not in schedule_history_columns:
+                print("[WARNING] Adding reschedule_number column to schedule_history...")
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE schedule_history ADD COLUMN reschedule_number INTEGER DEFAULT 1"))
+                    conn.commit()
+                print("[SUCCESS] Added reschedule_number column to schedule_history")
+            
+            # CRITICAL: Backfill existing records with sequential numbers
+            existing_records = ScheduleHistory.query.all()
+            if existing_records:
+                print(f"[INFO] Checking {len(existing_records)} existing reschedule records...")
+                
+                # Group by project_id and stage_id
+                from collections import defaultdict
+                grouped = defaultdict(list)
+                
+                for record in existing_records:
+                    key = (record.project_id, record.stage_id)
+                    grouped[key].append(record)
+                
+                # Number them sequentially per stage
+                for (proj_id, stage_id), records in grouped.items():
+                    records.sort(key=lambda r: r.rescheduled_at)
+                    for idx, record in enumerate(records, 1):
+                        if not record.reschedule_number or record.reschedule_number == 0:
+                            record.reschedule_number = idx
+                            print(f"  [UPDATE] Record ID {record.id} set to reschedule #{idx}")
+                
+                db.session.commit()
+                print("[SUCCESS] Backfilled reschedule numbers for stage-level reschedules")
+            
+            # ==========================================
+            # 2. STAGE_DAILY_TASK TABLE (Add reschedule_count)
+            # ==========================================
+            if inspector.has_table('stage_daily_task'):
+                task_columns = [col['name'] for col in inspector.get_columns('stage_daily_task')]
+                if 'reschedule_count' not in task_columns:
+                    print("[WARNING] Adding reschedule_count column to stage_daily_task...")
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE stage_daily_task ADD COLUMN reschedule_count INTEGER DEFAULT 0"))
+                        conn.commit()
+                    print("[SUCCESS] Added reschedule_count column to stage_daily_task")
+            else:
+                db.create_all()
+                print("✅ Created stage_daily_task table")
+            
+            # ==========================================
+            # 3. DAILY_TASK_RESCHEDULE_HISTORY TABLE (Add reschedule_number)
+            # ==========================================
+            if inspector.has_table('daily_task_reschedule_history'):
+                history_columns = [col['name'] for col in inspector.get_columns('daily_task_reschedule_history')]
+                if 'reschedule_number' not in history_columns:
+                    print("[WARNING] Adding reschedule_number column to daily_task_reschedule_history...")
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE daily_task_reschedule_history ADD COLUMN reschedule_number INTEGER DEFAULT 1"))
+                        conn.commit()
+                    print("[SUCCESS] Added reschedule_number column to daily_task_reschedule_history")
+                
+                # Backfill existing daily task reschedule records
+                existing_task_history = DailyTaskRescheduleHistory.query.all()
+                if existing_task_history:
+                    print(f"[INFO] Backfilling {len(existing_task_history)} daily task reschedule records...")
+                    
+                    from collections import defaultdict
+                    task_grouped = defaultdict(list)
+                    
+                    for record in existing_task_history:
+                        key = (record.project_id, record.task_id)
+                        task_grouped[key].append(record)
+                    
+                    for (proj_id, task_id), records in task_grouped.items():
+                        records.sort(key=lambda r: r.rescheduled_at)
+                        for idx, record in enumerate(records, 1):
+                            if not hasattr(record, 'reschedule_number') or not record.reschedule_number or record.reschedule_number == 0:
+                                record.reschedule_number = idx
+                                print(f"  [UPDATE] Task history ID {record.id} set to reschedule #{idx}")
+                    
+                    db.session.commit()
+                    print("[SUCCESS] Backfilled reschedule numbers for daily task reschedules")
+            else:
+                print("⚠️  daily_task_reschedule_history table missing, creating...")
+                db.create_all()
+                print("✅ Created daily_task_reschedule_history table")
+            
+            # ==========================================
+            # 4. PROJECT TABLE (working_saturdays)
+            # ==========================================
+            columns = [col['name'] for col in inspector.get_columns('project')]
+            if 'working_saturdays' not in columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project ADD COLUMN working_saturdays TEXT DEFAULT '[]'"))
+                    conn.commit()
+                print("✅ Added working_saturdays column to project")
+            
+            # ==========================================
+            # 5. PROJECT_STAGE TABLE (manager_id)
+            # ==========================================
+            stage_columns = [col['name'] for col in inspector.get_columns('project_stage')]
+            if 'manager_id' not in stage_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project_stage ADD COLUMN manager_id INTEGER"))
+                    conn.commit()
+                print("✅ Added manager_id column to project_stage")
+            
+            # ==========================================
+            # 6. HOLD_DATE TABLE
+            # ==========================================
+            if not inspector.has_table('hold_date'):
+                print("⚠️  hold_date table missing, creating...")
+                db.create_all()
+                print("✅ Created hold_date table")
+            
+            print("\n" + "="*60)
+            print("✅ DATABASE INITIALIZATION COMPLETE")
+            print("="*60 + "\n")
+            
+        except Exception as e:
+            print(f"❌ Error during database initialization: {e}")
+            import traceback
+            traceback.print_exc()
+        
+        # Create default admin user if not exists
+        if not User.query.filter_by(username='admin').first():
+            admin = User(
+                username='admin',
+                email='admin@example.com',
+                password_hash=generate_password_hash('admin123'),
+                role='admin'
+            )
+            db.session.add(admin)
+            db.session.commit()
+            print("✅ Default admin user created (username: admin, password: admin123)")
+
+if __name__ == '__main__':
+    init_db()
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
+
+
+    <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Project Manager</title>
-    <link rel="stylesheet" href="css/style.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-</head>
-<body>
-    <div class="layout">
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <h2>Project Manager</h2>
-            </div>
-            <ul class="nav-menu">
-                <li><a href="dashboard.html" class="active">📊 Dashboard</a></li>
-                <li><a href="projects.html">📁 Projects</a></li>
-                <li><a href="kanban.html">📋 Kanban Board</a></li>
-                <li><a href="#" id="logoutBtn">🚪 Logout</a></li>
-            </ul>
-            <div class="user-info">
-                <img id="userAvatar" src="" alt="Avatar">
-                <div>
-                    <div id="userName"></div>
-                    <div id="userRole" class="user-role"></div>
-                </div>
-            </div>
-        </nav>
-
-        <main class="main-content">
-            <header class="page-header">
-                <h1>Dashboard</h1>
-                <button class="btn btn-primary" id="createProjectBtn">+ New Project</button>
-            </header>
-
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <h3>Total Projects</h3>
-                    <div class="stat-value" id="totalProjects">0</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Active Tasks</h3>
-                    <div class="stat-value" id="activeTasks">0</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Completed</h3>
-                    <div class="stat-value" id="completedTasks">0</div>
-                </div>
-                <div class="stat-card">
-                    <h3>Overdue</h3>
-                    <div class="stat-value" id="overdueTasks">0</div>
-                </div>
-            </div>
-
-            <div class="charts-grid">
-                <div class="chart-card">
-                    <h3>Task Distribution</h3>
-                    <canvas id="taskDistChart"></canvas>
-                </div>
-                <div class="chart-card">
-                    <h3>Project Progress</h3>
-                    <canvas id="projectProgressChart"></canvas>
-                </div>
-            </div>
-
-            <div class="recent-tasks">
-                <h3>Recent Tasks</h3>
-                <div id="recentTasksList"></div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Create Project Modal -->
-    <div id="projectModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2>Create New Project</h2>
-            <form id="projectForm">
-                <div class="form-group">
-                    <label>Project Name</label>
-                    <input type="text" id="projectName" required>
-                </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea id="projectDescription" rows="3"></textarea>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Start Date</label>
-                        <input type="date" id="projectStartDate">
-                    </div>
-                    <div class="form-group">
-                        <label>End Date</label>
-                        <input type="date" id="projectEndDate">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Priority</label>
-                        <select id="projectPriority">
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                            <option value="critical">Critical</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Budget</label>
-                        <input type="number" id="projectBudget" step="0.01">
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-primary btn-block">Create Project</button>
-            </form>
-        </div>
-    </div>
-
-    <script src="js/dashboard.js"></script>
-</body>
-</html>
-```
-
-
-## 15. public/kanban.html
-
-```html
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kanban Board - Project Manager</title>
-    <link rel="stylesheet" href="css/style.css">
-    <script src="https://cdn.socket.io/4.6.0/socket.io.min.js"></script>
-</head>
-<body>
-    <div class="layout">
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <h2>Project Manager</h2>
-            </div>
-            <ul class="nav-menu">
-                <li><a href="dashboard.html">📊 Dashboard</a></li>
-                <li><a href="projects.html">📁 Projects</a></li>
-                <li><a href="kanban.html" class="active">📋 Kanban Board</a></li>
-                <li><a href="#" id="logoutBtn">🚪 Logout</a></li>
-            </ul>
-        </nav>
-
-        <main class="main-content">
-            <header class="page-header">
-                <h1>Kanban Board</h1>
-                <div class="header-actions">
-                    <select id="projectFilter" class="form-control">
-                        <option value="">All Projects</option>
-                    </select>
-                    <button class="btn btn-primary" id="createTaskBtn">+ New Task</button>
-                </div>
-            </header>
-
-            <div class="kanban-board">
-                <div class="kanban-column" data-status="todo">
-                    <div class="column-header">
-                        <h3>To Do</h3>
-                        <span class="task-count" id="todoCount">0</span>
-                    </div>
-                    <div class="task-list" id="todoList"></div>
-                </div>
-
-                <div class="kanban-column" data-status="in-progress">
-                    <div class="column-header">
-                        <h3>In Progress</h3>
-                        <span class="task-count" id="inProgressCount">0</span>
-                    </div>
-                    <div class="task-list" id="inProgressList"></div>
-                </div>
-
-                <div class="kanban-column" data-status="review">
-                    <div class="column-header">
-                        <h3>Review</h3>
-                        <span class="task-count" id="reviewCount">0</span>
-                    </div>
-                    <div class="task-list" id="reviewList"></div>
-                </div>
-
-                <div class="kanban-column" data-status="completed">
-                    <div class="column-header">
-                        <h3>Completed</h3>
-                        <span class="task-count" id="completedCount">0</span>
-                    </div>
-                    <div class="task-list" id="completedList"></div>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Create Task Modal -->
-    <div id="taskModal" class="modal">
-        <div class="modal-content">
-            <span class="close">&times;</span>
-            <h2 id="taskModalTitle">Create New Task</h2>
-            <form id="taskForm">
-                <input type="hidden" id="taskId">
-                <div class="form-group">
-                    <label>Project</label>
-                    <select id="taskProject" required></select>
-                </div>
-                <div class="form-group">
-                    <label>Task Title</label>
-                    <input type="text" id="taskTitle" required>
-                </div>
-                <div class="form-group">
-                    <label>Description</label>
-                    <textarea id="taskDescription" rows="3"></textarea>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Assign To</label>
-                        <select id="taskAssignee"></select>
-                    </div>
-                    <div class="form-group">
-                        <label>Priority</label>
-                        <select id="taskPriority">
-                            <option value="low">Low</option>
-                            <option value="medium">Medium</option>
-                            <option value="high">High</option>
-                            <option value="critical">Critical</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Due Date</label>
-                        <input type="date" id="taskDueDate">
-                    </div>
-                    <div class="form-group">
-                        <label>Estimated Hours</label>
-                        <input type="number" id="taskEstimatedHours" step="0.5" min="0">
-                    </div>
-                </div>
-                <button type="submit" class="btn btn-primary btn-block">Save Task</button>
-            </form>
-        </div>
-    </div>
-
-    <script src="js/kanban.js"></script>
-</body>
-</html>
-```
-
-
-## 16. public/css/style.css
-
-```css
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
+    <title>Job Management Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css' rel='stylesheet' />
+    <!-- Add this in the <head> section of index.html -->
+    <style>
 :root {
-    --primary: #4f46e5;
-    --primary-dark: #4338ca;
-    --success: #10b981;
-    --warning: #f59e0b;
-    --danger: #ef4444;
-    --gray-50: #f9fafb;
-    --gray-100: #f3f4f6;
-    --gray-200: #e5e7eb;
-    --gray-300: #d1d5db;
-    --gray-600: #4b5563;
-    --gray-700: #374151;
-    --gray-800: #1f2937;
-    --gray-900: #111827;
+    --primary-color: #667eea;
+    --secondary-color: #764ba2;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-    background: var(--gray-50);
-    color: var(--gray-800);
-    line-height: 1.6;
-}
-
-/* Login Page */
-.login-page {
-    display: flex;
-    justify-content: center;
-    align-items: center;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
-    background: linear-gradient(135deg, var(--primary) 0%, #7c3aed 100%);
-}
-
-.login-container {
-    width: 100%;
-    max-width: 450px;
     padding: 20px;
-}
-
-.login-card {
-    background: white;
-    border-radius: 12px;
-    padding: 40px;
-    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-}
-
-.login-card h1 {
-    font-size: 2rem;
-    color: var(--gray-900);
-    margin-bottom: 8px;
-}
-
-.subtitle {
-    color: var(--gray-600);
-    margin-bottom: 30px;
-}
-
-.tabs {
-    display: flex;
-    gap: 10px;
-    margin-bottom: 30px;
-    border-bottom: 2px solid var(--gray-200);
-}
-
-.tab-btn {
-    flex: 1;
-    padding: 12px;
-    background: none;
-    border: none;
-    border-bottom: 3px solid transparent;
-    color: var(--gray-600);
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.tab-btn.active {
-    color: var(--primary);
-    border-bottom-color: var(--primary);
-}
-
-.auth-form {
-    display: none;
-}
-
-.auth-form.active {
-    display: block;
-}
-
-.form-group {
-    margin-bottom: 20px;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 6px;
-    font-weight: 500;
-    color: var(--gray-700);
-}
-
-.form-group input,
-.form-group select,
-.form-group textarea {
-    width: 100%;
-    padding: 12px;
-    border: 2px solid var(--gray-200);
-    border-radius: 8px;
-    font-size: 14px;
-    transition: border-color 0.3s;
-}
-
-.form-group input:focus,
-.form-group select:focus,
-.form-group textarea:focus {
-    outline: none;
-    border-color: var(--primary);
-}
-
-.form-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 15px;
-}
-
-.btn {
-    padding: 12px 24px;
-    border: none;
-    border-radius: 8px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
-}
-
-.btn-primary {
-    background: var(--primary);
-    color: white;
-}
-
-.btn-primary:hover {
-    background: var(--primary-dark);
-}
-
-.btn-block {
-    width: 100%;
-}
-
-.error-message {
-    margin-top: 15px;
-    padding: 12px;
-    background: #fef2f2;
-    color: var(--danger);
-    border-radius: 8px;
-    display: none;
-}
-
-/* Layout */
-.layout {
-    display: flex;
-    min-height: 100vh;
-}
-
-.sidebar {
-    width: 260px;
-    background: var(--gray-900);
-    color: white;
-    display: flex;
-    flex-direction: column;
-    position: fixed;
-    height: 100vh;
-}
-
-.sidebar-header {
-    padding: 24px 20px;
-    border-bottom: 1px solid var(--gray-800);
-}
-
-.sidebar-header h2 {
-    font-size: 1.5rem;
-}
-
-.nav-menu {
-    flex: 1;
-    list-style: none;
-    padding: 20px 0;
-}
-
-.nav-menu li a {
-    display: block;
-    padding: 12px 20px;
-    color: var(--gray-300);
-    text-decoration: none;
-    transition: all 0.3s;
-}
-
-.nav-menu li a:hover,
-.nav-menu li a.active {
-    background: var(--gray-800);
-    color: white;
-}
-
-.user-info {
-    padding: 20px;
-    border-top: 1px solid var(--gray-800);
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.user-info img {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-}
-
-.user-role {
-    font-size: 12px;
-    color: var(--gray-400);
-    text-transform: capitalize;
-}
-
-.main-content {
-    flex: 1;
-    margin-left: 260px;
-    padding: 30px;
-}
-
-.page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 30px;
-}
-
-.page-header h1 {
-    font-size: 2rem;
-    color: var(--gray-900);
-}
-
-.header-actions {
-    display: flex;
-    gap: 15px;
-    align-items: center;
-}
-
-/* Stats Grid */
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
 }
 
 .stat-card {
     background: white;
-    padding: 24px;
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-radius: 15px;
+    padding: 25px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    transition: transform 0.3s;
+    height: 100%;
 }
 
-.stat-card h3 {
-    font-size: 14px;
-    color: var(--gray-600);
-    margin-bottom: 8px;
+.stat-card:hover { 
+    transform: translateY(-5px);
 }
 
-.stat-value {
-    font-size: 2.5rem;
-    font-weight: 700;
-    color: var(--primary);
+.stat-card .icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.8rem;
+    margin-bottom: 15px;
 }
 
-/* Charts */
-.charts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-    gap: 20px;
+.stat-card h3 { 
+    font-size: 2rem; font-weight: 700; margin: 10px 0; 
+}
+
+.card-custom {
+    background: white;
+    border-radius: 15px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.card-custom .card-header {
+    background: transparent;
+    border-bottom: 2px solid #f1f3f5;
+    padding: 20px;
+    font-weight: 600;
+    font-size: 1.2rem;
+}
+
+.btn-primary-custom {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    border: none;
+    border-radius: 10px;
+    padding: 10px 20px;
+    color: white;
+    font-weight: 600;
+}
+
+.btn-primary-custom:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 20px rgba(95, 116, 206, 0.4);
+    color: white;
+}
+
+.top-bar-custom {
+    background: white;
+    padding: 15px 30px;
+    border-radius: 15px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.1);
     margin-bottom: 30px;
 }
 
-.chart-card {
-    background: white;
-    padding: 24px;
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.chart-card h3 {
-    margin-bottom: 20px;
-    color: var(--gray-700);
-}
-
-/* Kanban Board */
-.kanban-board {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 20px;
-    overflow-x: auto;
-}
-
-.kanban-column {
-    background: var(--gray-100);
-    border-radius: 12px;
-    padding: 16px;
-    min-width: 280px;
-}
-
-.column-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 16px;
-    padding-bottom: 12px;
-    border-bottom: 2px solid var(--gray-200);
-}
-
-.column-header h3 {
-    font-size: 1rem;
-    color: var(--gray-700);
-}
-
-.task-count {
-    background: var(--gray-300);
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.task-list {
-    min-height: 400px;
-}
-
-.task-card {
-    background: white;
-    padding: 16px;
-    border-radius: 8px;
-    margin-bottom: 12px;
-    cursor: grab;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-    transition: all 0.3s;
-}
-
-.task-card:hover {
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    transform: translateY(-2px);
-}
-
-.task-card.dragging {
-    opacity: 0.5;
-}
-
-.task-priority {
-    display: inline-block;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-    margin-bottom: 8px;
-}
-
-.priority-low {
-    background: #dbeafe;
-    color: #1e40af;
-}
-
-.priority-medium {
-    background: #fef3c7;
-    color: #92400e;
-}
-
-.priority-high {
-    background: #fed7aa;
-    color: #9a3412;
-}
-
-.priority-critical {
-    background: #fee2e2;
-    color: #991b1b;
-}
-
-.task-title {
-    font-weight: 600;
-    margin-bottom: 8px;
-    color: var(--gray-900);
-}
-
-.task-meta {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-top: 12px;
-    padding-top: 12px;
-    border-top: 1px solid var(--gray-200);
-    font-size: 12px;
-    color: var(--gray-600);
-}
-
-.task-assignee {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.task-assignee img {
-    width: 24px;
-    height: 24px;
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background: #dc3545;
+    color: white;
     border-radius: 50%;
-}
-
-/* Modal */
-.modal {
-    display: none;
-    position: fixed;
-    z-index: 1000;
-    left: 0;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.5);
-}
-
-.modal.active {
+    width: 20px;
+    height: 20px;
     display: flex;
-    justify-content: center;
     align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+}
+
+.modal-header {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: white;
+    border-bottom: none;
 }
 
 .modal-content {
+    border-radius: 8px;
+    border: 1px solid #dee2e6;
+}
+
+.modal-body {
+    padding: 25px 30px;
+    background: white;
+}
+
+/* ===== PROJECT PROGRESS STEPS ===== */
+.progress-steps {
+    position: relative;
+    display: flex;
+    flex-direction: row;
+    margin: 30px 0;
+    align-items: flex-start;
+    overflow-x: auto; /* âœ… Allow horizontal scrolling */
+    padding-bottom: 10px; /* Space for scrollbar */
+}
+.progress-line {
+    position: absolute;
+    top: 25px;
+    left: 20px;
+    right: 20px;
+    height: 4px;
+    background: #dee2e6;
+    z-index: 1;
+    min-width: calc(100% - 40px); /* âœ… Ensure it spans full width */
+}
+
+.progress-line-fill {
+    position: absolute;
+    height: 100%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    transition: width 0.5s ease;
+}
+
+.progress-step {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.progress-step.normal-spacing {
+    flex: 1;
+    padding: 0 15px;
+}
+
+.progress-step.tight-spacing {
+    flex: 0 0 70px;
+    margin: 0 -5px;
+}
+
+.progress-step.medium-spacing {
+    flex: 0 0 80px;
+    margin: 0 0px;
+}
+
+.stage-group-container {
+    display: flex;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%);
+    border: 2px solid #667eea;
+    border-radius: 15px;
+    padding: 15px 10px;
+    margin: 10px 10px 0 10px;
+    position: relative;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+}
+
+.stage-group-container::before {
+    content: 'âš¡ Parallel';
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 4px 16px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border-radius: 20px;
+    box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
+    z-index: 10;
+    white-space: nowrap;
+}
+.step-circle {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: white;
+    border: 4px solid #dee2e6;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #6c757d;
+    transition: all 0.3s;
+}
+
+.step-circle.completed {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-color: #667eea;
+    color: white;
+}
+
+.step-circle.active {
+    background: #17a2b8;
+    border-color: #17a2b8;
+    color: white;
+    box-shadow: 0 0 0 4px rgba(23,162,184,0.2);
+}
+
+.step-label {
+    margin-top: 10px;
+    padding: 5px 10px;
+    background: white;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-align: center;
+    max-width: 150px;
+    word-wrap: break-word;
+}
+
+.step-label.completed {
+    background: linear-gradient(135deg, #e8eef9 0%, #f0e8f5 100%);
+    color: #667eea;
+}
+
+.step-label.active {
+    background: #17a2b8;
+    color: white;
+}
+
+.duration-badge {
+    background: #667eea;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 0.65rem;
+    margin-left: 5px;
+}
+
+.project-progress-container {
+    margin-bottom: 40px;
+    padding: 25px;
+    background: #f8f9fa;
+    border-radius: 15px;
+}
+
+.project-status-badge {
+    padding: 5px 15px;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.status-active {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+}
+
+.status-completed {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+}
+
+.project-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.btn-delete-project {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.btn-delete-project:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+}
+
+    /* ===== CALENDAR MODAL ===== */
+    .calendar-modal .modal-dialog {
+        max-width: 1200px;
+        width: 95%;
+        margin: 1.75rem auto;
+    }
+
+    .calendar-modal .modal-content {
+        border-radius: 15px;
+    }
+
+    #calendar {
+        width: 100%;
+        min-height: 450px;
+    }
+
+    .fc {
+        font-family: inherit !important;
+        font-size: 0.75rem;
+        background: white;
+        border-radius: 10px;
+        padding: 10px;
+    }
+
+    .fc-toolbar-title {
+        font-size: 1rem !important;
+        font-weight: 700 !important;
+    }
+
+    .fc-button {
+        padding: 5px 10px !important;
+        font-size: 0.75rem !important;
+        border-radius: 6px !important;
+    }
+
+    .fc-event {
+        padding: 2px 4px;
+        margin: 1px;
+        font-size: 0.7rem;
+        border-radius: 4px;
+    }
+
+    /* ===== LEGEND ===== */
+    .calendar-legend {
+        background: transparent;
+        padding: 0;
+    }
+
+    .legend-item {
+        padding: 6px 8px;
+        margin-bottom: 4px;
+        background: #f8f9fa;
+        border-radius: 6px;
+        font-size: 0.7rem;
+        border-left: 3px solid;
+        transition: all 0.2s;
+    }
+
+    .legend-item:hover {
+        background: #e9ecef;
+        transform: translateX(2px);
+    }
+
+/* ===== CALENDAR TOOLBAR BUTTONS ===== */
+.fc-toolbar-chunk {
+    display: flex;
+    gap: 5px;
+}
+
+.fc-button {
+    padding: 6px 12px !important;  /* Changed from 8px 16px */
+    font-size: 0.75rem !important;
+}
+.fc-button:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5) !important;
+}
+
+.fc-button:active,
+.fc-button:focus {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%) !important;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4) !important;
+}
+
+.fc-button-active {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%) !important;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.2) !important;
+}
+
+.fc-prev-button,
+.fc-next-button {
+    padding: 8px 12px !important;
+    font-size: 1.1rem !important;
+}
+
+.fc-today-button {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
+}
+
+.fc-today-button:hover {
+    background: linear-gradient(135deg, #218838 0%, #1ba881 100%) !important;
+}
+/* Weekend styling */
+.fc-day-sun {
+    background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%) !important;
+    opacity: 0.8 !important;
+}
+
+.fc-day-sat {
+    background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%) !important;
+    opacity: 0.8 !important;
+}
+
+/* ===== CLEAN EVENT STYLING ===== */
+.fc-event {
+    padding: 2px 4px;     /* Changed from 3px 6px */
+    margin: 1px 1px;      /* Changed from 2px 1px */
+    font-size: 0.7rem;    /* Changed from 0.8rem */
+    border-left: 3px solid rgba(0,0,0,0.2) !important;  /* Changed from 4px */
+}
+
+.fc-event:hover {
+    transform: translateY(-2px) !important;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
+}
+
+/* ===== COMPLETED TASKS - Small green corner badge ===== */
+.fc-event.event-completed::after {
+    width: 14px;          /* Changed from 18px */
+    height: 14px;
+    font-size: 8px;       /* Changed from 10px */
+}
+
+.fc-event.event-completed {
+    opacity: 0.85 !important;
+    border-left-color: #28a745 !important;
+    text-decoration: none !important;
+}
+
+.fc-event.event-rescheduled::before {
+    content: 'â‡¢';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: #ff9800;
+    border-radius: 50%;
+    z-index: 10;
+    box-shadow: 0 2px 6px rgba(255, 152, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-size: 14px;
+    font-weight: bold;
+    animation: pulse-dot 2s infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% {
+        box-shadow: 0 2px 6px rgba(255, 152, 0, 0.4);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 2px 12px rgba(255, 152, 0, 0.7);
+        transform: scale(1.1);
+    }
+}
+.fc-event.event-rescheduled {
+    border-left-color: #ff9800 !important;
+}
+
+/* ===== STAGE RESCHEDULED - Subtle blue accent ===== */
+.fc-event.stage-rescheduled {
+    border-left-width: 5px !important;
+    border-left-color: #17a2b8 !important;
+}
+.fc-event.stage-rescheduled::after {
+    content: 'ðŸ”„';
+    position: absolute;
+    bottom: 2px;
+    left: 2px;
+    font-size: 10px;
+    opacity: 0.7;
+    z-index: 5;
+}
+
+/* Adjust for both completed and rescheduled */
+.fc-event.event-completed.stage-rescheduled::after {
+    content: 'âœ“';
+    top: 2px;
+    right: 2px;
+    bottom: auto;
+    left: auto;
+}
+
+/* ===== DURATION BADGE - Cleaner design ===== */
+.parallel-stage-indicator {
+    position: absolute !important;
+    top: 2px !important;
+    right: 2px !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #495057 !important;
+    border-radius: 4px !important;
+    padding: 2px 6px !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    z-index: 10 !important;
+    border: 1px solid rgba(0,0,0,0.1) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
+}
+
+/* If completed, move duration badge to left */
+.fc-event.event-completed .parallel-stage-indicator {
+    right: auto !important;
+    left: 2px !important;
+}
+
+/* ===== PARALLEL JOBS BADGE ===== */
+/* Replace your existing .parallel-jobs-badge CSS with this: */
+.parallel-jobs-badge {
+    position: absolute !important;
+    top: 3px !important;
+    right: 5px !important;  /* Changed from 35px to 5px */
+    background: #dc3545 !important;
+    color: white !important;
+    border-radius: 10px !important;
+    padding: 2px 8px !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    z-index: 999 !important;  /* Increased from 200 */
+    border: 1px solid white !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+    pointer-events: none !important;
+    display: block !important;
+    line-height: 1.2 !important;
+}
+/* ===== ACTIVE STAGE ===== */
+.fc-event.stage-event-active {
+    box-shadow: 0 0 0 3px #ffc107 !important;
+    animation: pulse-glow 2s infinite !important;
+}
+
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 0 0 0 3px #ffc107;
+    }
+    50% {
+        box-shadow: 0 0 0 6px #ffc107, 0 0 20px rgba(255, 193, 7, 0.6);
+    }
+}
+
+/* ===== CLEAN TOOLTIPS ===== */
+.fc-event {
+    position: relative !important;
+    --tooltip-x: 0;
+    --tooltip-y: 0;
+}
+
+.fc-event[data-tooltip]:hover::after {
+    content: attr(data-tooltip);
+    position: fixed !important;  /* Changed from absolute to fixed */
+    left: var(--tooltip-x, 50%);
+    top: var(--tooltip-y, auto);
+    transform: translate(-50%, -100%);
+    background: rgba(44, 62, 80, 0.98);
+    color: white;
+    padding: 12px 16px;
+    border-radius: 8px;
+    white-space: pre-line;
+    font-size: 11.5px;
+    line-height: 1.6;
+    z-index: 999999 !important;  /* Maximum z-index */
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    min-width: 180px;
+    max-width: 300px;
+    pointer-events: none;
+    display: block !important;
+    animation: tooltipFadeIn 0.2s ease-out;
+    border: 1px solid rgba(255,255,255,0.1);
+}
+
+@keyframes tooltipFadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -90%);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, -100%);
+    }
+}
+
+.fc-event[data-tooltip]:hover::before {
+    content: '';
+    position: fixed !important;
+    left: var(--tooltip-x, 50%);
+    top: var(--tooltip-y, auto);
+    transform: translate(-50%, 0);
+    border: 8px solid transparent;
+    border-top-color: rgba(44, 62, 80, 0.98);
+    z-index: 999999 !important;
+    display: block !important;
+    margin-top: -1px;
+}
+
+/* Tooltip below element (when near top of screen) */
+.fc-event.tooltip-below[data-tooltip]:hover::after {
+    transform: translate(-50%, 0) !important;
+    margin-top: 8px;
+}
+
+.fc-event.tooltip-below[data-tooltip]:hover::before {
+    transform: translate(-50%, -100%) !important;
+    border-top-color: transparent !important;
+    border-bottom-color: rgba(44, 62, 80, 0.98) !important;
+    margin-top: 0;
+    margin-bottom: -16px;
+}
+
+/* Ghost event tooltips */
+.fc-event.ghost-event[data-tooltip]:hover::after {
+    background: rgba(255, 152, 0, 0.98) !important;
+    border-color: rgba(255,255,255,0.15);
+}
+
+.fc-event.ghost-event[data-tooltip]:hover::before {
+    border-top-color: rgba(255, 152, 0, 0.98) !important;
+}
+
+.fc-event.ghost-event.tooltip-below[data-tooltip]:hover::before {
+    border-bottom-color: rgba(255, 152, 0, 0.98) !important;
+}
+
+/* Ensure calendar containers don't clip tooltips */
+.calendar-modal .modal-body,
+#calendar, 
+.fc, 
+.fc-view-harness,
+.fc-daygrid-body, 
+.fc-scrollgrid,
+.fc-scrollgrid-sync-table {
+    overflow: visible !important;
+}
+
+/* ===== LEGEND ===== */
+.calendar-legend {
+    padding: 12px;        /* Changed from 15px */
+    max-height: 400px;    /* Changed from 450px */
+}
+
+.calendar-legend h6 {
+    font-size: 0.85rem;   /* Changed from 0.95rem */
+}
+
+.legend-item {
+    padding: 8px;         /* Changed from 10px */
+    font-size: 0.75rem;   /* Changed from 0.8rem */
+}
+
+.legend-item:hover {
+    background: #e9ecef;
+    transform: translateX(5px);
+}
+
+/* ===== DAY RESCHEDULE BUTTON ===== */
+.day-reschedule-btn {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    cursor: pointer;
+    z-index: 150;
+    transition: all 0.3s;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+.fc-daygrid-day:hover .day-reschedule-btn {
+    display: flex;
+}
+
+.day-reschedule-btn:hover {
+    transform: scale(1.15);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+}
+
+/* ===== MINI RESCHEDULE POPUP ===== */
+.mini-reschedule-popup {
+    position: fixed;
     background: white;
     border-radius: 12px;
-    padding: 30px;
-    width: 90%;
-    max-width: 600px;
-    max-height: 90vh;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    padding: 15px;
+    z-index: 9999;
+    min-width: 280px;
+    display: none;
+    border: 2px solid #667eea;
+}
+
+.mini-reschedule-popup.active {
+    display: block;
+    animation: popIn 0.3s ease-out;
+}
+
+@keyframes popIn {
+    from {
+        opacity: 0;
+        transform: scale(0.8) translateY(-20px);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+    }
+}
+
+.mini-reschedule-popup h6 {
+    margin: 0 0 10px 0;
+    color: #667eea;
+    font-weight: 700;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.mini-reschedule-popup .stage-chip {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 6px 10px;
+    margin: 4px 0;
+    font-size: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+
+.mini-reschedule-popup .stage-chip:hover {
+    border-color: #667eea;
+    background: #e8eef9;
+}
+
+/* ===== DAILY TASK MODAL ===== */
+.daily-task-item {
+    background: #f8f9fa;
+    border-radius: 10px;
+    padding: 15px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    transition: all 0.3s;
+    border: 2px solid transparent;
+}
+
+.daily-task-item:hover {
+    border-color: #667eea;
+    background: #e8eef9;
+}
+
+.daily-task-item.completed {
+    opacity: 0.7;
+    background: #e8f5e9;
+    border-left: 4px solid #10b981;
+}
+
+.daily-task-item.rescheduled {
+    border-left: 4px solid #f59e0b;
+    background: #fffbeb;
+}
+
+.task-day-number {
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1.1rem;
+}
+
+.task-day-number.completed {
+    background: #28a745;
+}
+
+.task-status-badge {
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.badge-pending {
+    background: #6c757d;
+    color: white;
+}
+
+.badge-completed {
+    background: #28a745;
+    color: white;
+}
+
+.badge-rescheduled {
+    background: #ffc107;
+    color: #000;
+}
+
+/* ===== ANIMATIONS ===== */
+@keyframes slideInRight {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOutRight {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 992px) {
+    .calendar-legend {
+        max-height: 250px;  /* Changed from 300px */
+    }
+    
+    .fc {
+        font-size: 0.7rem;
+        padding: 8px;
+    }
+    
+    #calendar {
+        min-height: 400px;
+    }
+}
+
+/* ===== SCROLLBAR ===== */
+.calendar-legend::-webkit-scrollbar {
+    width: 6px;
+}
+
+.calendar-legend::-webkit-scrollbar-track {
+    background: #f1f1f1;
+    border-radius: 10px;
+}
+
+.calendar-legend::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+}
+/* Ghost Events - Show original locations */
+.fc-event.ghost-event {
+    opacity: 0.5 !important;
+    border: 2px dashed rgba(220, 53, 69, 0.6) !important;
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.8),
+        rgba(255, 255, 255, 0.8) 8px,
+        rgba(220, 53, 69, 0.15) 8px,
+        rgba(220, 53, 69, 0.15) 16px
+    ) !important;
+    cursor: help !important;
+    pointer-events: auto !important;
+}
+.fc-event.ghost-event .fc-event-main {
+    color: #ff9800 !important;
+    font-weight: 600 !important;
+    text-decoration: line-through !important;
+}
+.fc-event.ghost-event::before {
+    display: none !important;
+}
+/* Date cell reschedule indicator */
+.date-reschedule-badge {
+    position: absolute;
+    bottom: 3px;
+    left: 3px;
+    background: #ff9800;
+    color: white;
+    border-radius: 50%;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: bold;
+    z-index: 100;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+/* Enhanced tooltip for ghost events */
+.fc-event.ghost-event {
+    opacity: 0.6 !important;
+    border: 2px dashed rgba(255, 152, 0, 0.8) !important;
+    background: repeating-linear-gradient(
+        45deg,
+        rgba(255, 255, 255, 0.9),
+        rgba(255, 255, 255, 0.9) 8px,
+        rgba(255, 152, 0, 0.2) 8px,
+        rgba(255, 152, 0, 0.2) 16px
+    ) !important;
+    cursor: help !important;
+    pointer-events: auto !important;
+    position: relative !important;
+}
+
+.fc-event.ghost-event::after {
+    content: 'MOVED';
+    position: absolute !important;
+    top: 2px !important;
+    right: 2px !important;
+    background: #ff9800 !important;
+    color: white !important;
+    border-radius: 4px !important;
+    padding: 2px 5px !important;
+    font-size: 8px !important;
+    font-weight: bold !important;
+    z-index: 999 !important;
+    display: block !important;
+}
+
+
+/* Enhanced reschedule indicator */
+.reschedule-indicator {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+.daily-task-item.rescheduled {
+    border-left: 4px solid #ff9800 !important;
+    background: linear-gradient(135deg, #fffbf0 0%, #fff8e8 100%) !important;
+}
+
+.daily-task-item {
+    transition: all 0.3s ease;
+}
+
+.task-info {
+    min-width: 0; /* Allow flex shrinking */
+}
+
+.card.mb-2 {
+    border-radius: 12px !important;
+    border: 2px solid #e9ecef !important;
+    transition: all 0.3s ease;
+    background: white !important;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+.card.mb-2:hover {
+    border-color: #667eea !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+    transform: translateY(-2px);
+}
+.card.mb-2[style*="border-left: 3px solid rgb(102, 126, 234)"] {
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.03) 0%, rgba(118, 75, 162, 0.03) 100%) !important;
+}
+/* ===== FORM CONTROLS - BETTER STYLING ===== */
+.modal-body .form-control,
+.modal-body .form-select {
+    border: 2px solid #e9ecef;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+    background: white;
+}
+
+.modal-body .form-control:focus,
+.modal-body .form-select:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.modal-body .form-label {
+    font-weight: 600;
+    color: #495057;
+    margin-bottom: 8px;
+}
+
+/* ===== STAGE CONTAINER - BETTER SCROLLBAR ===== */
+#stagesContainer {
+    background: white;
+    border-radius: 12px;
+    padding: 15px;
+    max-height: 50vh;
     overflow-y: auto;
 }
 
-.close {
-    float: right;
-    font-size: 28px;
-    font-weight: bold;
+#stagesContainer::-webkit-scrollbar {
+    width: 8px;
+}
+
+#stagesContainer::-webkit-scrollbar-track {
+    background: #f1f3f5;
+    border-radius: 10px;
+}
+
+#stagesContainer::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+}
+
+/* ===== CHECKBOX STYLING ===== */
+.form-check-input {
+    width: 20px;
+    height: 20px;
+    border: 2px solid #dee2e6;
+    border-radius: 6px;
     cursor: pointer;
-    color: var(--gray-600);
+    transition: all 0.2s ease;
 }
 
-.close:hover {
-    color: var(--gray-900);
+.form-check-input:checked {
+    background-color: #667eea;
+    border-color: #667eea;
 }
 
-/* Recent Tasks */
-.recent-tasks {
-    background: white;
-    padding: 24px;
-    border-radius: 12px;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+.form-check-input:focus {
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.25);
 }
 
-.recent-tasks h3 {
-    margin-bottom: 20px;
-    color: var(--gray-700);
+/* ===== PROJECTED END DATE - ENHANCED ===== */
+.alert-info {
+    background: linear-gradient(135deg, #e8f4fd 0%, #f3e8fd 100%) !important;
+    border: 2px solid #667eea !important;
+    border-radius: 12px !important;
+    color: #495057 !important;
 }
 
+/* ===== MANAGER DROPDOWN - BETTER VISIBILITY ===== */
+.form-select {
+    font-weight: 500;
+    color: #495057;
+}
+
+.form-select option {
+    padding: 10px;
+}
+
+/* ===== DELETE BUTTON - SUBTLE ===== */
+.btn-outline-danger {
+    border-radius: 8px !important;
+    opacity: 0.7;
+    transition: all 0.2s ease;
+}
+
+.btn-outline-danger:hover {
+    opacity: 1;
+    transform: scale(1.05);
+}
+
+/* ===== ADD CUSTOM / RESET BUTTONS ===== */
+.btn-success, .btn-outline-secondary {
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    transition: all 0.2s ease !important;
+}
+
+.btn-success:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+}
+
+/* ===== CREATE JOB BUTTON - ENHANCED ===== */
+.btn-primary-custom.w-100 {
+    padding: 15px !important;
+    font-size: 1.1rem !important;
+    border-radius: 12px !important;
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+}
+
+.btn-primary-custom.w-100:hover {
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
+    transform: translateY(-2px);
+}
+
+/* ===== MODAL BACKDROP - BETTER BLUR ===== */
+.modal-backdrop {
+    backdrop-filter: blur(3px);
+}
+
+/* ===== RESPONSIVE ADJUSTMENTS ===== */
 @media (max-width: 768px) {
-    .sidebar {
-        width: 200px;
+    .modal-body {
+        padding: 15px;
     }
     
-    .main-content {
-        margin-left: 200px;
-    }
-    
-    .kanban-board {
-        grid-template-columns: 1fr;
-    }
-}
-```
-
-Due to length constraints, I'll provide the remaining JavaScript files in a follow-up. The key files are:
-
-- **js/app.js** - Handles authentication
-- **js/dashboard.js** - Dashboard functionality with Chart.js
-- **js/kanban.js** - Drag-and-drop Kanban board with Socket.io
-
-
-## Installation \& Setup
-
-1. Install PostgreSQL on your system
-2. Create database: `CREATE DATABASE project_manager;`
-3. Run: `npm install`
-4. Configure `.env` with your database credentials
-5. Start server: `npm start`
-6. Open browser: `http://localhost:3000`
-
-The application includes JWT authentication, role-based access control, real-time updates via Socket.io, PostgreSQL with Sequelize ORM, Chart.js visualizations, drag-and-drop Kanban board, and complete CRUD operations for projects and tasks.[^2_1][^2_2][^2_3][^2_4][^2_5][^2_6]
-
-Would you like me to provide the remaining JavaScript files (app.js, dashboard.js, kanban.js)?
-<span style="display:none">[^2_10][^2_7][^2_8][^2_9]</span>
-
-<div align="center">⁂</div>
-
-[^2_1]: https://www.geeksforgeeks.org/node-js/how-to-implement-jwt-authentication-in-express-js-app/
-
-[^2_2]: https://dev.to/hamzakhan/securing-your-expressjs-app-jwt-authentication-step-by-step-aom
-
-[^2_3]: https://www.corbado.com/blog/nodejs-express-postgresql-jwt-authentication-roles
-
-[^2_4]: https://webprogrammingtoolsandframeworks.sdds.ca/Relational-Database-Postgres/sequelize-orm-with-postgres
-
-[^2_5]: https://www.youtube.com/watch?v=V2wIK2lBGgk
-
-[^2_6]: https://www.robinwieruch.de/postgres-express-setup-tutorial/
-
-[^2_7]: https://www.topcoder.com/thrive/articles/authentication-and-authorization-in-express-js-api-using-jwt
-
-[^2_8]: https://www.sevensquaretech.com/nodejs-jwt-authentication-mysql-with-code/
-
-[^2_9]: https://blog.devgenius.io/node-js-jwt-authentication-with-express-and-mongodb-ecce331c1190
-
-[^2_10]: https://www.syncfusion.com/javascript-ui-controls/js-kanban-board
-
-
----
-
-# Yes
-
-Here are the remaining JavaScript files to complete your project management application:
-
-## 17. public/js/app.js
-
-```javascript
-const API_URL = 'http://localhost:3000/api';
-
-// Tab switching
-document.addEventListener('DOMContentLoaded', () => {
-    const tabBtns = document.querySelectorAll('.tab-btn');
-    const forms = document.querySelectorAll('.auth-form');
-
-    tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tab = btn.dataset.tab;
-            
-            tabBtns.forEach(b => b.classList.remove('active'));
-            forms.forEach(f => f.classList.remove('active'));
-            
-            btn.classList.add('active');
-            document.getElementById(`${tab}Form`).classList.add('active');
-        });
-    });
-
-    // Login form
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const email = document.getElementById('loginEmail').value;
-        const password = document.getElementById('loginPassword').value;
-
-        try {
-            const response = await fetch(`${API_URL}/auth/login`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ email, password })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Login failed');
-            }
-
-            // Store token and user data
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-
-            // Redirect to dashboard
-            window.location.href = 'dashboard.html';
-        } catch (error) {
-            showError(error.message);
-        }
-    });
-
-    // Register form
-    document.getElementById('registerForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        
-        const name = document.getElementById('registerName').value;
-        const email = document.getElementById('registerEmail').value;
-        const password = document.getElementById('registerPassword').value;
-        const role = document.getElementById('registerRole').value;
-
-        try {
-            const response = await fetch(`${API_URL}/auth/register`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ name, email, password, role })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Registration failed');
-            }
-
-            // Store token and user data
-            localStorage.setItem('token', data.token);
-            localStorage.setItem('user', JSON.stringify(data.user));
-
-            // Redirect to dashboard
-            window.location.href = 'dashboard.html';
-        } catch (error) {
-            showError(error.message);
-        }
-    });
-});
-
-function showError(message) {
-    const errorDiv = document.getElementById('errorMessage');
-    errorDiv.textContent = message;
-    errorDiv.style.display = 'block';
-    
-    setTimeout(() => {
-        errorDiv.style.display = 'none';
-    }, 5000);
-}
-
-// Utility function to make authenticated API calls
-async function apiCall(endpoint, options = {}) {
-    const token = localStorage.getItem('token');
-    
-    if (!token) {
-        window.location.href = 'index.html';
-        return;
-    }
-
-    const defaultOptions = {
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-        }
-    };
-
-    const response = await fetch(`${API_URL}${endpoint}`, {
-        ...defaultOptions,
-        ...options,
-        headers: {
-            ...defaultOptions.headers,
-            ...options.headers
-        }
-    });
-
-    if (response.status === 401) {
-        localStorage.clear();
-        window.location.href = 'index.html';
-        return;
-    }
-
-    return response;
-}
-
-// Check authentication
-function checkAuth() {
-    const token = localStorage.getItem('token');
-    if (!token) {
-        window.location.href = 'index.html';
+    .card.mb-2 .card-body {
+        padding: 12px !important;
     }
 }
 
-// Format date
-function formatDate(dateString) {
-    if (!dateString) return 'No date';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', { 
-        year: 'numeric', 
-        month: 'short', 
-        day: 'numeric' 
-    });
+/* ===== STAGE CONTENT OPACITY FIX ===== */
+#stageContent-1, #stageContent-2, #stageContent-3,
+#stageContent-4, #stageContent-5, #stageContent-6,
+#stageContent-7, #stageContent-8, #stageContent-9,
+#stageContent-10, #stageContent-11, #stageContent-12,
+#stageContent-13, #stageContent-14 {
+    transition: opacity 0.3s ease;
 }
 
-// Get priority color class
-function getPriorityClass(priority) {
-    const classes = {
-        low: 'priority-low',
-        medium: 'priority-medium',
-        high: 'priority-high',
-        critical: 'priority-critical'
-    };
-    return classes[priority] || 'priority-medium';
-}
-```
-
-
-## 18. public/js/dashboard.js
-
-```javascript
-const API_URL = 'http://localhost:3000/api';
-let socket;
-let taskDistChart;
-let projectProgressChart;
-
-document.addEventListener('DOMContentLoaded', async () => {
-    checkAuth();
-    loadUserInfo();
-    setupEventListeners();
-    await loadDashboardData();
-    initializeCharts();
-    connectSocket();
-});
-
-function loadUserInfo() {
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (user) {
-        document.getElementById('userName').textContent = user.name;
-        document.getElementById('userRole').textContent = user.role;
-        document.getElementById('userAvatar').src = user.avatar;
-    }
+/* ===== DURATION BADGE IN STAGE CARDS ===== */
+.duration-badge {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    margin-left: 8px;
 }
 
-function setupEventListeners() {
-    // Logout
-    document.getElementById('logoutBtn').addEventListener('click', (e) => {
-        e.preventDefault();
-        localStorage.clear();
-        window.location.href = 'index.html';
-    });
-
-    // Create project modal
-    const modal = document.getElementById('projectModal');
-    const createBtn = document.getElementById('createProjectBtn');
-    const closeBtn = document.querySelector('.close');
-
-    createBtn.addEventListener('click', () => {
-        modal.classList.add('active');
-    });
-
-    closeBtn.addEventListener('click', () => {
-        modal.classList.remove('active');
-    });
-
-    window.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.classList.remove('active');
-        }
-    });
-
-    // Project form submission
-    document.getElementById('projectForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await createProject();
-    });
+/* ===== WORKING DAYS BADGE ===== */
+span[style*="background: rgb(102, 126, 234)"] {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    border-radius: 8px !important;
+    padding: 4px 10px !important;
+    font-size: 0.7rem !important;
+    font-weight: 700 !important;
+}
+/* Hide ALL number badges in calendar */
+.fc-daygrid-day-bottom {
+    display: none !important;
 }
 
-async function loadDashboardData() {
-    try {
-        // Load projects
-        const projectsResponse = await apiCall('/projects');
-        const projects = await projectsResponse.json();
-
-        // Load all tasks
-        const tasksResponse = await apiCall('/tasks');
-        const tasks = await tasksResponse.json();
-
-        // Update stats
-        updateStats(projects, tasks);
-        
-        // Update charts
-        updateCharts(tasks, projects);
-        
-        // Display recent tasks
-        displayRecentTasks(tasks.slice(0, 10));
-
-    } catch (error) {
-        console.error('Error loading dashboard data:', error);
-    }
+.date-reschedule-badge,
+.parallel-jobs-badge {
+    display: none !important;
+}
+/* Search and Filter Bar */
+.search-filter-bar {
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 10px;
 }
 
-function updateStats(projects, tasks) {
-    document.getElementById('totalProjects').textContent = projects.length;
-    
-    const activeTasks = tasks.filter(t => t.status !== 'completed').length;
-    document.getElementById('activeTasks').textContent = activeTasks;
-    
-    const completedTasks = tasks.filter(t => t.status === 'completed').length;
-    document.getElementById('completedTasks').textContent = completedTasks;
-    
-    const overdueTasks = tasks.filter(t => 
-        t.dueDate && new Date(t.dueDate) < new Date() && t.status !== 'completed'
-    ).length;
-    document.getElementById('overdueTasks').textContent = overdueTasks;
+.search-box {
+    position: relative;
+    margin-bottom: 12px;
 }
 
-function initializeCharts() {
-    // Task Distribution Chart
-    const taskDistCtx = document.getElementById('taskDistChart').getContext('2d');
-    taskDistChart = new Chart(taskDistCtx, {
-        type: 'doughnut',
-        data: {
-            labels: ['To Do', 'In Progress', 'Review', 'Completed'],
-            datasets: [{
-                data: [0, 0, 0, 0],
-                backgroundColor: [
-                    '#3b82f6',
-                    '#f59e0b',
-                    '#8b5cf6',
-                    '#10b981'
-                ]
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                }
-            }
-        }
-    });
-
-    // Project Progress Chart
-    const projectProgressCtx = document.getElementById('projectProgressChart').getContext('2d');
-    projectProgressChart = new Chart(projectProgressCtx, {
-        type: 'bar',
-        data: {
-            labels: [],
-            datasets: [{
-                label: 'Progress %',
-                data: [],
-                backgroundColor: '#4f46e5'
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true,
-            scales: {
-                y: {
-                    beginAtZero: true,
-                    max: 100
-                }
-            },
-            plugins: {
-                legend: {
-                    display: false
-                }
-            }
-        }
-    });
+.search-icon {
+    position: absolute;
+    left: 15px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6c757d;
+    font-size: 1rem;
+    z-index: 1;
 }
 
-function updateCharts(tasks, projects) {
-    // Update task distribution chart
-    const taskCounts = {
-        todo: tasks.filter(t => t.status === 'todo').length,
-        inProgress: tasks.filter(t => t.status === 'in-progress').length,
-        review: tasks.filter(t => t.status === 'review').length,
-        completed: tasks.filter(t => t.status === 'completed').length
-    };
-
-    taskDistChart.data.datasets[^3_0].data = [
-        taskCounts.todo,
-        taskCounts.inProgress,
-        taskCounts.review,
-        taskCounts.completed
-    ];
-    taskDistChart.update();
-
-    // Update project progress chart
-    const projectNames = projects.slice(0, 5).map(p => p.name);
-    const projectProgress = projects.slice(0, 5).map(p => p.progress || 0);
-
-    projectProgressChart.data.labels = projectNames;
-    projectProgressChart.data.datasets[^3_0].data = projectProgress;
-    projectProgressChart.update();
+.search-input {
+    width: 100%;
+    padding: 12px 45px 12px 45px;
+    border: 2px solid #dee2e6;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    transition: all 0.3s;
 }
 
-function displayRecentTasks(tasks) {
-    const container = document.getElementById('recentTasksList');
-    
-    if (tasks.length === 0) {
-        container.innerHTML = '<p style="color: #6b7280; text-align: center;">No tasks yet</p>';
-        return;
-    }
+.search-input:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
 
-    container.innerHTML = tasks.map(task => `
-        <div class="task-card" style="margin-bottom: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: start;">
-                <div>
-                    <span class="task-priority ${getPriorityClass(task.priority)}">${task.priority}</span>
-                    <div class="task-title">${task.title}</div>
-                    <p style="font-size: 14px; color: #6b7280; margin-top: 4px;">
-                        ${task.description || 'No description'}
-                    </p>
-                </div>
-                <span style="font-size: 12px; color: #6b7280;">
-                    ${formatDate(task.dueDate)}
-                </span>
+.clear-search {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 5px 10px;
+    border-radius: 5px;
+    transition: all 0.2s;
+}
+
+.clear-search:hover {
+    background: #e9ecef;
+    color: #dc3545;
+}
+
+.filter-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.filter-select {
+    padding: 8px 12px;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    font-size: 0.85rem;
+    background: white;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.results-count {
+    margin-left: auto;
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-weight: 600;
+}
+
+/* Pagination */
+.pagination-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+    padding: 15px;
+}
+
+.pagination-btn {
+    padding: 8px 16px;
+    border: 2px solid #667eea;
+    background: white;
+    color: #667eea;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+    background: #667eea;
+    color: white;
+    transform: translateY(-2px);
+}
+
+.pagination-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.pagination-info {
+    font-size: 0.9rem;
+    color: #495057;
+    font-weight: 600;
+}
+
+/* Loading Spinner */
+.loading-spinner {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px;
+}
+
+.spinner {
+    border: 4px solid #f3f3f3;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* No Results */
+.no-results {
+    text-align: center;
+    padding: 60px 20px;
+}
+
+.no-results i {
+    font-size: 4rem;
+    color: #dee2e6;
+    margin-bottom: 20px;
+}
+
+.no-results h5 {
+    color: #6c757d;
+    margin-bottom: 10px;
+}
+
+.no-results p {
+    color: #adb5bd;
+    font-size: 0.9rem;
+}
+/* Fix projects section scroll */
+#allProjectsSection {
+    overflow: visible !important;
+    max-height: none !important;
+}
+
+/* Improve card layout */
+.project-progress-container {
+    margin-bottom: 30px;
+    padding: 25px;
+    background: #f8f9fa;
+    border-radius: 15px;
+    overflow: visible !important;
+}
+
+/* Better spacing for the entire projects card */
+.card-custom .card-body {
+    padding: 20px;
+    overflow: visible !important;
+}
+
+</style>
+</head>
+<body>
+    <div class="container-fluid" style="max-width: 1400px;">
+        <div class="top-bar-custom d-flex justify-content-between align-items-center">
+            <div>
+                <h4 class="mb-0">Welcome, {{ current_user.username }}!</h4>
+                <small class="text-muted">Have a productive day</small>
             </div>
-            <div class="task-meta">
-                <div class="task-assignee">
-                    ${task.assignedTo ? `
-                        <img src="${task.assignedTo.avatar}" alt="${task.assignedTo.name}">
-                        <span>${task.assignedTo.name}</span>
-                    ` : '<span>Unassigned</span>'}
+            <div class="d-flex align-items-center gap-3">
+                <div class="position-relative">
+                    <button class="btn btn-link text-dark" onclick="toggleNotifications()">
+                        <i class="fas fa-bell fa-lg"></i>
+                        <span class="notification-badge" id="notifBadge">0</span>
+                    </button>
                 </div>
-                <span style="text-transform: capitalize;">${task.status.replace('-', ' ')}</span>
+                <a href="/logout" class="btn btn-outline-danger">
+                    <i class="fas fa-sign-out-alt me-2"></i> Logout
+                </a>
             </div>
         </div>
-    `).join('');
+
+        <div class="row mb-4">
+            <div class="col-md-3 mb-3">
+                <div class="stat-card">
+                    <div class="icon" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                        <i class="fas fa-briefcase"></i>
+                    </div>
+                    <p>Total Jobs</p>
+                    <h3 id="totalProjects">0</h3>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stat-card">
+                    <div class="icon" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white;">
+                        <i class="fas fa-check-circle"></i>
+                    </div>
+                    <p>Active Jobs</p>
+                    <h3 id="activeProjects">0</h3>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stat-card">
+                    <div class="icon" style="background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%); color: white;">
+                        <i class="fas fa-tasks"></i>
+                    </div>
+                    <p>Total Tasks</p>
+                    <h3 id="totalTasks">0</h3>
+                </div>
+            </div>
+            <div class="col-md-3 mb-3">
+                <div class="stat-card">
+                    <div class="icon" style="background: linear-gradient(135deg, #17a2b8 0%, #138496 100%); color: white;">
+                        <i class="fas fa-users"></i>
+                    </div>
+                    <p>Team Members</p>
+                    <h3 id="totalEmployees">0</h3>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="card-custom">
+                <div class="card-header">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <span>All Jobs</span>
+                        <button class="btn btn-sm btn-primary-custom" onclick="openProjectModal()">
+                            <i class="fas fa-plus me-1"></i> New Job
+                        </button>
+                    </div>
+                    
+                    <!-- Search and Filter Bar -->
+                    <div class="search-filter-bar">
+                        <div class="search-box">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" 
+                                id="projectSearchInput" 
+                                class="search-input" 
+                                placeholder="Search by job number, name, or date..."
+                                oninput="handleProjectSearch()">
+                            <button class="clear-search" id="clearSearchBtn" onclick="clearProjectSearch()" style="display: none;">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        
+                        <div class="filter-controls">
+                            <select id="statusFilter" class="filter-select" onchange="handleProjectSearch()">
+                                <option value="">All Status</option>
+                                <option value="active">Active</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                            
+                            <select id="sortBy" class="filter-select" onchange="handleProjectSearch()">
+                                <option value="newest">Newest First</option>
+                                <option value="oldest">Oldest First</option>
+                                <option value="name">Name (A-Z)</option>
+                                <option value="progress">Progress</option>
+                            </select>
+                            
+                            <span class="results-count" id="resultsCount">Showing 0 jobs</span>
+                        </div>
+                    </div>
+                </div>                   
+                 <div class="card-body">
+                        <div id="allProjectsSection"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<div class="modal fade" id="projectModal" tabindex="-1" data-bs-backdrop="static">
+    <div class="modal-dialog modal-xl">
+    <div class="modal-content">            
+    <div class="modal-header">                
+    <h5 class="modal-title">Create New Job</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+             <div class="modal-body" style="max-height: 70vh; overflow-y: auto;">            
+                <form id="projectForm">
+            <div class="row">
+                <!-- Left Column -->
+                <div class="col-md-6">
+                    <div class="mb-3">
+                        <label class="form-label">Job Number</label>
+                        <input type="text" class="form-control form-control-sm" id="projectName" required placeholder="Enter job number">
+                    </div>
+                    <!-- REMOVED DESCRIPTION FIELD -->
+                    <div class="mb-3">
+                        <label class="form-label">Start Date</label>
+                        <input type="date" class="form-control form-control-sm" id="projectStartDate" required onchange="updateProjectEndDate()">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Team Members</label>
+                        <select class="form-select form-select-sm" id="memberSelect" onchange="addMember()">
+                            <option value="">Select member to add...</option>
+                        </select>
+                        <div id="selectedMembers" class="mt-2"></div>
+                    </div>
+                    <div class="alert alert-info py-2 mb-0">
+                        <small>
+                            <i class="fas fa-info-circle me-1"></i>
+                            <strong>Projected End Date:</strong> <span id="projectedEndDate">Not calculated</span>
+                        </small>
+                    </div>
+                </div>
+                
+                <!-- Right Column -->
+                <div class="col-md-6">
+                    <div class="mb-2">
+                        <label class="form-label d-flex justify-content-between align-items-center mb-2">
+                            <span>Tasks</span>
+                            <div>
+                                <button type="button" class="btn btn-sm btn-success py-1 px-2 me-1" onclick="addCustomTask()" style="font-size: 0.75rem;">
+                                    <i class="fas fa-plus"></i> Add Custom
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary py-1 px-2" onclick="loadDefaultStages()" style="font-size: 0.75rem;">
+                                    <i class="fas fa-redo"></i> Reset
+                                </button>
+                            </div>
+                        </label>
+                        <div id="stagesContainer" style="max-height: 50vh; overflow-y: auto; padding-right: 5px;"></div>
+                    </div>
+                </div>
+            </div>
+             <div class="mt-3">
+            <button type="submit" class="btn btn-primary-custom w-100">Create Job</button>
+        </div>
+    </form>
+ </div>       
+ </div>
+</div>
+</div>
+<!-- Task Popup Modal (ADD THIS IF YOU DON'T HAVE IT) -->
+     <div id="taskPopup" style="display: none;">
+        <div class="popup-overlay" onclick="closePopup()"></div>
+        <div class="popup-container">
+            <div id="popupContent"></div>
+        </div>
+    </div>
+<div class="modal fade calendar-modal" id="calendarModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title mb-1" id="calendarProjectTitle">Job Calendar View</h5>
+                    <small class="text-white-50" id="calendarProjectDates"></small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-3">
+                <div class="row g-2">
+                    <!-- Calendar Section - Full Width -->
+                    <div class="col-12">
+                        <div style="background: white; padding: 10px; border-radius: 10px;">
+                            <div id="calendar"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- Compact Legend Below Calendar -->
+                    <div class="col-12">
+                        <div class="d-flex gap-2 flex-wrap">
+                            <!-- Stages Legend - Compact Horizontal -->
+                            <div class="flex-grow-1" style="background: white; padding: 10px; border-radius: 10px;">
+                                <h6 style="font-size: 0.8rem; margin-bottom: 8px; font-weight: 700;">
+                                    <i class="fas fa-palette me-1"></i>Stages
+                                </h6>
+                                <div id="calendarLegend" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 6px; max-height: 150px; overflow-y: auto;"></div>
+                            </div>
+                            
+                            <!-- Status Indicators - Compact -->
+                            <div style="background: white; padding: 10px; border-radius: 10px; min-width: 200px;">
+                                <h6 style="font-size: 0.8rem; margin-bottom: 8px; font-weight: 700;">
+                                    <i class="fas fa-info-circle me-1"></i>Legend
+                                </h6>
+                                <div style="font-size: 0.7rem; line-height: 1.5;">
+                                    <div style="margin-bottom: 4px;">
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #dc3545; border-radius: 2px; margin-right: 4px;"></span>
+                                        Parallel
+                                    </div>
+                                    <div style="margin-bottom: 4px;">
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #ffc107; border-radius: 2px; margin-right: 4px;"></span>
+                                        Active
+                                    </div>
+                                    <div style="margin-bottom: 4px;">
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #28a745; border-radius: 2px; margin-right: 4px;"></span>
+                                        Done
+                                    </div>
+                                    <div>
+                                        <span style="display: inline-block; width: 8px; height: 8px; background: #ff9800; border-radius: 2px; margin-right: 4px;"></span>
+                                        Moved
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Mini Reschedule Popup -->
+<div class="mini-reschedule-popup" id="miniReschedulePopup">
+    <h6>
+        <span><i class="fas fa-calendar-alt me-2"></i>Stages on <span id="popupDate"></span></span>
+        <button class="close-popup" onclick="closeMiniPopup()">✖</button>
+    </h6>
+    <div id="popupStagesList"></div>
+</div>
+<!-- Compact Reschedule Modal -->
+<div class="modal fade reschedule-modal-compact" id="rescheduleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-white">
+                    <i class="fas fa-calendar-plus me-2"></i>Reschedule Stage
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <!-- Stage Info Card -->
+                <div class="card mb-3" style="background: linear-gradient(135deg, #f5f7fa 0%, #e8eef9 100%);">
+                    <div class="card-body p-3">
+                        <div class="d-flex align-items-start">
+                            <div class="flex-grow-1">
+                                <div class="mb-2">
+                                    <strong style="color: #667eea; font-size: 1.1rem;" id="rescheduleStageInfo"></strong>
+                                </div>
+                                <div class="mb-2">
+                                    <small class="text-muted">Current:</small><br>
+                                    <span id="rescheduleCurrentDates" class="badge bg-dark"></span>
+                                </div>
+                                <div id="rescheduleNewDatesPreview" style="display: none;">
+                                    <small class="text-muted">New:</small><br>
+                                    <span id="rescheduleNewDatesValue" class="badge bg-success"></span>
+                                </div>
+                            </div>
+                            <div id="rescheduleStageColor" style="width: 40px; height: 40px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,0.2);"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Reschedule Form -->
+                <form id="rescheduleForm">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold" style="font-size: 0.9rem;">
+                            <i class="fas fa-arrows-alt-h me-2"></i>Shift by days
+                        </label>
+                        <div class="input-group">
+                            <button class="btn btn-outline-secondary" type="button" onclick="adjustRescheduleDays(-1)">
+                                <i class="fas fa-minus"></i>
+                            </button>
+                            <input type="number" class="form-control text-center fw-bold" id="rescheduleDays" required 
+                                   placeholder="0" style="font-size: 1.1rem;" oninput="updateReschedulePreview()">
+                            <button class="btn btn-outline-secondary" type="button" onclick="adjustRescheduleDays(1)">
+                                <i class="fas fa-plus"></i>
+                            </button>
+                            <span class="input-group-text">days</span>
+                        </div>
+                        <small class="text-muted">
+                            <i class="fas fa-lightbulb me-1"></i>
+                            Positive = forward, Negative = backward
+                        </small>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label class="form-label fw-bold" style="font-size: 0.9rem;">
+                            <i class="fas fa-comment-dots me-2"></i>Reason (optional)
+                        </label>
+                        <textarea class="form-control" id="rescheduleReason" rows="2" 
+                                  placeholder="e.g., Resource availability..."></textarea>
+                    </div>
+                    
+                    <!-- Impact Warning -->
+                    <div class="alert alert-warning py-2" id="rescheduleImpactWarning" style="display: none; font-size: 0.85rem;">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <span id="rescheduleImpactText"></span>
+                    </div>
+                    
+                    <input type="hidden" id="rescheduleProjectId">
+                    <input type="hidden" id="rescheduleStageId">
+                    <input type="hidden" id="rescheduleStageStartDate">
+                    <input type="hidden" id="rescheduleStageEndDate">
+                    
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-primary-custom">
+                            <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
+                        </button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
+                            Cancel
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Daily Task Management Modal -->
+<div class="modal fade" id="dailyTaskModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title text-white" id="dailyTaskModalTitle">Manage Daily Tasks</h5>
+                    <small class="text-white-50" id="dailyTaskStageName"></small>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div id="dailyTasksList"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Reschedule Single Day Modal -->
+<div class="modal fade" id="rescheduleDayModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title text-white">Reschedule Day</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="alert alert-info" id="dayRescheduleInfo"></div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Shift by working days:</label>
+                    <div class="input-group">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustDayShift(-1)">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" class="form-control text-center fw-bold" id="dayShiftAmount" value="0">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustDayShift(1)">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <span class="input-group-text">days</span>
+                    </div>
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Reason:</label>
+                    <textarea class="form-control" id="dayRescheduleReason" rows="2" placeholder="Why is this day being rescheduled?"></textarea>
+                </div>
+                
+                <div id="dayReschedulePreview" style="display: none;" class="alert alert-success"></div>
+                
+                <input type="hidden" id="rescheduleTaskId">
+                <input type="hidden" id="rescheduleTaskProjectId">
+                <input type="hidden" id="rescheduleTaskStageId">
+                
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary-custom" onclick="confirmDayReschedule()">
+                        <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
+                    </button>
+                    <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>  
+
+
+<!-- Add this right before the opening <script> tag -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js'></script>
+<script>
+    let projects = [];
+    let employees = [];
+    let projectModal;
+    let stageCounter = 0;
+    let selectedMembers = [];
+    let defaultStages = [];
+    let calendar;
+    let calendarModal;
+    let rescheduleModal;
+    let currentProjectForCalendar = null;
+    let currentProjectData = null;
+    let includeSaturdayAsWorkingDay = false;
+    let workingSaturdays = new Set();
+    let dailyTaskModal;
+    let rescheduleDayModal;
+    let currentStageForDailyTasks = null; // Track individual working Saturdays
+    let allProjectsCache = [];
+    let filteredProjects = [];
+    let currentPage = 1;
+    const projectsPerPage = 10;
+    let searchTimeout = null;    
+    const STAGE_COLORS = [
+        '#667eea', '#764ba2', '#f093fb', '#4facfe', 
+        '#43e97b', '#fa709a', '#fee140', '#30cfd0', 
+        '#a8edea', '#ff6a88', '#feca57', '#48dbfb'
+    ];
+
+    // Add this near the top of your script section
+    async function handleApiResponse(response) {
+        if (response.status === 401) {
+            alert('Your session has expired. Please log in again.');
+            window.location.href = '/login';
+            throw new Error('Session expired');
+        }
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        return response.json();
+    }    
+
+    document.addEventListener('DOMContentLoaded', function() {
+        projectModal = new bootstrap.Modal(document.getElementById('projectModal'));
+        calendarModal = new bootstrap.Modal(document.getElementById('calendarModal'));
+        rescheduleModal = new bootstrap.Modal(document.getElementById('rescheduleModal'));
+        
+        document.getElementById('projectForm').addEventListener('submit', handleProjectSubmit);
+        document.getElementById('rescheduleForm').addEventListener('submit', handleReschedule);
+        
+        // Add event listener for start date change
+        document.getElementById('projectStartDate').addEventListener('change', checkStartDateWeekend);
+        document.getElementById('projectStartDate').valueAsDate = new Date();
+        dailyTaskModal = new bootstrap.Modal(document.getElementById('dailyTaskModal'));
+        rescheduleDayModal = new bootstrap.Modal(document.getElementById('rescheduleDayModal'));
+        
+        const saturdayCheckbox = document.getElementById('includeSaturday');
+        if (saturdayCheckbox) {
+            saturdayCheckbox.addEventListener('change', (e) => {
+                includeSaturdayAsWorkingDay = e.target.checked;
+                updateProjectEndDate();
+                if (currentProjectForCalendar && calendar) {
+                    openCalendarView(currentProjectForCalendar);
+                }
+                loadProjects();
+            });
+        }
+        
+        init();
+    });
+
+    // NEW FUNCTION: Check if start date is weekend
+    function checkStartDateWeekend() {
+        const startDateInput = document.getElementById('projectStartDate');
+        if (!startDateInput.value) return;
+        
+        const selectedDate = new Date(startDateInput.value);
+        const dayOfWeek = selectedDate.getDay();
+        
+        // Check if Sunday (0)
+                if (dayOfWeek === 0) {
+            showPopup(
+                'âš ï¸ Sunday is a Holiday',                       
+                'The selected start date falls on Sunday, which is a holiday. Please select a working day (Monday-Friday).',
+                        [
+                            {
+                                text: 'Choose Another Date',
+                                className: 'btn-primary',
+                                onClick: () => {
+                                    startDateInput.value = '';
+                                    startDateInput.focus();
+                                    closePopup();
+                                }
+                            }
+                        ]
+                    );
+                    return;
+                }        
+        // Check if Saturday (6)
+        if (dayOfWeek === 6) {
+            const dateStr = selectedDate.toISOString().split('T')[0];
+            
+        showPopup(
+                'ðŸ“… Saturday Detected',
+                `The selected start date is Saturday (${selectedDate.toLocaleDateString()}). Do you want to consider this Saturday as a working day?`,
+                [
+                    {
+                        text: '\u2714 Yes, Working Day',
+                        className: 'btn-success',
+                        onClick: () => {
+                            workingSaturdays.add(dateStr);
+                            updateProjectEndDate();
+                            closePopup();
+                            showNotification('Saturday marked as working day', 'success');
+                        }
+                    },               
+                       {
+                        text: '\u274C No, Holiday',
+                        className: 'btn-secondary',
+                        onClick: () => {
+                            workingSaturdays.delete(dateStr);
+                            // Move to next Monday
+                            const nextMonday = new Date(selectedDate);
+                            nextMonday.setDate(nextMonday.getDate() + 2);
+                            startDateInput.valueAsDate = nextMonday;
+                            updateProjectEndDate();
+                            closePopup();
+                            showNotification('Start date moved to Monday', 'info');
+                        }
+                    }              
+                ]
+            );
+        }
+    }
+
+    // NEW FUNCTION: Show popup dialog
+    function showPopup(title, message, buttons) {
+        const popup = document.getElementById('taskPopup');
+        const content = document.getElementById('popupContent');
+        
+        const buttonsHtml = buttons.map((btn, index) => 
+            `<button class="btn ${btn.className}" id="popupBtn${index}">${btn.text}</button>`
+        ).join('');
+        
+        content.innerHTML = `
+            <h5 style="margin-bottom: 15px; color: #667eea;">${title}</h5>
+            <p style="margin-bottom: 20px; line-height: 1.6;">${message}</p>
+            <div class="popup-buttons">
+                ${buttonsHtml}
+            </div>
+        `;
+        
+        // Attach click handlers after rendering
+        buttons.forEach((btn, index) => {
+            document.getElementById(`popupBtn${index}`).onclick = btn.onClick;
+        });
+        
+        popup.style.display = 'block';
+    }
+
+    // NEW FUNCTION: Close popup
+    function closePopup() {
+        document.getElementById('taskPopup').style.display = 'none';
+    }
+
+    // UPDATED FUNCTION: Calculate working days excluding weekends
+    function addWorkingDays(startDate, days) {
+        if (days === 0) return startDate;
+        
+        let currentDate = new Date(startDate);
+        let direction = days > 0 ? 1 : -1;
+        let daysRemaining = Math.abs(days);
+        
+        while (daysRemaining > 0) {
+            currentDate.setDate(currentDate.getDate() + direction);
+            
+            const dayOfWeek = currentDate.getDay();
+            const dateStr = currentDate.toISOString().split('T')[0];
+            
+            // Skip Sundays (0)
+            if (dayOfWeek === 0) continue;
+            
+            // For Saturdays (6), check if it's a working Saturday
+            if (dayOfWeek === 6) {
+                if (workingSaturdays.has(dateStr) || includeSaturdayAsWorkingDay) {
+                    daysRemaining--;
+                }
+                continue;
+            }
+            
+            // Monday-Friday are working days
+            daysRemaining--;
+        }
+        
+        return currentDate;
+    }
+
+    // UPDATED FUNCTION: Get next working day
+    function getNextWorkingDay(date) {
+        let checkDate = new Date(date);
+        
+        while (true) {
+            const dayOfWeek = checkDate.getDay();
+            const dateStr = checkDate.toISOString().split('T')[0];
+            
+            // Sunday - skip
+            if (dayOfWeek === 0) {
+                checkDate.setDate(checkDate.getDate() + 1);
+                continue;
+            }
+            
+            // Saturday - check if working
+            if (dayOfWeek === 6) {
+                if (workingSaturdays.has(dateStr) || includeSaturdayAsWorkingDay) {
+                    return checkDate;
+                }
+                checkDate.setDate(checkDate.getDate() + 1);
+                continue;
+            }
+            
+            // Monday-Friday
+            return checkDate;
+        }
+    }
+
+    async function init() {
+        await loadDefaultStagesFromAPI();
+        await loadEmployees();
+        await loadStats();
+        await loadProjects();
+    }
+
+    async function loadDefaultStagesFromAPI() {
+        const response = await fetch('/api/default-stages');
+        defaultStages = await response.json();
+    }
+
+    function loadDefaultStages() {
+            document.getElementById('stagesContainer').innerHTML = '';
+            stageCounter = 0;
+            defaultStages.forEach(stage => addTaskCheckbox(stage.name, stage.duration_days, true));
+            updateProjectEndDate();
+        }
+
+        function addTaskCheckbox(name, duration, isChecked = false, managerId = null) {
+            stageCounter++;
+            const html = `
+                <div class="card mb-2" id="stage-${stageCounter}" style="background: #f8f9fa; border-left: 3px solid ${isChecked ? '#667eea' : '#dee2e6'};">
+                    <div class="card-body p-2">
+                        <div class="d-flex align-items-start gap-2">
+                            <input type="checkbox" class="form-check-input mt-1" id="stageCheck-${stageCounter}" 
+                                ${isChecked ? 'checked' : ''} onchange="toggleStageSelection(${stageCounter})" 
+                                style="width: 18px; height: 18px; cursor: pointer;">
+                            <div class="flex-grow-1" id="stageContent-${stageCounter}" style="opacity: ${isChecked ? '1' : '0.5'};">
+                                <div class="mb-2">
+                                    <strong style="color: #495057; font-size: 0.85rem;">${name}</strong>
+                                    <input type="hidden" id="stageName-${stageCounter}" value="${name}">
+                                </div>
+                                <div class="row mb-2">
+                                    <div class="col-4">
+                                        <label class="form-label mb-1" style="font-size: 0.75rem;">Duration (days):</label>
+                                        <input type="number" class="form-control form-control-sm" placeholder="Days" 
+                                            id="stageDuration-${stageCounter}" min="1" value="${duration}" 
+                                            onchange="updateProjectEndDate()" style="font-size: 0.85rem;" ${!isChecked ? 'disabled' : ''}>
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label mb-1" style="font-size: 0.75rem;">Manager:</label>
+                                        <select class="form-select form-select-sm" id="stageManager-${stageCounter}" 
+                                            style="font-size: 0.85rem;" ${!isChecked ? 'disabled' : ''}>
+                                            <option value="">Select Manager...</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-4">
+                                        <label class="form-label mb-1" style="font-size: 0.75rem;">Custom Start:</label>
+                                        <input type="date" class="form-control form-control-sm" 
+                                            id="stageStartDate-${stageCounter}" 
+                                            onchange="updateProjectEndDate()" style="font-size: 0.85rem;" ${!isChecked ? 'disabled' : ''}>
+                                    </div>
+                                </div>
+                                <div>
+                                    <small class="text-muted" style="font-size: 0.65rem;">
+                                        <i class="fas fa-calendar me-1"></i>
+                                        <span id="stagePreview-${stageCounter}">Calculating...</span>
+                                    </small>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1" onclick="removeStage(${stageCounter})" 
+                                    style="font-size: 0.7rem; ${isChecked ? 'display: none;' : ''}" id="deleteBtn-${stageCounter}">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.getElementById('stagesContainer').insertAdjacentHTML('beforeend', html);
+            
+            // Populate manager dropdown
+            populateManagerDropdown(stageCounter, managerId);
+        }
+
+        function populateManagerDropdown(stageId, selectedManagerId = null) {
+            const managerSelect = document.getElementById(`stageManager-${stageId}`);
+            if (!managerSelect) return;
+            
+            managerSelect.innerHTML = '<option value="">Select Manager...</option>' + 
+                employees.map(e => `<option value="${e.id}" ${e.id === selectedManagerId ? 'selected' : ''}>${e.username}</option>`).join('');
+        }
+
+        function toggleStageSelection(id) {
+            const checkbox = document.getElementById(`stageCheck-${id}`);
+            const content = document.getElementById(`stageContent-${id}`);
+            const card = document.getElementById(`stage-${id}`);
+            const durationInput = document.getElementById(`stageDuration-${id}`);
+            const managerSelect = document.getElementById(`stageManager-${id}`);  // ADD THIS
+            const startDateInput = document.getElementById(`stageStartDate-${id}`);
+            const deleteBtn = document.getElementById(`deleteBtn-${id}`);
+            
+            if (checkbox.checked) {
+                content.style.opacity = '1';
+                card.style.borderLeftColor = '#667eea';
+                durationInput.disabled = false;
+                managerSelect.disabled = false;  // ADD THIS
+                startDateInput.disabled = false;
+                if (deleteBtn) deleteBtn.style.display = 'none';
+            } else {
+                content.style.opacity = '0.5';
+                card.style.borderLeftColor = '#dee2e6';
+                durationInput.disabled = true;
+                managerSelect.disabled = true;  // ADD THIS
+                startDateInput.disabled = true;
+                if (deleteBtn) deleteBtn.style.display = 'block';
+            }
+            
+            updateProjectEndDate();
+        }
+
+        function addCustomTask() {
+            const taskName = prompt('Enter custom task name:');
+            if (!taskName || taskName.trim() === '') return;
+            
+            const duration = prompt('Enter duration in days:', '1');
+            if (!duration || isNaN(duration) || parseInt(duration) < 1) return;
+            
+            addTaskCheckbox(taskName.trim(), parseInt(duration), true);
+            updateProjectEndDate();
+            showNotification('Custom task added!', 'success');
+        }
+
+        function addStageWithData(name, duration) {
+            addTaskCheckbox(name, duration, true);
+        }
+        function removeStage(id) {
+            document.getElementById(`stage-${id}`)?.remove();
+            updateProjectEndDate();
+        }
+
+    // UPDATED FUNCTION: Update project end date with working days calculation
+    function updateProjectEndDate() {
+        const startDateInput = document.getElementById('projectStartDate');
+        if (!startDateInput.value) return;
+        
+        const projectStartDate = new Date(startDateInput.value);
+        let currentDate = getNextWorkingDay(projectStartDate);
+        const stageElements = document.querySelectorAll('[id^="stage-"]');
+        
+        const stageDates = [];
+        
+        stageElements.forEach((element, idx) => {
+            const id = element.id.split('-')[1];
+            const checkbox = document.getElementById(`stageCheck-${id}`);
+            
+            // Skip unchecked tasks
+            if (!checkbox || !checkbox.checked) return;
+            
+            const duration = parseInt(document.getElementById(`stageDuration-${id}`)?.value) || 1;
+            const customStartDateInput = document.getElementById(`stageStartDate-${id}`);
+            const customStartDate = customStartDateInput?.value;
+            
+            let stageStart;
+            if (customStartDate) {
+                stageStart = getNextWorkingDay(new Date(customStartDate));
+            } else {
+                stageStart = new Date(currentDate);
+            }
+            
+            // Calculate end date using working days
+            const stageEnd = addWorkingDays(stageStart, duration - 1);
+            
+            stageDates.push({ 
+                id: id,
+                index: idx,
+                start: stageStart, 
+                end: stageEnd,
+                hasCustomDate: !!customStartDate,
+                duration: duration
+            });
+            
+            if (!customStartDate) {
+                currentDate = addWorkingDays(stageEnd, 1);
+            }
+        });
+        
+        // Detect overlapping stages
+        const overlapGroups = [];
+        stageDates.forEach((stage, idx) => {
+            const overlappingIndices = [idx];
+            
+            stageDates.forEach((otherStage, otherIdx) => {
+                if (idx === otherIdx) return;
+                const hasOverlap = (stage.start <= otherStage.end && stage.end >= otherStage.start);
+                if (hasOverlap && !overlappingIndices.includes(otherIdx)) {
+                    overlappingIndices.push(otherIdx);
+                }
+            });
+            
+            if (overlappingIndices.length > 1) {
+                overlappingIndices.sort((a, b) => a - b);
+                const groupExists = overlapGroups.some(group => 
+                    JSON.stringify(group.stages.sort()) === JSON.stringify(overlappingIndices.sort())
+                );
+                if (!groupExists) {
+                    overlapGroups.push({ stages: overlappingIndices });
+                }
+            }
+        });
+    
+    // Update previews
+    stageDates.forEach((stageData, idx) => {
+        const preview = document.getElementById(`stagePreview-${stageData.id}`);
+        if (!preview) return;
+        
+        let previewHTML = `${stageData.start.toLocaleDateString()} - ${stageData.end.toLocaleDateString()}`;
+        previewHTML += ` <span class="duration-badge">${stageData.duration} working days</span>`;
+        
+        if (stageData.hasCustomDate) {
+            previewHTML += ' <span class="badge bg-primary" style="font-size: 0.65rem;">Custom</span>';
+        }
+        
+        const overlapGroup = overlapGroups.find(group => group.stages.includes(idx));
+        if (overlapGroup) {
+            const position = overlapGroup.stages.indexOf(idx) + 1;
+            const total = overlapGroup.stages.length;
+            previewHTML += ` <span class="badge bg-warning" style="font-size: 0.65rem;">Overlap ${position}/${total}</span>`;
+        }
+        
+        preview.innerHTML = previewHTML;
+    });
+    
+    // Update projected end date with proper messaging
+    if (stageDates.length > 0) {
+        const latestEndDate = stageDates.reduce((latest, stage) => {
+            return stage.end > latest ? stage.end : latest;
+        }, stageDates[0].end);
+        
+        document.getElementById('projectedEndDate').textContent = latestEndDate.toLocaleDateString();
+    } else {
+        document.getElementById('projectedEndDate').textContent = 'No tasks selected';
+    }
 }
+    function addMember() {
+        const select = document.getElementById('memberSelect');
+        const memberId = parseInt(select.value);
+        if (!memberId || selectedMembers.includes(memberId)) return;
+        selectedMembers.push(memberId);
+        renderSelectedMembers();
+        select.value = '';
+    }
 
-async function createProject() {
-    const projectData = {
-        name: document.getElementById('projectName').value,
-        description: document.getElementById('projectDescription').value,
-        startDate: document.getElementById('projectStartDate').value,
-        endDate: document.getElementById('projectEndDate').value,
-        priority: document.getElementById('projectPriority').value,
-        budget: parseFloat(document.getElementById('projectBudget').value) || 0
-    };
+    function removeMember(memberId) {
+        selectedMembers = selectedMembers.filter(id => id !== memberId);
+        renderSelectedMembers();
+    }
 
+    function renderSelectedMembers() {
+        const container = document.getElementById('selectedMembers');
+        container.innerHTML = selectedMembers.map(memberId => {
+            const member = employees.find(e => e.id === memberId);
+            return `<div class="member-chip"><i class="fas fa-user-circle me-1"></i>${member.username}<i class="fas fa-times" onclick="removeMember(${memberId})"></i></div>`;
+        }).join('');
+    }
+
+    async function loadStats() {
+        const response = await fetch('/api/stats');
+        const data = await response.json();
+        document.getElementById('totalProjects').textContent = data.total_projects;
+        document.getElementById('activeProjects').textContent = data.active_projects;
+        document.getElementById('totalTasks').textContent = data.total_tasks;
+        document.getElementById('totalEmployees').textContent = data.total_employees;
+    }
+
+async function loadProjects() {
     try {
-        const response = await apiCall('/projects', {
-            method: 'POST',
-            body: JSON.stringify(projectData)
+        console.log('Loading projects...');
+        const response = await fetch('/api/projects');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        projects = await response.json();
+        console.log('Projects loaded:', projects.length);
+        
+        if (projects.length === 0) {
+            const container = document.getElementById('allProjectsSection');
+            container.innerHTML = '<p class="text-muted text-center py-4">No jobs yet. Create your first job!</p>';
+            return;
+        }
+        
+        // Fetch details for each project
+        const projectsWithDetails = await Promise.all(
+            projects.map(async (project) => {
+                try {
+                    console.log(`Fetching details for project ${project.id}...`);
+                    const detailsResponse = await fetch(`/api/projects/${project.id}/details`);
+                    
+                    if (!detailsResponse.ok) {
+                        console.error(`Failed to fetch details for project ${project.id}`);
+                        return null;
+                    }
+                    
+                    const details = await detailsResponse.json();
+                    console.log(`Details loaded for project ${project.id}:`, details);
+                    return details;
+                } catch (error) {
+                    console.error(`Error fetching project ${project.id}:`, error);
+                    return null;
+                }
+            })
+        );
+        
+        // Filter out null values
+        const validProjects = projectsWithDetails.filter(p => p !== null);
+        console.log('Valid projects:', validProjects.length);
+        
+        if (validProjects.length === 0) {
+            const container = document.getElementById('allProjectsSection');
+            container.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Jobs exist but couldn't load details. Please refresh the page.
+                </div>
+            `;
+            return;
+        }
+        
+        renderProjectsWithStages(validProjects);
+    } catch (error) {
+        console.error('Error loading projects:', error);
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Error loading jobs: ${error.message}
+                <button class="btn btn-sm btn-outline-danger ms-3" onclick="loadProjects()">
+                    <i class="fas fa-redo me-1"></i> Retry
+                </button>
+            </div>
+        `;
+    }
+}    
+
+function renderProjectsWithStages(projectsData) {
+        const container = document.getElementById('allProjectsSection');
+        
+        if (!projectsData.length) {
+            container.innerHTML = '<p class="text-muted text-center py-4">No jobs yet. Create your first job!</p>';
+            return;
+        }
+            
+        container.innerHTML = '';
+        
+        container.innerHTML = projectsData.map(project => {
+            const stages = project.stages || [];
+            const totalStages = stages.length;
+            const completedStages = stages.filter(s => s.status === 'completed').length;
+            const progress = totalStages > 0 ? Math.round((completedStages / totalStages) * 100) : 0;
+            
+            const startDateGroups = new Map();
+            
+            stages.forEach((stage, idx) => {
+                if (!stage.start_date) return;
+                const startDateKey = stage.start_date;
+                if (!startDateGroups.has(startDateKey)) {
+                    startDateGroups.set(startDateKey, []);
+                }
+                startDateGroups.get(startDateKey).push(idx);
+            });
+            
+            const stageGroupMap = new Map();
+            startDateGroups.forEach((indices, startDate) => {
+                if (indices.length > 1) {
+                    indices.sort((a, b) => a - b);
+                    indices.forEach(i => stageGroupMap.set(i, indices));
+                }
+            });
+            
+            const orderedStages = [];
+            const processedIndices = new Set();
+            
+            stages.forEach((stage, idx) => {
+                if (processedIndices.has(idx)) return;
+                
+                const sameStartGroup = stageGroupMap.get(idx);
+                
+                if (sameStartGroup && sameStartGroup.length > 1) {
+                    sameStartGroup.forEach(groupIdx => {
+                        if (!processedIndices.has(groupIdx)) {
+                            orderedStages.push({ stage: stages[groupIdx], originalIndex: groupIdx, group: sameStartGroup });
+                            processedIndices.add(groupIdx);
+                        }
+                    });
+                } else {
+                    orderedStages.push({ stage: stages[idx], originalIndex: idx, group: null });
+                    processedIndices.add(idx);
+                }
+            });
+            
+            let stagesHTML = '';
+            let previousGroup = null;
+            let groupHTML = '';
+            let isInGroup = false;
+            
+            orderedStages.forEach((stageData, displayIndex) => {
+                const stage = stageData.stage;
+                const index = stageData.originalIndex;
+                const currentGroup = stageData.group;
+                
+                const isCompleted = stage.status === 'completed';
+                const isActive = stage.status === 'in-progress';
+                
+                const hasSameStart = currentGroup && currentGroup.length > 1;
+                const isFirstInGroup = hasSameStart && currentGroup.indexOf(index) === 0;
+                const isLastInGroup = hasSameStart && currentGroup.indexOf(index) === currentGroup.length - 1;
+                
+                if (isFirstInGroup) {
+                    isInGroup = true;
+                    groupHTML = '<div class="stage-group-container">';
+                }
+                
+                let spacingClass = 'normal-spacing';
+                if (hasSameStart) {
+                    spacingClass = currentGroup.length >= 3 ? 'tight-spacing' : 'medium-spacing';
+                }
+                
+                let groupBadge = '';
+                if (hasSameStart) {
+                    const position = currentGroup.indexOf(index) + 1;
+                    const total = currentGroup.length;
+                    groupBadge = `<span class="parallel-badge">${position}/${total}</span>`;
+                }
+                
+                let circleContent;
+                if (isCompleted) {
+                    circleContent = '<i class="fas fa-check"></i>';
+                } else {
+                    circleContent = index + 1;
+                }
+                
+                const stageElement = `
+                    <div class="progress-step ${spacingClass}" 
+                        onclick="updateStageStatus(${project.id}, ${stage.id}, '${stage.status}')">
+                        <div class="step-circle ${isCompleted ? 'completed' : ''} ${isActive ? 'active' : ''}">
+                            ${circleContent}
+                        </div>
+                        <div class="step-label ${isCompleted ? 'completed' : ''} ${isActive ? 'active' : ''}">
+                            ${stage.name}
+                            <span class="duration-badge">${stage.duration_days}d</span>
+                            ${groupBadge}
+                        </div>
+                        ${stage.start_date ? `
+                            <div style="margin-top: 5px; text-align: center;">
+                                <small class="text-muted" style="font-size: 0.7rem;">
+                                    ${new Date(stage.start_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'})}
+                                    ${stage.end_date ? ' - ' + new Date(stage.end_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : ''}
+                                </small>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+                
+                if (isInGroup) {
+                    groupHTML += stageElement;
+                } else {
+                    stagesHTML += stageElement;
+                }
+                
+                if (isLastInGroup) {
+                    groupHTML += '</div>';
+                    stagesHTML += groupHTML;
+                    groupHTML = '';
+                    isInGroup = false;
+                }
+                
+                previousGroup = currentGroup;
+            });
+            
+            const membersHTML = project.members && project.members.length > 0 
+                ? project.members.slice(0, 3).map(m => `<span class="badge bg-info me-1"><i class="fas fa-user me-1"></i>${m.username}</span>`).join('') + 
+                (project.members.length > 3 ? `<span class="badge bg-secondary">+${project.members.length - 3}</span>` : '')
+                : '<span class="text-muted small">No members</span>';
+            
+            return `
+                <div class="project-progress-container">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <h5 class="mb-0">${project.name}</h5>
+                                <span class="project-status-badge status-${project.status}">
+                                    ${project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                                </span>
+                            </div>
+                            <div class="mt-1">${membersHTML}</div>
+                        </div>
+                        <div class="project-actions">
+                            <button class="btn btn-outline-success" onclick="exportCurrentProject(${project.id})" 
+                                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px;">
+                                <i class="fas fa-file-excel me-2"></i> Export to Excel
+                            </button>
+                            <button class="btn btn-outline-primary" onclick="openCalendarView(${project.id})" 
+                                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px;">
+                                <i class="fas fa-calendar-alt me-2"></i> View Calendar
+                            </button>
+                            <button class="btn-delete-project" onclick="deleteProject(${project.id}, event)">
+                                <i class="fas fa-trash-alt me-1"></i> Delete
+                            </button>
+                        </div>                        
+                    </div>
+                    
+                    <p class="text-muted small">${project.description || 'No description'}</p>
+                    
+                    <div class="progress-steps">
+                        <div class="progress-line">
+                            <div class="progress-line-fill" style="width: ${progress}%"></div>
+                        </div>
+                        ${stagesHTML}
+                    </div>
+                    
+                    <div class="d-flex justify-content-between align-items-center mt-3">
+                        <small class="text-muted">
+                            <i class="fas fa-calendar-alt me-1"></i>
+                            ${project.start_date ? new Date(project.start_date).toLocaleDateString() : 'Not set'} - 
+                            ${project.end_date ? new Date(project.end_date).toLocaleDateString() : 'Not set'}
+                        </small>
+                        <strong style="color: #667eea; font-size: 1.1rem;">${progress}% Complete (${completedStages}/${totalStages})</strong>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+    setTimeout(() => {
+        document.querySelectorAll('.progress-steps').forEach(progressContainer => {
+            const line = progressContainer.querySelector('.progress-line');
+            const steps = progressContainer.querySelectorAll('.progress-step');
+            
+            if (line && steps.length > 0) {
+                const firstStep = steps[0];
+                const lastStep = steps[steps.length - 1];
+                
+                const firstStepRect = firstStep.getBoundingClientRect();
+                const lastStepRect = lastStep.getBoundingClientRect();
+                const containerRect = progressContainer.getBoundingClientRect();
+                
+                const lineLeft = firstStepRect.left - containerRect.left + 25; // center of first circle
+                const lineRight = lastStepRect.left - containerRect.left + 25; // center of last circle
+                const lineWidth = lineRight - lineLeft;
+                
+                line.style.left = `${lineLeft}px`;
+                line.style.width = `${lineWidth}px`;
+                line.style.right = 'auto'; // Override the CSS 'right: 20px'
+            }
+        });
+    }, 100);
+}    
+
+    async function loadEmployees() {
+        const response = await fetch('/api/employees');
+        employees = await response.json();
+        const select = document.getElementById('memberSelect');
+        select.innerHTML = '<option value="">Select member to add...</option>' + 
+            employees.map(e => `<option value="${e.id}">${e.username} (${e.role})</option>`).join('');
+    }
+
+    // UPDATED FUNCTION: Handle project submit with working Saturdays
+    async function handleProjectSubmit(e) {
+        e.preventDefault();
+        
+        const stages = [];
+        const stageElements = document.querySelectorAll('[id^="stage-"]');
+        
+        stageElements.forEach((element, index) => {
+            const id = element.id.split('-')[1];
+            const checkbox = document.getElementById(`stageCheck-${id}`);
+            
+            if (!checkbox || !checkbox.checked) return;
+            
+            const name = document.getElementById(`stageName-${id}`)?.value;
+            const duration = parseInt(document.getElementById(`stageDuration-${id}`)?.value) || 1;
+            const managerId = parseInt(document.getElementById(`stageManager-${id}`)?.value) || null;  // ADD THIS
+            const customStartDate = document.getElementById(`stageStartDate-${id}`)?.value;
+            
+            if (name) {
+                const stageData = { 
+                    name, 
+                    order: stages.length + 1,
+                    duration_days: duration,
+                    manager_id: managerId  // ADD THIS
+                };
+                
+                if (customStartDate) {
+                    stageData.start_date = customStartDate;
+                }
+                
+                stages.push(stageData);
+            }
         });
 
+    if (stages.length === 0) {
+        alert('Please select at least one task!');
+        return;
+    }        
+    
+    const data = {
+        name: document.getElementById('projectName').value,
+        // description removed - no longer needed in UI
+        start_date: document.getElementById('projectStartDate').value,
+        stages,
+        members: selectedMembers,
+        include_saturday: includeSaturdayAsWorkingDay,
+        working_saturdays: Array.from(workingSaturdays)
+    };        
+        const response = await fetch('/api/projects', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
         if (response.ok) {
-            document.getElementById('projectModal').classList.remove('active');
+            showNotification('Job created successfully!', 'success');
+            projectModal.hide();
             document.getElementById('projectForm').reset();
-            await loadDashboardData();
+            document.getElementById('stagesContainer').innerHTML = '';
+            document.getElementById('selectedMembers').innerHTML = '';
+            stageCounter = 0;
+            selectedMembers = [];
+            workingSaturdays.clear();
+            await loadProjects();
+            await loadStats();
         } else {
             const error = await response.json();
-            alert(error.error || 'Failed to create project');
+            alert('Error: ' + (error.error || 'Failed to create job'));
         }
-    } catch (error) {
-        console.error('Error creating project:', error);
-        alert('Failed to create project');
     }
-}
 
-function connectSocket() {
-    socket = io('http://localhost:3000');
-
-    socket.on('connect', () => {
-        console.log('Connected to server');
-    });
-
-    socket.on('task:created', () => {
-        loadDashboardData();
-    });
-
-    socket.on('task:updated', () => {
-        loadDashboardData();
-    });
-
-    socket.on('task:deleted', () => {
-        loadDashboardData();
-    });
-}
-```
-
-
-## 19. public/js/kanban.js
-
-```javascript
-const API_URL = 'http://localhost:3000/api';
-let socket;
-let allTasks = [];
-let allProjects = [];
-let allUsers = [];
-let draggedTask = null;
-
-document.addEventListener('DOMContentLoaded', async () => {
-    checkAuth();
-    setupEventListeners();
-    await loadInitialData();
-    connectSocket();
-});
-
-function setupEventListeners() {
-    // Logout
-    document.getElementById('logoutBtn').addEventListener('click', (e) => {
-        e.preventDefault();
-        localStorage.clear();
-        window.location.href = 'index.html';
-    });
-
-    // Project filter
-    document.getElementById('projectFilter').addEventListener('change', (e) => {
-        const projectId = e.target.value;
-        filterTasksByProject(projectId);
-    });
-
-    // Create task modal
-    const modal = document.getElementById('taskModal');
-    const createBtn = document.getElementById('createTaskBtn');
-    const closeBtn = document.querySelector('.close');
-
-    createBtn.addEventListener('click', () => {
-        resetTaskForm();
-        document.getElementById('taskModalTitle').textContent = 'Create New Task';
-        modal.classList.add('active');
-    });
-
-    closeBtn.addEventListener('click', () => {
-        modal.classList.remove('active');
-    });
-
-    window.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.classList.remove('active');
-        }
-    });
-
-    // Task form submission
-    document.getElementById('taskForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await saveTask();
-    });
-
-    // Setup drag and drop for columns
-    setupDragAndDrop();
-}
-
-function setupDragAndDrop() {
-    const columns = document.querySelectorAll('.task-list');
-
-    columns.forEach(column => {
-        column.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            column.style.background = '#e0e7ff';
-        });
-
-        column.addEventListener('dragleave', () => {
-            column.style.background = '';
-        });
-
-        column.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            column.style.background = '';
-            
-            const taskId = e.dataTransfer.getData('text/plain');
-            const newStatus = column.closest('.kanban-column').dataset.status;
-            
-            await updateTaskStatus(taskId, newStatus);
-        });
-    });
-}
-
-async function loadInitialData() {
-    try {
-        // Load projects
-        const projectsResponse = await apiCall('/projects');
-        allProjects = await projectsResponse.json();
-        populateProjectFilter();
-        populateProjectDropdown();
-
-        // Load users
-        const usersResponse = await apiCall('/auth/users');
-        allUsers = await usersResponse.json();
-        populateUserDropdown();
-
-        // Load tasks
-        await loadTasks();
-
-    } catch (error) {
-        console.error('Error loading initial data:', error);
-    }
-}
-
-function populateProjectFilter() {
-    const select = document.getElementById('projectFilter');
-    select.innerHTML = '<option value="">All Projects</option>';
-    
-    allProjects.forEach(project => {
-        const option = document.createElement('option');
-        option.value = project.id;
-        option.textContent = project.name;
-        select.appendChild(option);
-    });
-}
-
-function populateProjectDropdown() {
-    const select = document.getElementById('taskProject');
-    select.innerHTML = '<option value="">Select Project</option>';
-    
-    allProjects.forEach(project => {
-        const option = document.createElement('option');
-        option.value = project.id;
-        option.textContent = project.name;
-        select.appendChild(option);
-    });
-}
-
-function populateUserDropdown() {
-    const select = document.getElementById('taskAssignee');
-    select.innerHTML = '<option value="">Unassigned</option>';
-    
-    allUsers.forEach(user => {
-        const option = document.createElement('option');
-        option.value = user.id;
-        option.textContent = `${user.name} (${user.role})`;
-        select.appendChild(option);
-    });
-}
-
-async function loadTasks(projectId = null) {
-    try {
-        const url = projectId ? `/tasks?projectId=${projectId}` : '/tasks';
-        const response = await apiCall(url);
-        allTasks = await response.json();
+    async function updateStageStatus(projectId, stageId, currentStatus) {
+        const newStatus = currentStatus === 'pending' ? 'in-progress' : 
+                         currentStatus === 'in-progress' ? 'completed' : 'pending';
         
-        renderTasks();
-    } catch (error) {
-        console.error('Error loading tasks:', error);
-    }
-}
-
-function filterTasksByProject(projectId) {
-    if (projectId) {
-        loadTasks(projectId);
-    } else {
-        loadTasks();
-    }
-}
-
-function renderTasks() {
-    // Clear all columns
-    ['todo', 'in-progress', 'review', 'completed'].forEach(status => {
-        const listId = status === 'in-progress' ? 'inProgressList' : 
-                       status === 'todo' ? 'todoList' :
-                       status === 'review' ? 'reviewList' : 'completedList';
-        document.getElementById(listId).innerHTML = '';
-    });
-
-    // Group tasks by status
-    const tasksByStatus = {
-        'todo': [],
-        'in-progress': [],
-        'review': [],
-        'completed': []
-    };
-
-    allTasks.forEach(task => {
-        if (tasksByStatus[task.status]) {
-            tasksByStatus[task.status].push(task);
-        }
-    });
-
-    // Render tasks in each column
-    Object.keys(tasksByStatus).forEach(status => {
-        const tasks = tasksByStatus[status];
-        const listId = status === 'in-progress' ? 'inProgressList' : 
-                       status === 'todo' ? 'todoList' :
-                       status === 'review' ? 'reviewList' : 'completedList';
-        const countId = status === 'in-progress' ? 'inProgressCount' : 
-                        status === 'todo' ? 'todoCount' :
-                        status === 'review' ? 'reviewCount' : 'completedCount';
-        
-        document.getElementById(countId).textContent = tasks.length;
-        
-        const list = document.getElementById(listId);
-        list.innerHTML = tasks.map(task => createTaskCard(task)).join('');
-    });
-
-    // Add drag event listeners to task cards
-    document.querySelectorAll('.task-card').forEach(card => {
-        card.addEventListener('dragstart', (e) => {
-            e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', card.dataset.taskId);
-            card.classList.add('dragging');
-        });
-
-        card.addEventListener('dragend', (e) => {
-            card.classList.remove('dragging');
-        });
-
-        card.addEventListener('click', () => {
-            openEditTaskModal(card.dataset.taskId);
-        });
-    });
-}
-
-function createTaskCard(task) {
-    return `
-        <div class="task-card" draggable="true" data-task-id="${task.id}">
-            <span class="task-priority ${getPriorityClass(task.priority)}">
-                ${task.priority}
-            </span>
-            <div class="task-title">${task.title}</div>
-            ${task.description ? `<p style="font-size: 13px; color: #6b7280; margin-top: 6px;">${task.description.substring(0, 80)}${task.description.length > 80 ? '...' : ''}</p>` : ''}
-            <div class="task-meta">
-                <div class="task-assignee">
-                    ${task.assignedTo ? `
-                        <img src="${task.assignedTo.avatar}" alt="${task.assignedTo.name}">
-                        <span>${task.assignedTo.name}</span>
-                    ` : '<span>Unassigned</span>'}
-                </div>
-                ${task.dueDate ? `<span>📅 ${formatDate(task.dueDate)}</span>` : ''}
-            </div>
-        </div>
-    `;
-}
-
-async function updateTaskStatus(taskId, newStatus) {
-    try {
-        const response = await apiCall(`/tasks/${taskId}`, {
+        await fetch(`/api/projects/${projectId}/stages/${stageId}`, {
             method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
         });
-
-        if (response.ok) {
-            const task = allTasks.find(t => t.id === taskId);
-            if (task) {
-                task.status = newStatus;
-            }
-            renderTasks();
-        }
-    } catch (error) {
-        console.error('Error updating task status:', error);
+        
+        await loadProjects();
+        await loadStats();
     }
+
+function openProjectModal() {
+    document.getElementById('projectForm').reset();
+    document.getElementById('projectStartDate').valueAsDate = new Date();
+    workingSaturdays.clear();
+    loadDefaultStages();
+    projectModal.show();
 }
 
-function resetTaskForm() {
-    document.getElementById('taskForm').reset();
-    document.getElementById('taskId').value = '';
+function toggleNotifications() {
+    alert('Notifications feature');
 }
 
-function openEditTaskModal(taskId) {
-    const task = allTasks.find(t => t.id === taskId);
-    if (!task) return;
-
-    document.getElementById('taskModalTitle').textContent = 'Edit Task';
-    document.getElementById('taskId').value = task.id;
-    document.getElementById('taskProject').value = task.projectId || '';
-    document.getElementById('taskTitle').value = task.title;
-    document.getElementById('taskDescription').value = task.description || '';
-    document.getElementById('taskAssignee').value = task.assignedToId || '';
-    document.getElementById('taskPriority').value = task.priority;
-    document.getElementById('taskDueDate').value = task.dueDate ? task.dueDate.split('T')[^3_0] : '';
-    document.getElementById('taskEstimatedHours').value = task.estimatedHours || '';
-
-    document.getElementById('taskModal').classList.add('active');
-}
-
-async function saveTask() {
-    const taskId = document.getElementById('taskId').value;
-    const taskData = {
-        projectId: document.getElementById('taskProject').value,
-        title: document.getElementById('taskTitle').value,
-        description: document.getElementById('taskDescription').value,
-        assignedToId: document.getElementById('taskAssignee').value || null,
-        priority: document.getElementById('taskPriority').value,
-        dueDate: document.getElementById('taskDueDate').value || null,
-        estimatedHours: parseFloat(document.getElementById('taskEstimatedHours').value) || 0
-    };
-
+async function deleteProject(projectId, event) {
+    event.stopPropagation();
+    
+    if (!confirm('Are you sure you want to delete this job? This action cannot be undone.')) {
+        return;
+    }
+    
     try {
-        let response;
-        if (taskId) {
-            // Update existing task
-            response = await apiCall(`/tasks/${taskId}`, {
-                method: 'PUT',
-                body: JSON.stringify(taskData)
-            });
-        } else {
-            // Create new task
-            response = await apiCall('/tasks', {
-                method: 'POST',
-                body: JSON.stringify(taskData)
-            });
-        }
-
+        const response = await fetch(`/api/projects/${projectId}`, {
+            method: 'DELETE'
+        });
+        
         if (response.ok) {
-            document.getElementById('taskModal').classList.remove('active');
-            await loadTasks();
+            alert('Job deleted successfully!');
+            await loadProjects();
+            await loadStats();
         } else {
             const error = await response.json();
-            alert(error.error || 'Failed to save task');
+            alert('Error: ' + (error.error || 'Failed to delete job'));
         }
     } catch (error) {
-        console.error('Error saving task:', error);
-        alert('Failed to save task');
+        alert('Error deleting job: ' + error.message);
     }
 }
 
-function connectSocket() {
-    socket = io('http://localhost:3000');
+function getStageColor(index) {
+    return STAGE_COLORS[index % STAGE_COLORS.length];
+}
 
-    socket.on('connect', () => {
-        console.log('Connected to server');
+let miniPopupData = null;
+
+
+
+async function openCalendarView(projectId) {
+    currentProjectForCalendar = projectId;
+    
+    try {
+        // Fetch project details
+        const response = await fetch(`/api/projects/${projectId}/details`);
+        currentProjectData = await response.json();
+        
+        // ✅ CRITICAL: ALWAYS fetch complete reschedule history (including daily tasks)
+        const timestamp = Date.now();
+        const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_t=${timestamp}`);
+        if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            currentProjectData.rescheduleHistory = historyData;
+            console.log('✅ Loaded complete reschedule history:', historyData.length, 'records');
+            console.log('History details:', historyData);
+        } else {
+            console.warn('⚠️ Failed to load reschedule history');
+            currentProjectData.rescheduleHistory = [];
+        }  
+              
+        // Initialize saturdayWorkingDays
+        if (!currentProjectData.saturdayWorkingDays) {
+            currentProjectData.saturdayWorkingDays = new Set();
+        } else if (Array.isArray(currentProjectData.saturdayWorkingDays)) {
+            currentProjectData.saturdayWorkingDays = new Set(currentProjectData.saturdayWorkingDays);
+        }
+        
+        console.log('Working Saturdays loaded:', Array.from(currentProjectData.saturdayWorkingDays));
+        console.log('Reschedule History loaded:', currentProjectData.rescheduleHistory);
+        
+        document.getElementById('calendarProjectTitle').textContent = `${currentProjectData.name}`;
+        document.getElementById('calendarProjectDates').textContent = 
+            `${new Date(currentProjectData.start_date).toLocaleDateString()} - ${new Date(currentProjectData.end_date).toLocaleDateString()}`;
+        
+        // Show modal first
+        calendarModal.show();
+        
+        // Wait for modal to be fully shown
+        setTimeout(async () => {
+            const calendarEl = document.getElementById('calendar');
+            
+            // Clear any existing calendar
+            if (calendar) {
+                calendar.destroy();
+            }
+            
+            // ✅ Generate events with ghost events
+            const calendarEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
+            
+            console.log('📊 Total calendar events generated:', calendarEvents.length);
+            console.log('👻 Ghost events:', calendarEvents.filter(e => e.classNames?.includes('ghost-event')).length);
+            
+            // Create new calendar
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                initialDate: currentProjectData.start_date,
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek,listMonth'
+                },                
+                height: 'auto',
+                contentHeight: 500,
+                events: calendarEvents,
+                eventClick: function(info) {
+                    // ✅ Don't allow clicking ghost events
+                    if (info.event.extendedProps.isGhost) {
+                        const props = info.event.extendedProps;
+                        let message = `Original Location\n\n`;
+                        
+                        if (props.type === 'daily_task') {
+                            message += `Stage: ${props.stageName}\n`;
+                            message += `Day: ${props.dayNumber}\n`;
+                        } else {
+                            message += `Stage: ${props.stageName}\n`;
+                        }
+                        
+                        message += `Moved ${props.daysShifted} day(s) ${props.direction}\n`;
+                        message += `New location: ${new Date(props.movedTo).toLocaleDateString()}`;
+                        
+                        alert(message);
+                        return;
+                    }
+                    handleStageClickReschedule(info, currentProjectData);
+                },
+                dayCellDidMount: function(info) {
+                    addDayRescheduleButton(info, currentProjectData);
+                },
+                eventDisplay: 'block',
+                displayEventTime: false,
+                eventDidMount: function(info) {
+                    enhanceEventDisplay(info);
+                },
+                datesSet: function() {
+                    // ✅ When month changes, refresh badges
+                    setTimeout(() => {
+                        refreshParallelBadges();
+                    }, 200);
+                }
+            });
+            
+            calendar.render();
+            
+            // ✅ Apply enhancements after render INCLUDING badge refresh
+            setTimeout(() => {
+                enhanceCalendarWithWeekends();
+                generateEnhancedLegend(currentProjectData.stages);
+                refreshParallelBadges(); // ✅ ADDED: Refresh badges on initial load
+            }, 500); // ✅ Increased timeout from 300ms to 500ms
+        }, 300);
+        
+    } catch (error) {
+        console.error('Error loading calendar:', error);
+        alert('Error loading calendar: ' + error.message);
+    }
+}
+
+async function generateEnhancedCalendarEvents(stages) {
+    const events = [];
+    const dateStageMap = new Map();
+    
+    // Ensure saturdayWorkingDays is always a Set
+    if (!currentProjectData.saturdayWorkingDays) {
+        currentProjectData.saturdayWorkingDays = new Set();
+    } else if (Array.isArray(currentProjectData.saturdayWorkingDays)) {
+        currentProjectData.saturdayWorkingDays = new Set(currentProjectData.saturdayWorkingDays);
+    } else if (!(currentProjectData.saturdayWorkingDays instanceof Set)) {
+        try {
+            currentProjectData.saturdayWorkingDays = new Set(JSON.parse(currentProjectData.saturdayWorkingDays));
+        } catch (e) {
+            currentProjectData.saturdayWorkingDays = new Set();
+        }
+    }
+    
+    
+        console.log('=== Generating Calendar Events ===');
+        console.log('Working Saturdays:', Array.from(currentProjectData.saturdayWorkingDays));
+        console.log('Reschedule History:', currentProjectData.rescheduleHistory?.length || 0, 'records');    
+    // Helper function to check if date is working day
+    function isWorkingDay(date) {
+        const day = date.getDay();
+        const dateStr = date.toISOString().split('T')[0];
+        
+        if (day === 0) return false;
+        if (day === 6) {
+            const isWorking = currentProjectData.saturdayWorkingDays.has(dateStr);
+            return isWorking;
+        }
+        return true;
+    }
+    
+if (currentProjectData.rescheduleHistory && currentProjectData.rescheduleHistory.length > 0) {
+    console.log('\n=== Adding Ghost Events ===');
+    console.log('Total history records:', currentProjectData.rescheduleHistory.length);
+    
+try {
+        currentProjectData.rescheduleHistory.forEach(history => {
+            const stage = stages.find(s => s.id === history.stage_id);
+            if (!stage) {
+                console.warn('⚠️ Stage not found for history:', history);
+                return;
+            }
+            
+            const index = stages.indexOf(stage);
+            const color = getStageColor(index);
+            
+            // ✅ Determine ghost event title based on type
+            let ghostTitle = '';
+            let tooltipText = '';
+            
+            if (history.type === 'daily_task') {
+                // For daily tasks, show "Stage Name - Day X"
+                ghostTitle = `⇢ ${history.stage_name} - Day ${history.day_number}`;
+                
+                tooltipText = `📍 Original Location\n`;
+                tooltipText += `━━━━━━━━━━━━━\n`;
+                tooltipText += `Stage: ${history.stage_name}\n`;
+                tooltipText += `Day: ${history.day_number}\n`;
+                tooltipText += `Moved ${history.days_shifted} day(s) ${history.direction}\n`;
+                tooltipText += `➡️ New date: ${new Date(history.new_date).toLocaleDateString()}`;
+                if (history.reason) {
+                    tooltipText += `\n💬 Reason: ${history.reason}`;
+                }
+                
+                console.log(`  ✔️ Daily task ghost: ${history.stage_name} Day ${history.day_number} at ${history.original_date} → ${history.new_date}`);
+            } else {
+                // For stage-level reschedules
+                ghostTitle = `⇢ ${history.stage_name}`;
+                
+                tooltipText = `📍 Original Location\n`;
+                tooltipText += `━━━━━━━━━━━━━\n`;
+                tooltipText += `Stage: ${history.stage_name}\n`;
+                tooltipText += `Moved ${history.days_shifted} day(s) ${history.direction}\n`;
+                tooltipText += `➡️ New date: ${new Date(history.new_date).toLocaleDateString()}`;
+                if (history.reason) {
+                    tooltipText += `\n💬 Reason: ${history.reason}`;
+                }
+                
+                console.log(`  ✔️ Stage ghost: ${history.stage_name} at ${history.original_date} → ${history.new_date}`);
+            }            
+            // ✅ Create ghost event at ORIGINAL location
+            const ghostEvent = {
+                title: ghostTitle,
+                start: history.original_date,
+                end: history.original_date, // Single day indicator
+                backgroundColor: color,
+                borderColor: color,
+                classNames: ['ghost-event'],
+                extendedProps: {
+                    isGhost: true,
+                    type: history.type,
+                    stageId: history.stage_id,
+                    stageName: history.stage_name,
+                    dayNumber: history.day_number || null,
+                    movedTo: history.new_date,
+                    daysShifted: history.days_shifted,
+                    direction: history.direction,
+                    reason: history.reason,
+                    rescheduledBy: history.rescheduled_by,
+                    rescheduledAt: history.rescheduled_at,
+                    tooltip: tooltipText
+                }
+            };
+            
+            events.push(ghostEvent);
+        });
+        
+console.log(`=== Total ghost events created: ${currentProjectData.rescheduleHistory.length} ===\n`);
+    } catch (error) {
+        console.error('❌ Error creating ghost events:', error);
+        // Continue anyway - don't let ghost event errors break the whole calendar
+    }
+}
+    // ✅ STEP 2 - Process actual stage events (with daily tasks if available)
+    for (const stage of stages) {
+        const index = stages.indexOf(stage);
+        
+        try {
+            const response = await fetch(`/api/projects/${currentProjectData.id}/stages/${stage.id}/daily-tasks`);
+            
+            if (response.ok) {
+                const dailyTasks = await response.json();
+                
+                if (dailyTasks && dailyTasks.length > 0) {
+                    console.log(`\n✔️ Using daily tasks for stage: "${stage.name}" (${dailyTasks.length} tasks)`);
+                    
+                    const color = getStageColor(index);
+                    let segmentStart = null;
+                    let lastDate = null;
+                    let segmentTasks = [];
+                    
+                    dailyTasks.sort((a, b) => new Date(a.scheduled_date) - new Date(b.scheduled_date));
+                    
+                    const hasAnyRescheduled = dailyTasks.some(t => t.is_rescheduled);
+                    
+                    // ✅ Check if THIS stage was rescheduled (entire stage)
+                    const stageRescheduleHistory = currentProjectData.rescheduleHistory?.find(h => h.stage_id === stage.id);
+                    
+                    dailyTasks.forEach((task, taskIdx) => {
+                        const taskDate = new Date(task.scheduled_date + 'T12:00:00');
+                        
+                        const dateKey = taskDate.toISOString().split('T')[0];
+                        if (!dateStageMap.has(dateKey)) {
+                            dateStageMap.set(dateKey, []);
+                        }
+                        dateStageMap.get(dateKey).push({ stage, index });
+                        
+                        if (!segmentStart) {
+                            segmentStart = new Date(taskDate);
+                            lastDate = new Date(taskDate);
+                            segmentTasks = [task];
+                        } else {
+                            const nextDay = new Date(lastDate);
+                            nextDay.setDate(nextDay.getDate() + 1);
+                            
+                            if (taskDate.getTime() !== nextDay.getTime()) {
+                                const segmentEnd = new Date(lastDate);
+                                segmentEnd.setDate(segmentEnd.getDate() + 1);
+                                
+                                console.log(`  ✔️ Daily task segment: ${segmentStart.toISOString().split('T')[0]} to ${segmentEnd.toISOString().split('T')[0]}`);
+                                
+                                events.push(createStageEventWithStatus(
+                                    stage, 
+                                    index, 
+                                    segmentStart, 
+                                    segmentEnd, 
+                                    color, 
+                                    dateStageMap,
+                                    segmentTasks,
+                                    hasAnyRescheduled,
+                                    stageRescheduleHistory // ✅ Pass reschedule info
+                                ));
+                                
+                                segmentStart = new Date(taskDate);
+                                segmentTasks = [task];
+                            } else {
+                                segmentTasks.push(task);
+                            }
+                            lastDate = new Date(taskDate);
+                        }
+                        
+                        if (taskIdx === dailyTasks.length - 1 && segmentStart) {
+                            const segmentEnd = new Date(lastDate);
+                            segmentEnd.setDate(segmentEnd.getDate() + 1);
+                            console.log(`  ✔️ Final daily task segment: ${segmentStart.toISOString().split('T')[0]} to ${segmentEnd.toISOString().split('T')[0]}`);
+                            
+                            events.push(createStageEventWithStatus(
+                                stage, 
+                                index, 
+                                segmentStart, 
+                                segmentEnd, 
+                                color, 
+                                dateStageMap,
+                                segmentTasks,
+                                hasAnyRescheduled,
+                                stageRescheduleHistory // ✅ Pass reschedule info
+                            ));
+                        }
+                    });
+                    
+                    continue;
+                }
+            }
+        } catch (error) {
+            console.log(`  ℹ️ No daily tasks for stage "${stage.name}", using default dates`);
+        }
+        
+        // Fallback: Use original logic if no daily tasks
+        if (!stage.start_date || !stage.end_date) {
+            console.warn(`Stage "${stage.name}" missing dates`);
+            continue;
+        }
+        
+        const stageStart = new Date(stage.start_date);
+        const stageEnd = new Date(stage.end_date);
+        const color = getStageColor(index);
+        
+        // ✅ Check if THIS stage was rescheduled
+        const stageRescheduleHistory = currentProjectData.rescheduleHistory?.find(h => h.stage_id === stage.id);
+        
+        console.log(`\nProcessing Stage: "${stage.name}" (using default dates)`);
+        
+        for (let d = new Date(stageStart); d <= stageEnd; d.setDate(d.getDate() + 1)) {
+            const dateKey = d.toISOString().split('T')[0];
+            if (!dateStageMap.has(dateKey)) {
+                dateStageMap.set(dateKey, []);
+            }
+            dateStageMap.get(dateKey).push({ stage, index });
+        }
+        
+        let segmentStart = null;
+        let lastWorkingDate = null;
+        
+        for (let d = new Date(stageStart); d <= stageEnd; d.setDate(d.getDate() + 1)) {
+            const currentDate = new Date(d);
+            const isWorking = isWorkingDay(currentDate);
+            
+            if (isWorking) {
+                if (!segmentStart) {
+                    segmentStart = new Date(currentDate);
+                }
+                lastWorkingDate = new Date(currentDate);
+            } else {
+                if (segmentStart && lastWorkingDate) {
+                    const segmentEnd = new Date(lastWorkingDate);
+                    segmentEnd.setDate(segmentEnd.getDate() + 1);
+                    
+                    events.push(createStageEvent(
+                        stage, 
+                        index, 
+                        segmentStart, 
+                        segmentEnd, 
+                        color, 
+                        dateStageMap,
+                        stageRescheduleHistory // ✅ Pass reschedule info
+                    ));
+                    
+                    segmentStart = null;
+                    lastWorkingDate = null;
+                }
+            }
+        }
+        
+        if (segmentStart && lastWorkingDate) {
+            const segmentEnd = new Date(lastWorkingDate);
+            segmentEnd.setDate(segmentEnd.getDate() + 1);
+            events.push(createStageEvent(
+                stage, 
+                index, 
+                segmentStart, 
+                segmentEnd, 
+                color, 
+                dateStageMap,
+                stageRescheduleHistory // ✅ Pass reschedule info
+            ));
+        }
+    }
+    
+    console.log(`\nGenerated ${events.length} total calendar events (including ghosts)`);
+    console.log('=== Event Generation Complete ===\n');
+    return events;
+}
+
+
+function createStageEvent(stage, index, start, end, color, dateStageMap, stageRescheduleHistory = null) {
+    // Check for parallel stages
+    let hasParallel = false;
+    let parallelCount = 0;
+    
+    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+        const dateKey = d.toISOString().split('T')[0];
+        const stagesOnDate = dateStageMap.get(dateKey) || [];
+        if (stagesOnDate.length > 1) {
+            hasParallel = true;
+            parallelCount = Math.max(parallelCount, stagesOnDate.length);
+        }
+    }
+    
+    // Check entire project for overlaps
+    if (currentProjectData && currentProjectData.stages) {
+        const stageStart = new Date(stage.start_date);
+        const stageEnd = new Date(stage.end_date);
+        
+        let overlapCount = 1;
+        
+        currentProjectData.stages.forEach((otherStage, otherIdx) => {
+            if (otherStage.id === stage.id || !otherStage.start_date || !otherStage.end_date) return;
+            
+            const otherStart = new Date(otherStage.start_date);
+            const otherEnd = new Date(otherStage.end_date);
+            
+            if (stageStart <= otherEnd && stageEnd >= otherStart) {
+                hasParallel = true;
+                overlapCount++;
+            }
+        });
+        
+        parallelCount = Math.max(parallelCount, overlapCount);
+    }
+    
+    let title = stage.name;
+    
+    if (hasParallel) {
+        title = `⚡ ${stage.name}`;
+    }      
+    const classNames = [];
+    if (stage.status === 'completed') classNames.push('stage-event-completed');
+    if (stage.status === 'in-progress') classNames.push('stage-event-active');
+    
+    // ✅ Build extended props with reschedule info
+    const extendedProps = {
+        stageId: stage.id,
+        stageIndex: index,
+        duration: stage.duration_days,
+        status: stage.status,
+        hasParallel: hasParallel,
+        parallelCount: parallelCount,
+        startDate: stage.start_date,
+        endDate: stage.end_date,
+        stageName: stage.name
+    };
+    
+    // ✅ Add reschedule information if available
+    if (stageRescheduleHistory) {
+        extendedProps.wasRescheduled = true;
+        extendedProps.daysShifted = stageRescheduleHistory.days_shifted || 
+            Math.abs(Math.round((new Date(stageRescheduleHistory.new_date) - new Date(stageRescheduleHistory.original_date)) / (1000 * 60 * 60 * 24)));
+        extendedProps.rescheduleDirection = stageRescheduleHistory.direction || 
+            (new Date(stageRescheduleHistory.new_date) > new Date(stageRescheduleHistory.original_date) ? 'forward' : 'backward');
+        extendedProps.rescheduleBadge = `${extendedProps.rescheduleDirection === 'forward' ? '+' : '-'}${extendedProps.daysShifted}d`;
+        extendedProps.originalDate = stageRescheduleHistory.original_date;
+    }
+
+    return {
+        title: title,
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0],
+        backgroundColor: color,
+        borderColor: color,
+        extendedProps: extendedProps,
+        classNames: classNames
+    };
+}
+// Create tooltip element once (add this BEFORE enhanceEventDisplay function)
+let tooltipElement = null;
+
+function createTooltipElement() {
+    if (!tooltipElement) {
+        tooltipElement = document.createElement('div');
+        tooltipElement.className = 'event-tooltip';
+        tooltipElement.style.cssText = `
+            position: fixed;
+            background: rgba(44, 62, 80, 0.98);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            white-space: pre-line;
+            font-size: 11.5px;
+            line-height: 1.6;
+            z-index: 999999;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            min-width: 180px;
+            max-width: 300px;
+            pointer-events: none;
+            border: 1px solid rgba(255,255,255,0.1);
+            display: none;
+        `;
+        document.body.appendChild(tooltipElement);
+    }
+    return tooltipElement;
+}
+
+function enhanceEventDisplay(info) {
+    const props = info.event.extendedProps;
+    
+    info.el.style.setProperty('--event-color', info.event.backgroundColor);
+    
+    // Build tooltip content
+    let tooltipText = '';
+    let isGhost = false;
+    
+    // Ghost event handling
+    if (props.isGhost) {
+        isGhost = true;
+        
+        // ✅ Use pre-built tooltip if available, otherwise construct
+        if (props.tooltip) {
+            tooltipText = props.tooltip;
+        } else {
+                    tooltipText = `👻 Original Location\n`;
+                    tooltipText += `━━━━━━━━━━━━━\n`;
+                    
+                    // ✅ Check if it's a daily task or stage-level reschedule
+                    if (props.type === 'daily_task' && props.dayNumber) {
+                        tooltipText += `Stage: ${props.stageName}\n`;
+                        tooltipText += `Day: ${props.dayNumber}\n`;
+                    } else {
+                        tooltipText += `Stage: ${props.stageName}\n`;
+                    }
+                    
+                    tooltipText += `Moved ${props.daysShifted} day(s) ${props.direction}\n`;
+                    tooltipText += `➡️ New date: ${new Date(props.movedTo).toLocaleDateString()}`;
+                    
+                    if (props.reason) {
+                        tooltipText += `\n💬 Reason: ${props.reason}`;
+                    }
+                }        
+        info.el.style.cursor = 'help';
+    } else {
+        // Build tooltip for real events
+        tooltipText = `${props.stageName}\n━━━━━━━━━━━━━\n`;
+                tooltipText += `📅 ${props.duration} days\n`;
+                
+                if (props.completedCount > 0) {
+                    tooltipText += `✅ ${props.completedCount}/${props.totalTasks} completed\n`;
+                }
+                
+                if (props.rescheduledCount > 0) {
+                    tooltipText += `🔄 ${props.rescheduledCount} day(s) rescheduled\n`;
+                }
+                
+                // ✅ ADD: Show if entire stage was rescheduled
+                if (props.wasRescheduled) {
+                    tooltipText += `🔄 Stage shifted ${props.rescheduleBadge}\n`;
+                }
+                
+                tooltipText += `📊 ${props.status}`;
+            }    
+    // Add hover events to show tooltip
+    info.el.addEventListener('mouseenter', function(e) {
+        const tooltip = createTooltipElement();
+        tooltip.textContent = tooltipText;
+        
+        // Set background color based on type
+        if (isGhost) {
+            tooltip.style.background = 'rgba(255, 152, 0, 0.98)';
+        } else {
+            tooltip.style.background = 'rgba(44, 62, 80, 0.98)';
+        }
+        
+        // Calculate position
+        const rect = info.el.getBoundingClientRect();
+        const tooltipX = rect.left + (rect.width / 2);
+        
+        // Show tooltip immediately
+        tooltip.style.display = 'block';
+        tooltip.style.left = tooltipX + 'px';
+        tooltip.style.transform = 'translateX(-50%)';
+        
+        // Wait for next frame to position vertically
+        setTimeout(() => {
+            const tooltipHeight = tooltip.offsetHeight;
+            let tooltipY;
+            
+            // Check if tooltip would go off top of screen
+            if (rect.top - tooltipHeight - 20 < 10) {
+                // Position below the event
+                tooltipY = rect.bottom + 12;
+            } else {
+                // Position above the event
+                tooltipY = rect.top - tooltipHeight - 12;
+            }
+            
+            tooltip.style.top = tooltipY + 'px';
+        }, 10);
     });
-
-    socket.on('task:created', (task) => {
-        allTasks.push(task);
-        renderTasks();
+    
+    // Hide tooltip on mouse leave
+    info.el.addEventListener('mouseleave', function(e) {
+        const tooltip = createTooltipElement();
+        tooltip.style.display = 'none';
     });
+    
+    // Add duration badge (only for non-ghost events)
+    if (!isGhost && props.duration) {
+        const durationBadge = document.createElement('span');
+        durationBadge.className = 'parallel-stage-indicator';
+        durationBadge.textContent = `${props.duration}d`;
+        info.el.appendChild(durationBadge);
+    }
+}
+function addDayRescheduleButton(info, projectData) {
+    const dateStr = info.date.toISOString().split('T')[0];
+    const checkDate = new Date(dateStr + 'T12:00:00');
+    const dayOfWeek = checkDate.getDay();
+    
+    // Don't show anything on Sundays (always holiday)
+    if (dayOfWeek === 0) {
+        return;
+    }
+    
+    // Don't show anything on Saturdays that are holidays
+    if (dayOfWeek === 6) {
+        const isWorkingDay = projectData.saturdayWorkingDays && 
+                            projectData.saturdayWorkingDays.has(dateStr);
+        if (!isWorkingDay) {
+            return;
+        }
+    }
+    
+    const stagesOnDay = projectData.stages.filter(stage => {
+        if (!stage.start_date || !stage.end_date) return false;
+        
+        const stageStart = new Date(stage.start_date + 'T12:00:00');
+        const stageEnd = new Date(stage.end_date + 'T12:00:00');
+        
+        return checkDate >= stageStart && checkDate <= stageEnd;
+    });
+    
+    const dayFrame = info.el.querySelector('.fc-daygrid-day-frame');
+    
+    if (!dayFrame) {
+        return;
+    }
+    
+    // Add reschedule button only if there are stages
+}
 
-    socket.on('task:updated', (updatedTask) => {
-        const index = allTasks.findIndex(t => t.id === updatedTask.id);
-        if (index !== -1) {
-            allTasks[index] = updatedTask;
-            renderTasks();
+function showMiniReschedulePopup(date, stages, projectData, event) {
+        const popup = document.getElementById('miniReschedulePopup');
+        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        
+        document.getElementById('popupDate').textContent = dateStr;
+        
+        const stagesList = document.getElementById('popupStagesList');
+        stagesList.innerHTML = stages.map((stage, idx) => {
+            const color = getStageColor(projectData.stages.indexOf(stage));
+            const isCompleted = stage.status === 'completed';
+            const statusIcon = isCompleted ? '<i class="fas fa-check-circle text-success"></i>' : 
+                              stage.status === 'in-progress' ? '<i class="fas fa-spinner text-warning"></i>' : '';
+            
+            return `
+                <div class="stage-chip ${isCompleted ? 'opacity-50' : ''}" 
+                     ${!isCompleted ? `onclick="handleStageRescheduleFromPopup(${projectData.id}, ${stage.id}, '${stage.name.replace(/'/g, "\\'")}', '${stage.start_date}', '${stage.end_date}')"` : ''}>
+                    <div class="stage-chip-color" style="background: ${color};"></div>
+                    <div class="stage-chip-name">${stage.name} ${statusIcon}</div>
+                    ${!isCompleted ? `<button class="stage-chip-btn" onclick="event.stopPropagation(); handleStageRescheduleFromPopup(${projectData.id}, ${stage.id}, '${stage.name.replace(/'/g, "\\'")}', '${stage.start_date}', '${stage.end_date}');">Reschedule</button>` : ''}
+                </div>
+            `;
+        }).join('');
+        
+        const rect = event.target.getBoundingClientRect();
+        popup.style.left = `${Math.min(rect.left, window.innerWidth - 320)}px`;
+        popup.style.top = `${rect.bottom + 10}px`;
+        
+        setTimeout(() => {
+            const popupRect = popup.getBoundingClientRect();
+            if (popupRect.bottom > window.innerHeight) {
+                popup.style.top = `${rect.top - popupRect.height - 10}px`;
+            }
+        }, 10);
+        
+        popup.classList.add('active');
+        
+        setTimeout(() => {
+            document.addEventListener('click', closeMiniPopupOutside);
+        }, 100);
+    }
+
+    function closeMiniPopup() {
+        const popup = document.getElementById('miniReschedulePopup');
+        popup.classList.remove('active');
+        document.removeEventListener('click', closeMiniPopupOutside);
+    }
+
+    function closeMiniPopupOutside(e) {
+        const popup = document.getElementById('miniReschedulePopup');
+        if (!popup.contains(e.target)) {
+            closeMiniPopup();
+        }
+    }
+
+    function handleStageRescheduleFromPopup(projectId, stageId, stageName, startDate, endDate) {
+        closeMiniPopup();
+        
+        const color = getStageColor(currentProjectData.stages.findIndex(s => s.id === stageId));
+        
+        document.getElementById('rescheduleStageInfo').textContent = stageName;
+        document.getElementById('rescheduleCurrentDates').textContent = 
+            `${new Date(startDate).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})} - ${new Date(endDate).toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})}`;
+        document.getElementById('rescheduleStageColor').style.background = color;
+        document.getElementById('rescheduleProjectId').value = projectId;
+        document.getElementById('rescheduleStageId').value = stageId;
+        document.getElementById('rescheduleStageStartDate').value = startDate;
+        document.getElementById('rescheduleStageEndDate').value = endDate;
+        document.getElementById('rescheduleDays').value = '';
+        document.getElementById('rescheduleReason').value = '';
+        document.getElementById('rescheduleNewDatesPreview').style.display = 'none';
+        document.getElementById('rescheduleImpactWarning').style.display = 'none';
+        
+        rescheduleModal.show();
+    }
+
+
+function handleStageClickReschedule(info, project) {
+    const stage = project.stages.find(s => s.id === info.event.extendedProps.stageId);
+    
+    if (!stage) return;
+    
+    // Show options: Reschedule entire stage OR manage daily tasks
+    const choice = confirm(
+        `Stage: ${stage.name}\n\n` +
+        `Click OK to manage individual days\n` +
+        `Click Cancel to reschedule entire stage`
+    );
+    
+    if (choice) {
+        // Open daily task manager
+        openDailyTaskManager(project.id, stage.id, stage.name);
+    } else {
+        // Original behavior - reschedule entire stage
+        if (stage.status === 'completed') {
+            alert('Cannot reschedule a completed stage. Update its status first.');
+            return;
+        }
+        
+        handleStageRescheduleFromPopup(
+            project.id, 
+            stage.id, 
+            stage.name, 
+            stage.start_date, 
+            stage.end_date
+        );
+    }
+}
+
+function generateEnhancedLegend(stages) {
+    const legendContainer = document.getElementById('calendarLegend');
+    
+    const legendHTML = stages.map((stage, index) => {
+        const color = getStageColor(index);
+        
+        let statusBadge = '';
+        if (stage.status === 'completed') {
+            statusBadge = '<span class="badge bg-success" style="font-size: 0.6rem; padding: 2px 4px;">Ã¢Å“â€œ</span>';
+        } else if (stage.status === 'in-progress') {
+            statusBadge = '<span class="badge bg-warning" style="font-size: 0.6rem; padding: 2px 4px;">Ã¢Å¡Â¡</span>';
+        }
+        
+        return `
+            <div class="legend-item" style="border-left-color: ${color};">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+                    <div style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                        <strong style="font-size: 0.75rem;">${stage.name}</strong>
+                    </div>
+                    ${statusBadge}
+                </div>
+                   <small style="font-size: 0.65rem; color: #6c757d;">
+                    ${stage.duration_days}d • ${new Date(stage.start_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'})}
+                   </small>            
+                </div>
+        `;
+    }).join('');
+    
+    legendContainer.innerHTML = legendHTML;
+}
+
+// ✅ UPDATED: handleReschedule - Add forced refresh
+async function handleReschedule(e) {
+    e.preventDefault();
+    
+    const projectId = document.getElementById('rescheduleProjectId').value;
+    const stageId = parseInt(document.getElementById('rescheduleStageId').value);
+    const days = parseInt(document.getElementById('rescheduleDays').value);
+    const reason = document.getElementById('rescheduleReason').value;
+    
+    if (!days || days === 0) {
+        alert('Please enter a valid number of days (not zero)');
+        return;
+    }
+    
+    const startDate = new Date(document.getElementById('rescheduleStageStartDate').value);
+    const testDate = addWorkingDays(startDate, days);
+    const testDay = testDate.getDay();
+    
+    if (testDay === 0) {
+        alert('⚠️ Cannot reschedule to Sunday (holiday)');
+        return;
+    }
+    
+    if (testDay === 6 && !includeSaturdayAsWorkingDay) {
+        alert('⚠️ Cannot reschedule to Saturday (holiday).\n\nEnable "Include Saturday as Working Day" if needed.');
+        return;
+    }
+    
+    const stageIndex = currentProjectData.stages.findIndex(s => s.id === stageId);
+    const hasCompletedBefore = currentProjectData.stages
+        .slice(0, stageIndex)
+        .some(s => s.status === 'completed');
+    
+    let confirmMsg = `Are you sure you want to shift this stage by ${days} working days?\n\n`;
+    
+    if (hasCompletedBefore) {
+        confirmMsg += '✅ Completed stages will remain unchanged\n';
+    }
+    confirmMsg += '✅ This stage and subsequent stages will be shifted\n';
+    confirmMsg += '✅ Weekends will be excluded from calculation';
+    
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/projects/${projectId}/reschedule`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                stage_id: stageId,
+                days: days,
+                reason: reason,
+                include_saturday: includeSaturdayAsWorkingDay,
+                working_saturdays: Array.from(currentProjectData.saturdayWorkingDays || [])
+            })
+        });
+        
+        if (response.ok) {
+            showNotification('Stage rescheduled successfully!', 'success');
+            rescheduleModal.hide();
+            
+            // ✅ CRITICAL: Wait for database transaction to fully commit
+            console.log('⏳ Waiting for database commit (3 seconds)...');
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+            // ✅ Force complete calendar rebuild with verified data
+            console.log('🔨 Starting COMPLETE calendar rebuild...');
+            await forceCompleteCalendarRebuild(parseInt(projectId));
+            
+            // ✅ Refresh main project view
+            await loadProjects();
+            await loadStats();
+            
+            showNotification('✅ Calendar updated successfully!', 'success');
+            
+        } else {
+            const error = await response.json();
+            alert('Error: ' + (error.error || 'Failed to reschedule'));
+        }
+    } catch (error) {
+        console.error('❌ Reschedule error:', error);
+        alert('Error rescheduling: ' + error.message);
+    }
+}
+// ✅ NEW FUNCTION: Complete calendar rebuild with verification
+async function forceCompleteCalendarRebuild(projectId) {
+    console.log('🔨 Starting COMPLETE calendar rebuild...');
+    
+    // Step 1: Clear ALL badges
+    document.querySelectorAll('.parallel-jobs-badge').forEach(badge => badge.remove());
+    console.log('🧹 Cleared all badges');
+    
+    // Step 2: Wait for database
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    console.log('✅ Database wait complete');
+    
+    // Step 3: Fetch FRESH data - MULTIPLE ATTEMPTS
+    let freshData = null;
+    let attempts = 0;
+    const maxAttempts = 3;
+    
+    while (attempts < maxAttempts && !freshData) {
+        attempts++;
+        console.log(`📡 Fetch attempt ${attempts}/${maxAttempts}...`);
+        
+        try {
+            const timestamp = Date.now();
+            const response = await fetch(`/api/projects/${projectId}/details?_bust=${timestamp}`, {
+                method: 'GET',
+                cache: 'no-store',
+                headers: {
+                    'Cache-Control': 'no-cache, no-store, must-revalidate',
+                    'Pragma': 'no-cache'
+                }
+            });
+            
+            if (response.ok) {
+                freshData = await response.json();
+                console.log(`✅ Got fresh data (attempt ${attempts})`);
+                break;
+            }
+        } catch (error) {
+            console.error(`❌ Fetch attempt ${attempts} failed:`, error);
+        }
+        
+        if (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+    
+    if (!freshData) {
+        alert('Failed to refresh calendar data');
+        return;
+    }
+    
+    // Step 4: Log what we received
+    console.log('📊 Fresh stage dates from backend:');
+    freshData.stages.forEach((s, idx) => {
+        console.log(`  ${idx + 1}. ${s.name}: ${s.start_date} → ${s.end_date}`);
+    });
+    
+    // Step 5: Fetch COMPLETE reschedule history (both stage and daily task)
+    try {
+        const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_t=${timestamp}`);
+        if (historyResponse.ok) {
+            freshData.rescheduleHistory = await historyResponse.json();
+            console.log(`✅ Loaded ${freshData.rescheduleHistory.length} history records`);
+        } else {
+            freshData.rescheduleHistory = [];
+        }
+    } catch (error) {
+        console.error('Failed to load history:', error);
+        freshData.rescheduleHistory = [];
+    }    
+    // Step 6: Process saturdayWorkingDays
+    if (Array.isArray(freshData.saturdayWorkingDays)) {
+        freshData.saturdayWorkingDays = new Set(freshData.saturdayWorkingDays);
+    } else {
+        freshData.saturdayWorkingDays = new Set();
+    }
+    
+    // Step 7: ✅ CRITICAL - Completely replace currentProjectData
+    if (!currentProjectData.rescheduleHistory || currentProjectData.rescheduleHistory.length === 0) {
+        console.warn('⚠️ WARNING: No reschedule history in currentProjectData!');
+        console.log('Attempting to reload history...');
+        
+        try {
+            const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_t=${Date.now()}`);
+            if (historyResponse.ok) {
+                currentProjectData.rescheduleHistory = await historyResponse.json();
+                console.log(`✅ Reloaded ${currentProjectData.rescheduleHistory.length} history records`);
+            }
+        } catch (e) {
+            console.error('❌ Failed to reload history:', e);
+        }
+    } else {
+        console.log(`✅ History verified: ${currentProjectData.rescheduleHistory.length} records`);
+    }    
+    // Step 8: Regenerate calendar events
+    console.log('🎨 Generating new calendar events...');
+    const newEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
+    console.log(`✅ Generated ${newEvents.length} events`);
+    
+    // Step 9: Destroy old calendar
+    if (calendar) {
+        calendar.destroy();
+        console.log('🗑️ Old calendar destroyed');
+    }
+    
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    // Step 10: Create NEW calendar
+    const calendarEl = document.getElementById('calendar');
+    
+    calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        initialDate: currentProjectData.start_date,
+        headerToolbar: {
+            left: 'prev,next today',
+            center: 'title',
+            right: 'dayGridMonth,timeGridWeek,listMonth'
+        },
+        height: 'auto',
+        contentHeight: 600,
+        events: newEvents,
+        eventClick: function(info) {
+            if (info.event.extendedProps.isGhost) {
+                const props = info.event.extendedProps;
+                alert(
+                    `Original Location\n\n` +
+                    `Stage: ${props.stageName}\n` +
+                    `Moved ${props.daysShifted} day(s) ${props.direction}\n` +
+                    `New location: ${new Date(props.movedTo).toLocaleDateString()}`
+                );
+                return;
+            }
+            handleStageClickReschedule(info, currentProjectData);
+        },
+        dayCellDidMount: function(info) {
+            addDayRescheduleButton(info, currentProjectData);
+        },
+        eventDisplay: 'block',
+        displayEventTime: false,
+        eventDidMount: function(info) {
+            enhanceEventDisplay(info);
         }
     });
+    
+    calendar.render();
+    console.log('🎬 New calendar rendered');
+    
+    // Step 12: Wait for DOM
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
-    socket.on('task:deleted', (data) => {
-        allTasks = allTasks.filter(t => t.id !== data.id);
-        renderTasks();
-    });
+    console.log('🎉 Calendar rebuild COMPLETE!');
 }
-```
+
+function adjustRescheduleDays(delta) {
+        const input = document.getElementById('rescheduleDays');
+        const currentValue = parseInt(input.value) || 0;
+        input.value = currentValue + delta;
+        updateReschedulePreview();
+    }
+
+    function updateReschedulePreview() {
+        const days = parseInt(document.getElementById('rescheduleDays').value);
+        
+        if (!days || days === 0) {
+            document.getElementById('rescheduleNewDatesPreview').style.display = 'none';
+            document.getElementById('rescheduleImpactWarning').style.display = 'none';
+            return;
+        }
+        
+        const startDate = new Date(document.getElementById('rescheduleStageStartDate').value);
+        const endDate = new Date(document.getElementById('rescheduleStageEndDate').value);
+        
+        const newStart = addWorkingDays(startDate, days);
+        const newEnd = addWorkingDays(endDate, days);
+        
+        document.getElementById('rescheduleNewDatesValue').textContent = 
+            `${newStart.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})} - ${newEnd.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})}`;
+        document.getElementById('rescheduleNewDatesPreview').style.display = 'block';
+        
+        const impactText = days > 0 
+            ? `All subsequent stages will be pushed forward by ${days} working day(s)`
+            : `All subsequent stages will be pulled backward by ${Math.abs(days)} working day(s)`;
+        document.getElementById('rescheduleImpactText').textContent = impactText;
+        document.getElementById('rescheduleImpactWarning').style.display = 'block';
+    }
+
+function enhanceCalendarWithWeekends() {
+    if (!calendar) return;
+    
+    // Ensure working Saturdays is initialized
+    if (!currentProjectData.saturdayWorkingDays) {
+        currentProjectData.saturdayWorkingDays = new Set();
+    }
+    
+    // Get the current dayCellDidMount handler
+    const oldDayCellDidMount = calendar.getOption('dayCellDidMount');
+    
+    // Override with enhanced version
+    calendar.setOption('dayCellDidMount', function(info) {
+        const day = info.date.getDay();
+        const dateKey = info.date.toISOString().split('T')[0];
+        
+        // Handle Sundays (day 0)
+        if (day === 0) {
+            info.el.style.background = 'linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%)';
+            info.el.style.opacity = '0.7';
+            info.el.title = 'Sunday - Holiday';
+        }
+        
+        // Handle Saturdays (day 6) - always holiday, no toggle
+        if (day === 6) {
+            info.el.style.background = 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)';
+            info.el.style.opacity = '0.7';
+            info.el.title = 'Saturday - Holiday';
+        }
+        
+        // Call original handler if it exists
+        if (oldDayCellDidMount) {
+            oldDayCellDidMount(info);
+        }
+        
+        // Add reschedule button
+        addDayRescheduleButton(info, currentProjectData);
+    });
+    
+    // Force calendar to re-render with new dayCellDidMount
+    calendar.render();
+}
+    // UPDATED FUNCTION: Toggle Saturday working status with recalculation
+async function recalculateProjectWithSaturdays() {
+    if (!currentProjectData) return;
+    
+    try {
+        // Send update to backend
+        const response = await fetch(`/api/projects/${currentProjectData.id}/update-saturdays`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                working_saturdays: Array.from(currentProjectData.saturdayWorkingDays || [])
+            })
+        });
+        
+        if (response.ok) {
+            // Wait for DB to update
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
+            // Fetch fresh data
+            const detailsResponse = await fetch(`/api/projects/${currentProjectData.id}/details`);
+            const freshData = await detailsResponse.json();
+            
+            // Update current data
+            currentProjectData = freshData;
+            
+            // Ensure Set conversion
+            if (Array.isArray(freshData.saturdayWorkingDays)) {
+                currentProjectData.saturdayWorkingDays = new Set(freshData.saturdayWorkingDays);
+            }
+            
+            // COMPLETE calendar regeneration
+            const calendarEl = document.getElementById('calendar');
+            calendarEl.innerHTML = '';
+            
+            calendar = new FullCalendar.Calendar(calendarEl, {
+                initialView: 'dayGridMonth',
+                initialDate: currentProjectData.start_date,
+                headerToolbar: {
+                    left: 'prev,next today',
+                    center: 'title',
+                    right: 'dayGridMonth,timeGridWeek,listMonth'
+                },
+                events: generateEnhancedCalendarEvents(currentProjectData.stages),
+                eventClick: function(info) {
+                    handleStageClickReschedule(info, currentProjectData);
+                },
+                dayCellDidMount: function(info) {
+                    addDayRescheduleButton(info, currentProjectData);
+                },
+                height: 'auto',
+                eventDisplay: 'block',
+                displayEventTime: false,
+                eventDidMount: function(info) {
+                    enhanceEventDisplay(info);
+                }
+            });
+            
+            calendar.render();
+            enhanceCalendarWithWeekends(); // CRITICAL: Call after render
+            generateEnhancedLegend(currentProjectData.stages);
+            
+            await loadProjects(); // Refresh main view
+            
+            showNotification('Schedule recalculated!', 'success');
+        }
+    } catch (error) {
+        console.error('Recalculation error:', error);
+        showNotification('Failed to update: ' + error.message, 'error');
+    }
+}
+
+// Helper function to show notifications
+    function showNotification(message, type = 'success') {
+        const bgColors = {
+            success: '#28a745',
+            info: '#17a2b8',
+            warning: '#ffc107',
+            error: '#dc3545'
+        };
+        
+        const bgColor = bgColors[type] || bgColors.success;
+        
+        const notification = document.createElement('div');
+        notification.className = 'alert alert-dismissible fade show position-fixed';
+        notification.style.cssText = `top: 20px; right: 20px; z-index: 9999; min-width: 300px; background: ${bgColor}; color: white; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3);`;
+        notification.innerHTML = `
+            <i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'} me-2"></i>
+            ${message}
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert"></button>
+        `;
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 3000);
+    }
+
+async function openDailyTaskManager(projectId, stageId, stageName) {
+    currentStageForDailyTasks = { projectId, stageId };
+    
+    document.getElementById('dailyTaskModalTitle').textContent = 'Manage Daily Tasks';
+    document.getElementById('dailyTaskStageName').textContent = `Stage: ${stageName}`;
+    
+    try {
+        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks`);
+        const tasks = await handleApiResponse(response);  // ✅ CHANGED THIS LINE
+        
+        if (tasks.length === 0) {
+            console.log('No tasks found, generating...');
+            await generateDailyTasks(projectId);
+            
+            const retryResponse = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks`);
+            const retryTasks = await handleApiResponse(retryResponse);  // ✅ CHANGED THIS LINE
+            renderDailyTasks(retryTasks);
+        } else {
+            renderDailyTasks(tasks);
+        }
+        
+        dailyTaskModal.show();
+    } catch (error) {
+        console.error('Error loading daily tasks:', error);
+        if (error.message !== 'Session expired') {
+            alert(`Error loading daily tasks: ${error.message}`);
+        }
+    }
+}
+// Generate daily tasks for project
+async function generateDailyTasks(projectId) {
+    const response = await fetch(`/api/projects/${projectId}/generate-daily-tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+    });
+    
+    if (!response.ok) {
+        throw new Error('Failed to generate daily tasks');
+    }
+}
+
+// Render daily tasks
+function renderDailyTasks(tasks) {
+    const container = document.getElementById('dailyTasksList');
+    
+    if (tasks.length === 0) {
+        container.innerHTML = '<p class="text-center text-muted">No daily tasks available</p>';
+        return;
+    }
+    
+    container.innerHTML = tasks.map(task => {
+        const statusClass = task.status === 'completed' ? 'completed' : task.is_rescheduled ? 'rescheduled' : '';
+        const statusBadge = task.status === 'completed' ? 'badge-completed' : 
+                           task.status === 'rescheduled' ? 'badge-rescheduled' : 'badge-pending';
+        
+        let dateDisplay = new Date(task.scheduled_date).toLocaleDateString('en-US', {
+            weekday: 'short',
+            month: 'short',
+            day: 'numeric',
+            year: 'numeric'
+        });
+        
+        let rescheduleInfo = '';
+        if (task.is_rescheduled) {
+            const originalDate = new Date(task.original_date).toLocaleDateString('en-US', { 
+                weekday: 'short',
+                month: 'short', 
+                day: 'numeric',
+                year: 'numeric'
+            });
+            const currentDate = new Date(task.scheduled_date);
+            const origDate = new Date(task.original_date);
+            const daysDiff = Math.round((currentDate - origDate) / (1000 * 60 * 60 * 24));
+            const direction = daysDiff > 0 ? 'forward' : 'backward';
+            
+            rescheduleInfo = `
+                <div class="reschedule-indicator mt-2 p-2" style="background: #fff3cd; border-left: 4px solid #ff9800; border-radius: 6px;">
+                    <div class="d-flex align-items-start">
+                        <i class="fas fa-exchange-alt me-2 mt-1" style="color: #ff9800;"></i>
+                        <div style="flex: 1;">
+                            <div class="mb-1">
+                                <strong style="color: #ff6b00;">Rescheduled</strong>
+                                <span class="badge bg-warning text-dark ms-2">${Math.abs(daysDiff)} day(s) ${direction}</span>
+                            </div>
+                            <small class="text-muted d-block">Original: ${originalDate}</small>
+                            ${task.rescheduled_reason ? `
+                                <small class="d-block mt-1" style="color: #495057;">
+                                    <i class="fas fa-comment-dots me-1"></i>
+                                    <strong>Reason:</strong> ${task.rescheduled_reason}
+                                </small>
+                            ` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        return `
+            <div class="daily-task-item ${statusClass}">
+                <div class="task-day-number ${task.status === 'completed' ? 'completed' : ''}">
+                    ${task.status === 'completed' ? '<i class="fas fa-check"></i>' : `Day ${task.day_number}`}
+                </div>
+                <div class="task-info flex-grow-1">
+                    <div class="d-flex align-items-center justify-content-between mb-1">
+                        <div class="task-date-display fw-bold">${dateDisplay}</div>
+                        <span class="task-status-badge ${statusBadge}">${task.status.toUpperCase()}</span>
+                    </div>
+                    ${rescheduleInfo}
+                </div>
+                <div class="d-flex gap-2 align-items-start">
+                    ${task.status !== 'completed' ? `
+                        <button class="btn btn-sm btn-success" onclick="completeDailyTask(${task.id}, ${currentStageForDailyTasks.projectId}, ${currentStageForDailyTasks.stageId})" title="Mark as complete">
+                            <i class="fas fa-check me-1"></i>Complete
+                        </button>
+                        <button class="btn btn-sm btn-primary-custom" onclick="openRescheduleDayModal(${task.id}, ${task.day_number}, '${task.scheduled_date}')" title="Change schedule">
+                            <i class="fas fa-calendar-alt me-1"></i>Reschedule
+                        </button>
+                    ` : `
+                        <div class="text-center">
+                            <span class="text-success d-block">
+                                <i class="fas fa-check-circle me-1"></i>
+                                Completed
+                            </span>
+                            ${task.completed_at ? `
+                                <small class="text-muted">${new Date(task.completed_at).toLocaleDateString('en-US', {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'})}</small>
+                            ` : ''}
+                        </div>
+                    `}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+// Complete a daily task
+async function completeDailyTask(taskId, projectId, stageId) {
+    if (!confirm('Mark this day as completed?')) return;
+    
+    try {
+        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/complete`, {
+            method: 'PUT'
+        });
+        
+        if (response.ok) {
+            showNotification('Day marked as completed!', 'success');
+            
+            // ✅ Wait for database commit
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Reload tasks in modal
+            const tasksResponse = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks`);
+            const tasks = await tasksResponse.json();
+            renderDailyTasks(tasks);
+            
+            // ✅ Refresh calendar in background
+            if (calendar && currentProjectForCalendar === projectId) {
+                await refreshCalendarEvents();
+            }
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+// Open reschedule day modal
+function openRescheduleDayModal(taskId, dayNumber, currentDate) {
+    document.getElementById('rescheduleTaskId').value = taskId;
+    document.getElementById('rescheduleTaskProjectId').value = currentStageForDailyTasks.projectId;
+    document.getElementById('rescheduleTaskStageId').value = currentStageForDailyTasks.stageId;
+    document.getElementById('dayShiftAmount').value = 0;
+    document.getElementById('dayRescheduleReason').value = '';
+    document.getElementById('dayReschedulePreview').style.display = 'none';
+    
+    const dateStr = new Date(currentDate).toLocaleDateString('en-US', {
+        weekday: 'long',
+        month: 'long',
+        day: 'numeric',
+        year: 'numeric'
+    });
+    
+    document.getElementById('dayRescheduleInfo').innerHTML = `
+        <strong>Day ${dayNumber}</strong><br>
+        Current date: ${dateStr}
+    `;
+    
+    rescheduleDayModal.show();
+}
+
+// Adjust day shift
+function adjustDayShift(delta) {
+    const input = document.getElementById('dayShiftAmount');
+    input.value = parseInt(input.value || 0) + delta;
+    updateDayReschedulePreview();
+}
+
+// Update preview
+function updateDayReschedulePreview() {
+    const days = parseInt(document.getElementById('dayShiftAmount').value || 0);
+    const preview = document.getElementById('dayReschedulePreview');
+    
+    if (days === 0) {
+        preview.style.display = 'none';
+        return;
+    }
+    
+    preview.style.display = 'block';
+    preview.textContent = `This day will be shifted ${Math.abs(days)} working day(s) ${days > 0 ? 'forward' : 'backward'}`;
+}
 
 
-## 20. public/projects.html (Bonus Page)
+// Confirm day reschedule
+async function confirmDayReschedule() {
+    const taskId = document.getElementById('rescheduleTaskId').value;
+    const projectId = document.getElementById('rescheduleTaskProjectId').value;
+    const stageId = document.getElementById('rescheduleTaskStageId').value;
+    const days = parseInt(document.getElementById('dayShiftAmount').value || 0);
+    const reason = document.getElementById('dayRescheduleReason').value;
+    
+    if (days === 0) {
+        alert('Please enter a number of days to shift');
+        return;
+    }
+    
+    try {
+        console.log('🔄 Rescheduling daily task...');
+        
+        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/reschedule`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                days: days,
+                reason: reason,
+                working_saturdays: Array.from(currentProjectData?.saturdayWorkingDays || [])
+            })
+        });
+        
+        if (response.ok) {
+            showNotification('✅ Day rescheduled successfully!', 'success');
+            
+            // Close the reschedule day modal
+            rescheduleDayModal.hide();
+            
+            // ✅ CRITICAL: Wait LONGER for database transaction to FULLY commit
+            console.log('⏳ Waiting for database commit (4 seconds)...');
+            await new Promise(resolve => setTimeout(resolve, 4000));
+            
+            console.log('🔥 Fetching updated task list...');
+            
+            // Reload tasks in the daily task modal
+            const tasksResponse = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks?_t=${Date.now()}`, {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
+            const tasks = await tasksResponse.json();
+            renderDailyTasks(tasks);
+            
+            console.log('✅ Task list updated');
+            
+            // ✅ Close the daily task modal so user can see the calendar
+            console.log('📊 Closing daily task modal...');
+            dailyTaskModal.hide();
+            
+            // ✅ Additional wait before calendar rebuild
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // ✅ Force COMPLETE calendar rebuild with ALL history
+            if (calendar && currentProjectForCalendar === parseInt(projectId)) {
+                showNotification('🔄 Rebuilding calendar with ghost events...', 'info');
+                
+                console.log('🔨 Starting calendar rebuild...');
+                
+                // ✅ CRITICAL: Fetch history FIRST before rebuild
+                try {
+                    const timestamp = Date.now();
+                    const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_t=${timestamp}`, {
+                        cache: 'no-store',
+                        headers: { 
+                            'Cache-Control': 'no-cache, no-store, must-revalidate',
+                            'Pragma': 'no-cache'
+                        }
+                    });
+                    
+                    if (historyResponse.ok) {
+                        const historyData = await historyResponse.json();
+                        console.log(`📜 Loaded ${historyData.length} history records (including daily tasks)`);
+                        
+                        // Update currentProjectData with fresh history
+                        if (!currentProjectData) {
+                            console.error('❌ currentProjectData is null!');
+                        } else {
+                            currentProjectData.rescheduleHistory = historyData;
+                            console.log('✅ Updated currentProjectData.rescheduleHistory');
+                        }
+                    } else {
+                        console.warn('⚠️ Failed to fetch history:', historyResponse.status);
+                    }
+                } catch (error) {
+                    console.error('❌ Error fetching history:', error);
+                }
+                
+                // Now rebuild calendar with updated history
+                await forceCompleteCalendarRebuild(parseInt(projectId));
+                
+                showNotification('✅ Calendar updated! Ghost event shows original location.', 'success');
+            } else {
+                console.warn('⚠️ Calendar not available for rebuild');
+            }
+        } else {
+            const error = await response.json();
+            alert('Error: ' + error.error);
+        }
+    } catch (error) {
+        console.error('❌ Reschedule error:', error);
+        alert('Error: ' + error.message);
+    }
+}
 
-```html
+// ✅ NEW FUNCTION: Refresh calendar events without closing/reopening modal
+async function refreshCalendarEvents() {
+    if (!calendar || !currentProjectData) {
+        console.log('⚠️ Cannot refresh calendar: calendar or data missing');
+        return;
+    }
+    
+    try {
+        console.log('🔄 Refreshing calendar events...');
+        
+        // ✅ CRITICAL: Fetch COMPLETE reschedule history
+        const timestamp = Date.now();
+        const historyResponse = await fetch(`/api/projects/${currentProjectData.id}/complete-reschedule-history?_t=${timestamp}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+        
+        if (historyResponse.ok) {
+            currentProjectData.rescheduleHistory = await historyResponse.json();
+            console.log('✅ Loaded reschedule history:', currentProjectData.rescheduleHistory.length, 'records');
+        } else {
+            console.warn('⚠️ Failed to load history');
+            currentProjectData.rescheduleHistory = [];
+        }
+        
+        // Fetch fresh project data
+        const response = await fetch(`/api/projects/${currentProjectData.id}/details?_t=${timestamp}`, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+        const freshData = await response.json();
+        
+        // Update saturdayWorkingDays
+        if (Array.isArray(freshData.saturdayWorkingDays)) {
+            freshData.saturdayWorkingDays = new Set(freshData.saturdayWorkingDays);
+        }
+        
+        // ✅ PRESERVE reschedule history
+        freshData.rescheduleHistory = currentProjectData.rescheduleHistory;
+        
+        currentProjectData = freshData;
+        
+        // Generate new events from fresh data (including ghost events)
+        const newEvents = await generateEnhancedCalendarEvents(freshData.stages);
+        
+        console.log('📊 Generated events:', newEvents.length, 'total');
+        console.log('👻 Ghost events:', newEvents.filter(e => e.classNames?.includes('ghost-event')).length);
+        
+        // Remove all old events
+        calendar.removeAllEvents();
+        
+        // Wait a tick
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // Add new events
+        newEvents.forEach(event => {
+            calendar.addEvent(event);
+        });
+        
+        // Refresh display
+        calendar.render();
+                
+        console.log('✅ Calendar refreshed successfully');
+        
+    } catch (error) {
+        console.error('Error refreshing calendar:', error);
+    }
+}
+
+// Complete calendar refresh with FORCED data reload
+async function refreshCalendarWithBadges() {
+    if (!calendar || !currentProjectData) {
+        console.log('⚠️ Cannot refresh calendar: calendar or data missing');
+        return;
+    }
+    
+    try {
+        console.log('🔄 Starting calendar refresh...');
+        
+        const projectId = currentProjectData.id;
+        
+        // ✅ Wait for database commit
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // ✅ Fetch fresh data with cache busting
+        const timestamp = Date.now();
+        const detailsUrl = `/api/projects/${projectId}/details?_t=${timestamp}&_bustCache=${Math.random()}`;
+        
+        const response = await fetch(detailsUrl, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Failed to fetch: ${response.status}`);
+        }
+        
+        const freshData = await response.json();
+        console.log('✅ Fresh data received:', freshData.stages.length, 'stages');
+        
+        // Fetch reschedule history
+        const historyUrl = `/api/projects/${projectId}/reschedule-history?_t=${timestamp}`;
+        const historyResponse = await fetch(historyUrl, {
+            cache: 'no-store',
+            headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' }
+        });
+        
+        if (historyResponse.ok) {
+            freshData.rescheduleHistory = await historyResponse.json();
+        } else {
+            freshData.rescheduleHistory = [];
+        }
+        
+        // Convert saturdayWorkingDays
+        if (Array.isArray(freshData.saturdayWorkingDays)) {
+            freshData.saturdayWorkingDays = new Set(freshData.saturdayWorkingDays);
+        } else {
+            freshData.saturdayWorkingDays = new Set();
+        }
+        
+        // ✅ Update currentProjectData
+        currentProjectData = freshData;
+        
+        // ✅ CRITICAL FIX: Clear ALL badges BEFORE any calendar operations
+        document.querySelectorAll('.parallel-jobs-badge').forEach(badge => badge.remove());
+        
+        // ✅ Regenerate events
+        const newEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
+        console.log('🎯 Generated', newEvents.length, 'events');
+        
+        // ✅ Remove old events
+        calendar.removeAllEvents();
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // ✅ Add new events
+        newEvents.forEach(event => calendar.addEvent(event));
+        
+        // ✅ CRITICAL: Force calendar to fully re-render
+        calendar.render();
+        
+        // ✅ Wait for render to complete
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // ✅ NOW recalculate badges with fresh DOM
+        console.log('🏷️ Recalculating badges with updated stage positions...');
+        
+        // Clear again just to be safe
+        document.querySelectorAll('.parallel-jobs-badge').forEach(badge => badge.remove());
+        
+        // ✅ IMPROVED: Recalculate badges with the UPDATED stage data
+        recalculateBadgesWithFreshData();
+        
+        // ✅ Do additional refreshes to ensure accuracy
+        
+        console.log('✅ Calendar refresh complete');
+        
+    } catch (error) {
+        console.error('❌ Error:', error);
+        showNotification('Failed to refresh: ' + error.message, 'error');
+    }
+}
+
+function createStageEventWithStatus(stage, index, start, end, color, dateStageMap, tasks, stageHasRescheduled, stageRescheduleHistory = null) {
+    // Check for parallel stages
+    let hasParallel = false;
+    let parallelCount = 0;
+    
+    for (let d = new Date(start); d < end; d.setDate(d.getDate() + 1)) {
+        const dateKey = d.toISOString().split('T')[0];
+        const stagesOnDate = dateStageMap.get(dateKey) || [];
+        if (stagesOnDate.length > 1) {
+            hasParallel = true;
+            parallelCount = Math.max(parallelCount, stagesOnDate.length);
+        }
+    }
+    
+    // Analyze task statuses
+    const allCompleted = tasks.every(t => t.status === 'completed');
+    const someCompleted = tasks.some(t => t.status === 'completed');
+    const hasRescheduled = tasks.some(t => t.is_rescheduled);
+    const completedCount = tasks.filter(t => t.status === 'completed').length;
+    const rescheduledCount = tasks.filter(t => t.is_rescheduled).length;
+    
+    let title = stage.name;
+    
+    // Build clean tooltip
+    let tooltip = `${stage.name}\n`;
+    tooltip += `━━━━━━━━━━━━━━━\n`;
+    tooltip += `📅 Duration: ${stage.duration_days} days\n`;
+    tooltip += `📊 Status: ${stage.status}\n`;    
+
+    if (completedCount > 0) {
+        tooltip += `✅ Completed: ${completedCount}/${tasks.length} days\n`;
+    }
+    
+    if (rescheduledCount > 0) {
+        tooltip += `🔄 Rescheduled: ${rescheduledCount} day(s)\n`;
+    }
+    
+    if (hasParallel) {
+        tooltip += `⚡️ Parallel with ${parallelCount - 1} other stage(s)`;
+    }
+    
+    const classNames = [];
+    
+    if (allCompleted) {
+        classNames.push('event-completed');
+    } else if (hasRescheduled) {
+        classNames.push('event-rescheduled');
+    }
+    
+    if (stageHasRescheduled) {
+        classNames.push('stage-rescheduled');
+    }
+    
+    if (stage.status === 'in-progress') {
+        classNames.push('stage-event-active');
+    }
+    
+    // ✅ Build extended props with reschedule info
+    const extendedProps = {
+        stageId: stage.id,
+        stageIndex: index,
+        duration: stage.duration_days,
+        status: stage.status,
+        hasParallel: hasParallel,
+        parallelCount: parallelCount,
+        stageName: stage.name,
+        allCompleted: allCompleted,
+        hasRescheduled: hasRescheduled,
+        completedCount: completedCount,
+        rescheduledCount: rescheduledCount,
+        totalTasks: tasks.length
+    };
+    
+    // ✅ Add reschedule information if available
+    if (stageRescheduleHistory) {
+        extendedProps.wasRescheduled = true;
+        extendedProps.daysShifted = stageRescheduleHistory.days_shifted || 
+            Math.abs(Math.round((new Date(stageRescheduleHistory.new_date) - new Date(stageRescheduleHistory.original_date)) / (1000 * 60 * 60 * 24)));
+        extendedProps.rescheduleDirection = stageRescheduleHistory.direction || 
+            (new Date(stageRescheduleHistory.new_date) > new Date(stageRescheduleHistory.original_date) ? 'forward' : 'backward');
+        extendedProps.rescheduleBadge = `${extendedProps.rescheduleDirection === 'forward' ? '+' : '-'}${extendedProps.daysShifted}d`;
+        extendedProps.originalDate = stageRescheduleHistory.original_date;
+    }
+    
+    return {
+        title: title,
+        start: start.toISOString().split('T')[0],
+        end: end.toISOString().split('T')[0],
+        backgroundColor: color,
+        borderColor: color,
+        extendedProps: extendedProps,
+        classNames: classNames
+    };
+}
+// Add this function to the <script> section in index.html
+
+async function exportCurrentProject(projectId) {
+    try {
+        showNotification('ðŸ“Š Preparing Excel export...', 'info');
+        
+        // Use fetch to download the file
+        const response = await fetch(`/api/projects/${projectId}/export-excel`);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        // Get the blob
+        const blob = await response.blob();
+        
+        // Create download link
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `Project_${projectId}_Tracker_${new Date().toISOString().split('T')[0]}.xlsx`;
+        
+        // Trigger download
+        document.body.appendChild(link);
+        link.click();
+        
+        // Cleanup
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+        
+        showNotification('âœ… Excel file downloaded successfully!', 'success');
+        
+    } catch (error) {
+        console.error('âŒ Export failed:', error);
+        showNotification('Failed to export: ' + error.message, 'error');
+        alert('Export Error: ' + error.message + '\n\nPlease check the browser console for more details.');
+    }
+}
+// Load projects with caching
+async function loadProjects() {
+    try {
+        const response = await fetch('/api/projects');
+        projects = await response.json();
+        allProjectsCache = projects;
+        
+        // Initial filter and display
+        handleProjectSearch();
+        
+    } catch (error) {
+        console.error('Error loading projects:', error);
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Error loading jobs: ${error.message}
+                <button class="btn btn-sm btn-outline-danger ms-3" onclick="loadProjects()">
+                    <i class="fas fa-redo me-1"></i> Retry
+                </button>
+            </div>
+        `;
+    }
+}
+
+// Handle search with debouncing
+function handleProjectSearch() {
+    clearTimeout(searchTimeout);
+    searchTimeout = setTimeout(() => {
+        performSearch();
+    }, 300); // Wait 300ms after user stops typing
+}
+
+// Perform the actual search and filter
+function performSearch() {
+    const searchTerm = document.getElementById('projectSearchInput').value.toLowerCase().trim();
+    const statusFilter = document.getElementById('statusFilter').value;
+    const sortBy = document.getElementById('sortBy').value;
+    
+    // Show/hide clear button
+    document.getElementById('clearSearchBtn').style.display = searchTerm ? 'block' : 'none';
+    
+    // Filter projects
+    filteredProjects = allProjectsCache.filter(project => {
+        const matchesSearch = searchTerm === '' || 
+            project.name.toLowerCase().includes(searchTerm) ||
+            (project.description && project.description.toLowerCase().includes(searchTerm)) ||
+            (project.start_date && project.start_date.includes(searchTerm)) ||
+            (project.end_date && project.end_date.includes(searchTerm));
+        
+        const matchesStatus = statusFilter === '' || project.status === statusFilter;
+        
+        return matchesSearch && matchesStatus;
+    });
+    
+    // Sort projects
+    filteredProjects.sort((a, b) => {
+        switch(sortBy) {
+            case 'newest':
+                return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+            case 'oldest':
+                return new Date(a.created_at || 0) - new Date(b.created_at || 0);
+            case 'name':
+                return a.name.localeCompare(b.name);
+            case 'progress':
+                return (b.progress || 0) - (a.progress || 0);
+            default:
+                return 0;
+        }
+    });
+    
+    // Update results count
+    document.getElementById('resultsCount').textContent = 
+        `Showing ${filteredProjects.length} job${filteredProjects.length !== 1 ? 's' : ''}`;
+    
+    // Reset to first page
+    currentPage = 1;
+    
+    // Display results
+    displayPaginatedProjects();
+}
+
+// Display projects with pagination
+async function displayPaginatedProjects() {
+    const container = document.getElementById('allProjectsSection');
+    
+    if (filteredProjects.length === 0) {
+        container.innerHTML = `
+            <div class="no-results">
+                <i class="fas fa-search"></i>
+                <h5>No jobs found</h5>
+                <p>Try adjusting your search or filters</p>
+            </div>
+        `;
+        updatePaginationControls();
+        return;
+    }
+    
+    // Show loading spinner
+    container.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+    
+    // Calculate pagination
+    const startIndex = (currentPage - 1) * projectsPerPage;
+    const endIndex = startIndex + projectsPerPage;
+    const projectsToDisplay = filteredProjects.slice(startIndex, endIndex);
+    
+    // Fetch details for visible projects only
+    const projectsWithDetails = await Promise.all(
+        projectsToDisplay.map(async (project) => {
+            try {
+                const response = await fetch(`/api/projects/${project.id}/details`);
+                return await response.json();
+            } catch (error) {
+                console.error(`Error loading project ${project.id}:`, error);
+                return null;
+            }
+        })
+    );
+    
+    // Filter out failed requests
+    const validProjects = projectsWithDetails.filter(p => p !== null);
+    
+    // Render projects
+    renderProjectsWithStages(validProjects);
+    
+    // Update pagination controls
+    updatePaginationControls();
+}
+
+// Update pagination controls
+function updatePaginationControls() {
+    const totalPages = Math.ceil(filteredProjects.length / projectsPerPage);
+    const container = document.getElementById('allProjectsSection');
+    
+    let paginationHTML = '';
+    
+    if (totalPages > 1) {
+        paginationHTML = `
+            <div class="pagination-container">
+                <button class="pagination-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>
+                    <i class="fas fa-chevron-left"></i> Previous
+                </button>
+                
+                <span class="pagination-info">
+                    Page ${currentPage} of ${totalPages}
+                </span>
+                
+                <button class="pagination-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>
+                    Next <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        `;
+    }
+    
+    container.insertAdjacentHTML('beforeend', paginationHTML);
+}
+
+// Navigate to specific page
+function goToPage(page) {
+    const totalPages = Math.ceil(filteredProjects.length / projectsPerPage);
+    
+    if (page < 1 || page > totalPages) return;
+    
+    currentPage = page;
+    displayPaginatedProjects();
+    
+    // Scroll to top of projects section
+    document.getElementById('allProjectsSection').scrollIntoView({ behavior: 'smooth' });
+}
+
+// Clear search
+function clearProjectSearch() {
+    document.getElementById('projectSearchInput').value = '';
+    document.getElementById('statusFilter').value = '';
+    document.getElementById('sortBy').value = 'newest';
+    handleProjectSearch();
+}
+
+
+// Add this function in your <script> section:
+</script>
+</body>
+</html>
+
+
+
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Projects - Project Manager</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>Login - Project Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+        
+        .login-container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            max-width: 900px;
+            width: 100%;
+            display: flex;
+        }
+        
+        .login-left {
+            flex: 1;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        
+        .login-left h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 20px;
+        }
+        
+        .login-left p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .login-right {
+            flex: 1;
+            padding: 60px 40px;
+        }
+        
+        .login-right h2 {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        
+        .login-right p {
+            color: #6c757d;
+            margin-bottom: 30px;
+        }
+        
+        .form-control {
+            border-radius: 10px;
+            padding: 12px 15px;
+            border: 2px solid #e9ecef;
+        }
+        
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: none;
+        }
+        
+        .btn-login {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            border-radius: 10px;
+            padding: 12px;
+            color: white;
+            font-weight: 600;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+        
+        .btn-login:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .input-group-text {
+            background: white;
+            border: 2px solid #e9ecef;
+            border-right: none;
+            border-radius: 10px 0 0 10px;
+        }
+        
+        .input-group .form-control {
+            border-left: none;
+            border-radius: 0 10px 10px 0;
+        }
+        
+        .alert {
+            border-radius: 10px;
+        }
+        
+        @media (max-width: 768px) {
+            .login-container {
+                flex-direction: column;
+            }
+            
+            .login-left {
+                padding: 40px 30px;
+            }
+            
+            .login-right {
+                padding: 40px 30px;
+            }
+        }
+    </style>
 </head>
 <body>
-    <div class="layout">
-        <nav class="sidebar">
-            <div class="sidebar-header">
-                <h2>Project Manager</h2>
+    <div class="login-container">
+        <div class="login-left">
+            <div>
+                <i class="fas fa-chart-line fa-4x mb-4"></i>
+                <h1>Project Dashboard</h1>
+                <p>Manage your projects, track tasks, and collaborate with your team all in one place.</p>
             </div>
-            <ul class="nav-menu">
-                <li><a href="dashboard.html">📊 Dashboard</a></li>
-                <li><a href="projects.html" class="active">📁 Projects</a></li>
-                <li><a href="kanban.html">📋 Kanban Board</a></li>
-                <li><a href="#" id="logoutBtn">🚪 Logout</a></li>
-            </ul>
-        </nav>
-
-        <main class="main-content">
-            <header class="page-header">
-                <h1>Projects</h1>
-                <button class="btn btn-primary" onclick="window.location.href='dashboard.html'">+ New Project</button>
-            </header>
-
-            <div id="projectsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 20px;"></div>
-        </main>
-    </div>
-
-    <script src="js/app.js"></script>
-    <script>
-        document.addEventListener('DOMContentLoaded', async () => {
-            checkAuth();
-            await loadProjects();
-        });
-
-        document.getElementById('logoutBtn').addEventListener('click', (e) => {
-            e.preventDefault();
-            localStorage.clear();
-            window.location.href = 'index.html';
-        });
-
-        async function loadProjects() {
-            try {
-                const response = await apiCall('/projects');
-                const projects = await response.json();
-                displayProjects(projects);
-            } catch (error) {
-                console.error('Error loading projects:', error);
-            }
-        }
-
-        function displayProjects(projects) {
-            const container = document.getElementById('projectsList');
+        </div>
+        
+        <div class="login-right">
+            <h2>Welcome Back!</h2>
+            <p>Sign in to continue to your dashboard</p>
             
-            if (projects.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #6b7280;">No projects yet</p>';
-                return;
-            }
-
-            container.innerHTML = projects.map(project => `
-                <div class="stat-card">
-                    <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;">
-                        <h3 style="font-size: 18px; margin: 0;">${project.name}</h3>
-                        <span class="task-priority ${getPriorityClass(project.priority)}">${project.priority}</span>
+            <div id="alertContainer"></div>
+            
+            <form id="loginForm">
+                <div class="mb-3">
+                    <label class="form-label">Username</label>
+                    <div class="input-group">
+                        <span class="input-group-text">
+                            <i class="fas fa-user"></i>
+                        </span>
+                        <input type="text" class="form-control" id="username" placeholder="Enter username" required>
                     </div>
-                    <p style="color: #6b7280; font-size: 14px; margin-bottom: 16px;">
-                        ${project.description || 'No description'}
-                    </p>
-                    <div style="margin-bottom: 12px;">
-                        <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
-                            <span>Progress</span>
-                            <span style="font-weight: 600;">${project.progress || 0}%</span>
-                        </div>
-                        <div style="background: #e5e7eb; height: 8px; border-radius: 4px; overflow: hidden;">
-                            <div style="background: #4f46e5; height: 100%; width: ${project.progress || 0}%;"></div>
-                        </div>
-                    </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 13px; color: #6b7280;">
-                        <span>📅 ${formatDate(project.startDate)} - ${formatDate(project.endDate)}</span>
-                        <span style="text-transform: capitalize;">${project.status}</span>
-                    </div>
-                    ${project.manager ? `
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e7eb; display: flex; align-items: center; gap: 8px;">
-                            <img src="${project.manager.avatar}" alt="${project.manager.name}" style="width: 24px; height: 24px; border-radius: 50%;">
-                            <span style="font-size: 13px;">Manager: ${project.manager.name}</span>
-                        </div>
-                    ` : ''}
                 </div>
-            `).join('');
-        }
+                
+                <div class="mb-4">
+                    <label class="form-label">Password</label>
+                    <div class="input-group">
+                        <span class="input-group-text">
+                            <i class="fas fa-lock"></i>
+                        </span>
+                        <input type="password" class="form-control" id="password" placeholder="Enter password" required>
+                    </div>
+                </div>
+                
+                <button type="submit" class="btn btn-login">
+                    <i class="fas fa-sign-in-alt me-2"></i> Sign In
+                </button>
+            </form>
+            
+            <div class="mt-4 text-center">
+                <small class="text-muted">
+                    Default credentials: <strong>admin</strong> / <strong>admin123</strong>
+                </small>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const alertContainer = document.getElementById('alertContainer');
+            
+            // Clear previous alerts
+            alertContainer.innerHTML = '';
+            
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ username, password })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    // Show success message
+                    alertContainer.innerHTML = `
+                        <div class="alert alert-success">
+                            <i class="fas fa-check-circle me-2"></i>
+                            Login successful! Redirecting...
+                        </div>
+                    `;
+                    
+                    // Redirect to dashboard
+                    setTimeout(() => {
+                        window.location.href = '/dashboard';
+                    }, 1000);
+                } else {
+                    // Show error message
+                    alertContainer.innerHTML = `
+                        <div class="alert alert-danger">
+                            <i class="fas fa-exclamation-circle me-2"></i>
+                            ${data.message || 'Invalid username or password'}
+                        </div>
+                    `;
+                }
+            } catch (error) {
+                alertContainer.innerHTML = `
+                    <div class="alert alert-danger">
+                        <i class="fas fa-exclamation-circle me-2"></i>
+                        An error occurred. Please try again.
+                    </div>
+                `;
+            }
+        });
     </script>
 </body>
 </html>
-```
-
-
-## Setup Instructions
-
-1. **Install dependencies:**
-```bash
-npm install
-```
-
-2. **Setup PostgreSQL database:**
-```sql
-CREATE DATABASE project_manager;
-```
-
-3. **Configure environment variables in `.env`:**
-```env
-PORT=3000
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=project_manager
-DB_USER=postgres
-DB_PASSWORD=your_password
-JWT_SECRET=your_secret_key_change_in_production
-NODE_ENV=development
-```
-
-4. **Start the server:**
-```bash
-npm start
-```
-
-5. **Access the application:**
-
-- Open browser: `http://localhost:3000`
-- Register a new account with desired role (admin/manager/employee)
-- Start creating projects and assigning tasks
-
-
-## Key Features Implemented
-
-The application includes **drag-and-drop task management** using the HTML5 Drag and Drop API with event listeners for dragstart, dragover, and drop events. **JWT authentication** is managed securely using localStorage for token storage with automatic redirection on authentication failure. **Real-time updates** are powered by Socket.io, broadcasting task changes to all connected clients instantly. **Dynamic charts** update automatically using Chart.js with the `update()` method when data changes. The **role-based access control** restricts project creation to admin and manager roles, while all users can view and update tasks assigned to them.[^3_1][^3_2][^3_3][^3_4][^3_5][^3_6][^3_7][^3_8][^3_9][^3_10][^3_11][^3_12]
-
-This complete application provides project planning, daily task assignment, visual progress tracking with Kanban boards and charts, real-time collaboration, and a user-friendly interface with drag-and-drop functionality.[^3_5][^3_13][^3_14][^3_1]
-<span style="display:none">[^3_15][^3_16][^3_17]</span>
-
-<div align="center">⁂</div>
-
-[^3_1]: https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API
-
-[^3_2]: https://www.w3schools.com/html/html5_draganddrop.asp
-
-[^3_3]: https://blog.bitsrc.io/must-know-javascript-api-drag-and-drop-api-1e3186b83be6
-
-[^3_4]: https://www.descope.com/blog/post/developer-guide-jwt-storage
-
-[^3_5]: https://www.geeksforgeeks.org/javascript/how-to-dynamically-update-values-of-a-chart-in-chartjs/
-
-[^3_6]: https://satvikcoder.hashnode.dev/jwt-token-storage-localstorage-sessionstorage-or-cookies
-
-[^3_7]: https://www.scichart.com/documentation/js/current/Tutorial 04 - Adding Realtime Updates.html
-
-[^3_8]: https://codesignal.com/learn/courses/building-a-full-featured-to-do-list-application-1/lessons/real-time-updates-with-socketio
-
-[^3_9]: https://dev.to/novu/sending-real-time-notifications-with-socketio-in-nodejs-1l5j
-
-[^3_10]: https://www.geeksforgeeks.org/node-js/how-to-implement-jwt-authentication-in-express-js-app/
-
-[^3_11]: https://dev.to/hamzakhan/securing-your-expressjs-app-jwt-authentication-step-by-step-aom
-
-[^3_12]: https://www.corbado.com/blog/nodejs-express-postgresql-jwt-authentication-roles
-
-[^3_13]: https://www.youtube.com/watch?v=V2wIK2lBGgk
-
-[^3_14]: https://www.syncfusion.com/javascript-ui-controls/js-kanban-board
-
-[^3_15]: https://reactflow.dev/examples/interaction/drag-and-drop
-
-[^3_16]: https://en.kelen.cc/share/frontend-drag-and-drop-libraries-2025
-
-[^3_17]: https://web.dev/patterns/files/drag-and-drop-directories
-
