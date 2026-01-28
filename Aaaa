@@ -1,2376 +1,1420 @@
-from openpyxl import Workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
-from openpyxl.styles import Font, PatternFill, Alignment
-from openpyxl.cell import MergedCell
-import sys, re, json, time, urllib.parse, math, os, chardet
-from datetime import datetime, timedelta
-import requests
-import os
-import sys
-from bs4 import BeautifulSoup
-import pandas as pd
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QToolBar,
-    QFileDialog, QTableWidget, QTableWidgetItem, QComboBox, QLabel,
-    QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox, QTabWidget, QProgressBar,
-    QSplitter, QDialog, QListWidget, QPushButton
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
+	"github.com/gin-gonic/gin"
+	"github.com/xuri/excelize/v2"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
-from PyQt6.QtCore import Qt, QThread, pyqtSignal,QTimer
-from PyQt6.QtGui import QColor, QAction, QFont, QPalette, QPixmap,QIcon
 
-def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
-    if hasattr(sys, '_MEIPASS'):
-        return os.path.join(sys._MEIPASS, relative_path)
-    return os.path.join(os.path.abspath("."), relative_path)
+// ============================================================================
+// Database & Global Configuration
+// ============================================================================
 
+var db *gorm.DB
 
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-BASE_SEARCH = "https://www.findchips.com/search/"
-BASE_DETAIL = "https://www.findchips.com/detail/{mpn}/{mfg}"
+func initDB() {
+	// UPDATE THIS STRING WITH YOUR POSTGRES CREDENTIALS
+	dsn := "host=localhost user=postgres password=5842 dbname=sienna_ecad_tools_db port=5432 sslmode=disable TimeZone=Asia/Kolkata"
 
-# Common MLCC/EIA size mapping for fallbacks and grouping
-EIA_TO_MM = {
-    "008004": (0.25, 0.13), "0075": (0.3, 0.15), "01005": (0.4, 0.2),
-    "15015": (0.4, 0.4), "0201": (0.6, 0.3), "0202": (0.5, 0.5),
-    "0302": (0.8, 0.5), "0303": (0.8, 0.8), "0504": (1.3, 1.0),
-    "0402": (1.0, 0.5), "0603": (1.6, 0.8), "0805": (2.0, 1.25),
-    "1008": (2.5, 2.0), "1111": (2.8, 2.8), "1206": (3.2, 1.6),
-    "1210": (3.2, 2.5), "1410": (3.6, 2.5), "1515": (3.81, 3.81),
-    "1806": (4.5, 1.6), "1808": (4.5, 2.0), "1812": (4.5, 3.2),
-    "1825": (4.5, 6.4), "2010": (5.0, 2.5), "2020": (5.08, 5.08),
-    "2220": (5.7, 5.0), "2225": (5.7, 6.4), "2512": (6.4, 3.2),
-    "2520": (6.4, 5.0), "2920": (7.4, 5.0), "3333": (8.38, 8.38),
-    "3640": (9.2, 10.16), "4040": (10.2, 10.2), "5550": (14.0, 12.7),
-    "8060": (20.3, 15.3)
+	var err error
+	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Info),
+	})
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+
+	// Auto Migrate the schema
+	err = db.AutoMigrate(
+		&User{},
+		&Project{},
+		&ProjectStage{},
+		&ProjectMember{},
+		&Task{},
+		&ScheduleHistory{},
+		&Notification{},
+		&ActivityLog{},
+		&StageDailyTask{},
+		&DailyTaskRescheduleHistory{},
+		&HoldDate{},
+	)
+	if err != nil {
+		log.Fatal("Failed to migrate database:", err)
+	}
+
+	createDefaultAdmin()
 }
 
-def apply_dark_green_theme(app):
-    """Apply dark green theme to the entire application"""
-    palette = QPalette()
-
-    # Window background - Dark gray/black
-    palette.setColor(QPalette.ColorRole.Window, QColor(25, 35, 25))
-    palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 255, 100))  # Bright green text
-
-    # Base background for input fields
-    palette.setColor(QPalette.ColorRole.Base, QColor(35, 45, 35))
-    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(45, 55, 45))
-
-    # Text colors
-    palette.setColor(QPalette.ColorRole.Text, QColor(0, 255, 100))
-
-    # Button styling
-    palette.setColor(QPalette.ColorRole.Button, QColor(35, 55, 35))
-    palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 255, 100))
-
-    # Highlight colors
-    palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 150, 50))
-    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
-
-    # Links
-    palette.setColor(QPalette.ColorRole.Link, QColor(100, 255, 150))
-
-    # FIXED: Disabled elements - Use ColorGroup.Disabled, not ColorRole.Disabled
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(100, 100, 100))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(100, 100, 100))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(100, 100, 100))
-
-    app.setPalette(palette)
-
-    # Additional stylesheet for better appearance
-    app.setStyleSheet("""
-        QMainWindow {
-            background-color: rgb(25, 35, 25);
-            color: rgb(0, 255, 100);
-        }
-        
-        QToolBar {
-            background-color: rgb(35, 45, 35);
-            border: 1px solid rgb(0, 150, 50);
-            spacing: 3px;
-        }
-        
-        QToolBar::separator {
-            background-color: rgb(0, 150, 50);
-            width: 2px;
-            margin: 2px;
-        }
-        
-        QPushButton, QToolButton {
-            background-color: rgb(35, 55, 35);
-            color: rgb(0, 255, 100);
-            border: 2px solid rgb(0, 150, 50);
-            border-radius: 5px;
-            padding: 5px 10px;
-            font-weight: bold;
-        }
-        
-        QPushButton:hover, QToolButton:hover {
-            background-color: rgb(0, 150, 50);
-            color: white;
-        }
-        
-        QPushButton:pressed, QToolButton:pressed {
-            background-color: rgb(0, 100, 30);
-        }
-        
-        QComboBox {
-            background-color: rgb(35, 45, 35);
-            color: rgb(0, 255, 100);
-            border: 2px solid rgb(0, 150, 50);
-            border-radius: 3px;
-            padding: 2px 5px;
-        }
-        
-        QComboBox::drop-down {
-            border: none;
-        }
-        
-        QComboBox::down-arrow {
-            image: none;
-            border-left: 5px solid transparent;
-            border-right: 5px solid transparent;
-            border-top: 5px solid rgb(0, 255, 100);
-        }
-        
-        QSpinBox, QDoubleSpinBox {
-            background-color: rgb(35, 45, 35);
-            color: rgb(0, 255, 100);
-            border: 2px solid rgb(0, 150, 50);
-            border-radius: 3px;
-            padding: 2px;
-        }
-        
-        QLabel {
-            color: rgb(0, 255, 100);
-            font-weight: bold;
-        }
-        
-        QTabBar::tab {
-            background-color: rgb(35, 45, 35);
-            color: rgb(0, 255, 100);
-            border: 2px solid rgb(0, 150, 50);
-            padding: 8px 15px;
-            margin: 2px;
-        }
-        
-        QTabBar::tab:selected {
-            background-color: rgb(0, 150, 50);
-            color: white;
-        }
-        
-        QTabBar::tab:hover {
-            background-color: rgb(0, 120, 40);
-        }
-        
-        QProgressBar {
-            background-color: rgb(35, 45, 35);
-            border: 2px solid rgb(0, 150, 50);
-            border-radius: 5px;
-            color: white;          
-            text-align: center;
-        }
-        
-        QProgressBar::chunk {
-            background-color: rgb(0, 200, 50);
-            border-radius: 3px;
-        }
-        
-        QSplitter::handle {
-            background-color: rgb(0, 150, 50);
-        }
-        
-        QMessageBox {
-            background-color: rgb(25, 35, 25);
-            color: rgb(0, 255, 100);
-        }
-        
-        QDialog {
-            background-color: rgb(25, 35, 25);
-            color: rgb(0, 255, 100);
-        }
-        
-        QListWidget {
-            background-color: white;
-            color: black;
-            border: 2px solid rgb(0, 150, 50);
-        }
-    """)
-
-def norm_eia_code(text: str | None) -> str | None:
-    if not text:
-        return None
-    cleaned = text.replace('-', '').replace('_', '')
-    m = re.search(r'\b(008004|01005|0201|0302|0303|0402|0504|0603|0805|1008|1206|1210|1812|2010|2220|2225|2512|2920|3333|3640|4040|5550|8060)\b', cleaned)
-
-    return m.group(1) if m else None
-
-def max_dim_mm_from_package_or_size(package_code: str | None, L: float | None, W: float | None) -> float | None:
-    if package_code and package_code in EIA_TO_MM:
-        l, w = EIA_TO_MM[package_code]
-        return max(l, w)
-    if L is not None and W is not None:
-        return max(L, W)
-    if L is not None:
-        return L
-    if W is not None:
-        return W
-    return None
-
-def filter_search_results(mpn: str, search_results: list[dict]) -> list[dict]:
-    """
-    Filter search results based on exact vs partial matches:
-    - If exact matches exist, return only exact matches
-    - If no exact matches exist, return only the first partial match
-    """
-    exact_matches = []
-    partial_matches = []
-    mpn_lower = mpn.strip().lower()
-    
-    for result in search_results:
-        result_mpn = result["mpn"].strip().lower()
-        if result_mpn == mpn_lower:
-            exact_matches.append(result)
-        else:
-            partial_matches.append(result)
-    
-    # Return exact matches if they exist, otherwise return only first partial match
-    if exact_matches:
-        return exact_matches
-    elif partial_matches:
-        return partial_matches[:1] # Only take the first partial match
-    else:
-        return []
-
-def detect_file_encoding(file_path: str) -> str:
-    """Detect the encoding of a file"""
-    try:
-        with open(file_path, 'rb') as f:
-            raw_data = f.read(10000)  # Read first 10KB
-            result = chardet.detect(raw_data)
-            return result['encoding'] or 'utf-8'
-    except Exception:
-        return 'utf-8'
-
-def detect_csv_delimiter(file_path: str, encoding: str = 'utf-8') -> str:
-    """Detect CSV delimiter by testing common delimiters"""
-    delimiters = [',', ';', '\t', '|']
-    try:
-        with open(file_path, 'r', encoding=encoding) as f:
-            sample = f.read(1024)
-            
-        delimiter_scores = {}
-        for delim in delimiters:
-            lines = sample.split('\n')[:3]  # Check first 3 lines
-            scores = []
-            for line in lines:
-                if line.strip():
-                    scores.append(line.count(delim))
-            if scores and max(scores) > 0:
-                delimiter_scores[delim] = max(scores)
-        
-        if delimiter_scores:
-            return max(delimiter_scores.items(), key=lambda x: x[1])[0]
-        return ','
-    except Exception:
-        return ','
-
-class SheetSelectionDialog(QDialog):
-    """Dialog for selecting Excel worksheet"""
-    def __init__(self, sheet_names, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Select Worksheet")
-        self.setModal(True)
-        self.resize(300, 200)
-        
-        layout = QVBoxLayout()
-        layout.addWidget(QLabel("Multiple worksheets found. Select one:"))
-        
-        self.sheet_list = QListWidget()
-        self.sheet_list.addItems(sheet_names)
-        self.sheet_list.setCurrentRow(0)
-        layout.addWidget(self.sheet_list)
-        
-        buttons = QHBoxLayout()
-        ok_btn = QPushButton("OK")
-        cancel_btn = QPushButton("Cancel")
-        ok_btn.clicked.connect(self.accept)
-        cancel_btn.clicked.connect(self.reject)
-        buttons.addWidget(ok_btn)
-        buttons.addWidget(cancel_btn)
-        layout.addLayout(buttons)
-        
-        self.setLayout(layout)
-        
-    def get_selected_sheet(self, _):
-        current_item = self.sheet_list.currentItem()
-        return current_item.text() if current_item else None
-
-class FindchipsClient:
-    def __init__(self, timeout=15):
-        self.s = requests.Session()
-        self.s.headers.update({"User-Agent": USER_AGENT})
-        self.timeout = timeout
-
-    def get(self, url):
-        return self.s.get(url, timeout=self.timeout)
-
-    def search(self, mpn: str) -> list[dict]:
-        """Extract only MPN and manufacturer from search page"""
-        url = BASE_SEARCH + urllib.parse.quote(mpn)
-        r = self.get(url)
-        if r.status_code != 200:
-            return []
-
-        soup = BeautifulSoup(r.content, "html.parser")
-        rows = soup.find_all("tr", class_="row")
-        results = []
-
-        for row in rows:
-            try:
-                mfg = (row.get("data-mfr") or row.get("data-manufacturer") or "").strip()
-                result_mpn = (row.get("data-mfrpartnumber") or "").strip()
-                if not mfg or not result_mpn:
-                    continue
-
-                # Only return MPN and manufacturer - no pricing/stock data
-                results.append({
-                    "mpn": result_mpn,
-                    "manufacturer": mfg
-                })
-            except Exception:
-                continue
-
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_results = []
-        for item in results:
-            key = (item["mpn"].lower(), item["manufacturer"].lower())
-            if key not in seen:
-                seen.add(key)
-                unique_results.append(item)
-
-        return unique_results
-
-    def detail(self, mpn: str, manufacturer: str) -> dict:
-        """Extract all data from detail page"""
-        url = BASE_DETAIL.format(
-            mpn=urllib.parse.quote(mpn),
-            mfg=urllib.parse.quote(manufacturer.replace(' ', '-'))
-        )
-        r = self.get(url)
-        if r.status_code != 200:
-            return {}
-
-        html = r.text
-        meta = {
-            "life_cycle_code": None,
-            "package_code": None,
-            "length_mm": None,
-            "width_mm": None,
-            "default_currency": None,
-            "lead_time": None,
-            "offers": []
-        }
-
-        # Extract metadata from JavaScript or meta tags
-        dc = re.search(r'"defaultCurrency"\s*:\s*"([A-Z]{3})"', html)
-        if dc:
-            meta["default_currency"] = dc.group(1)
-
-        # Parse HTML table for Part Data Attributes
-        soup = BeautifulSoup(html, "html.parser")
-        
-        # Extract from Part Data Attributes table
-        data_rows = soup.find_all("tr", class_="data-row")
-        for row in data_rows:
-            try:
-                field_cell = row.find("td", class_="field-cell")
-                main_cell = row.find("td", class_="main-part-cell")
-                
-                if field_cell and main_cell:
-                    field_name = field_cell.get_text(strip=True)
-                    field_value = main_cell.get_text(strip=True)
-                    
-                    # Extract specific fields
-                    if field_name == "Part Life Cycle Code":
-                        meta["life_cycle_code"] = field_value
-                    elif field_name in ["Part Package Code", "Size Code", "Package Description"]:
-                        # Try to normalize package code
-                        normalized = norm_eia_code(field_value)
-                        if normalized:
-                            meta["package_code"] = normalized
-                        else:
-                            meta["package_code"] = field_value
-                    elif field_name == "Factory Lead Time":
-                        meta["lead_time"] = field_value
-                    # NEW: Extract Length and Width
-                    elif field_name in ["Length","Package Length"]:
-                        # Extract numeric value from "14 mm"
-                        length_match = re.search(r'(\d+(?:\.\d+)?)', field_value)
-                        if length_match:
-                            meta["length_mm"] = float(length_match.group(1))
-                    elif field_name in ["Width","Package Width"]:
-                        # Extract numeric value from "14 mm"
-                        width_match = re.search(r'(\d+(?:\.\d+)?)', field_value)
-                        if width_match:
-                            meta["width_mm"] = float(width_match.group(1))
-                            
-            except Exception:
-                continue
-
-        # Try to extract dimensions from package description
-        pkg_desc_rows = soup.find_all("tr", attrs={"data-field": "Package Description"})
-        for row in pkg_desc_rows:
-            try:
-                desc_cell = row.find("td", class_="main-part-cell")
-                if desc_cell:
-                    desc_text = desc_cell.get_text(strip=True)
-                    # Try to extract dimensions from package description
-                    # Look for patterns like "1.6x0.8" or "1.6 x 0.8"
-                    size_match = re.search(r'(\d+(?:\.\d+)?)\s*[x*]\s*(\d+(?:\.\d+)?)', desc_text)
-                    if size_match:
-                        meta["length_mm"] = float(size_match.group(1))
-                        meta["width_mm"] = float(size_match.group(2))
-                    else:
-                        # Try to extract standard package sizes (like 0805)
-                        std_size = norm_eia_code(desc_text)
-                        if std_size and std_size in EIA_TO_MM:
-                            meta["package_code"] = std_size
-                            l, w = EIA_TO_MM[std_size]
-                            meta["length_mm"] = l
-                            meta["width_mm"] = w
-            except Exception:
-                continue
-
-        # Fallback: Try original JavaScript extraction methods
-        if not meta["life_cycle_code"]:
-            life = re.search(r'"lifeCycle(Code)?"\s*:\s*"([^"]+)"', html)
-            if life:
-                meta["life_cycle_code"] = life.group(2)
-
-        if not meta["package_code"]:
-            pkg = re.search(r'"sizeCode"\s*:\s*"([^"]+)"', html) or re.search(r'"package"\s*:\s*"([^"]+)"', html)
-            if pkg:
-                normalized = norm_eia_code(pkg.group(1))
-                meta["package_code"] = normalized or pkg.group(1)
-
-        # Continue with existing dimensions extraction if not found
-        if not meta["length_mm"]:
-            lmatch = re.search(r'"length"\s*:\s*([0-9.]+)\s*,\s*"unit"\s*:\s*"mm"', html)
-            if lmatch:
-                meta["length_mm"] = float(lmatch.group(1))
-                
-        if not meta["width_mm"]:
-            wmatch = re.search(r'"width"\s*:\s*([0-9.]+)\s*,\s*"unit"\s*:\s*"mm"', html)
-            if wmatch:
-                meta["width_mm"] = float(wmatch.group(1))
-
-        # Extract distributor offers from the FC.group JavaScript object
-        group_match = re.search(r'FC\.group\s*=\s*\{[^}]*offers:\s*(\[.*?\])', html, re.DOTALL)
-        if group_match:
-            try:
-                offers_json = group_match.group(1)
-                # Clean up the JavaScript to make it valid JSON
-                offers_json = re.sub(r'([{,]\s*)(\w+):', r'\1"\2":', offers_json) # Quote keys
-                offers_json = re.sub(r"'([^']*)'", r'"\1"', offers_json) # Convert single quotes
-                offers_data = json.loads(offers_json)
-
-                for offer in offers_data:
-                    distributor = offer.get("distributor", "").strip()
-                    stock = int(offer.get("stock", 0) or 0)
-
-                    # Extract price tiers
-                    price_tiers = []
-                    price_data = offer.get("price", [])
-                    if isinstance(price_data, list):
-                        for tier in price_data:
-                            if isinstance(tier, list) and len(tier) >= 3:
-                                try:
-                                    qty = int(str(tier[0]).replace(",", ""))
-                                    price = float(str(tier[2]).replace(",", ""))
-                                    price_tiers.append({"quantity": qty, "price": price})
-                                except (ValueError, IndexError):
-                                    continue
-
-                    if distributor and (price_tiers or stock > 0):
-                        meta["offers"].append({
-                            "distributor": distributor,
-                            "stock": stock,
-                            "currency": "USD",
-                            "price_tiers": sorted(price_tiers, key=lambda x: x["quantity"]),
-                            "lead_time": offer.get("leadTime") or meta.get("lead_time"),
-                            "moq": min(tier["quantity"] for tier in price_tiers) if price_tiers else None
-                        })
-            except (json.JSONDecodeError, Exception):
-                pass
-
-        # Fallback: Parse HTML tables for distributor data
-        if not meta["offers"]:
-            price_stock_table = soup.find("table", class_="price-stock-table")
-            if price_stock_table:
-                for row in price_stock_table.find_all("tr", class_="price-stock-tr"):
-                    try:
-                        # Extract distributor name
-                        dist_cell = row.find("td", class_="td-dis")
-                        if not dist_cell:
-                            continue
-                        distributor = dist_cell.get_text(strip=True)
-
-                        # Extract stock
-                        stock_cell = row.find("td", class_="td-stock")
-                        stock = 0
-                        if stock_cell:
-                            stock_text = stock_cell.get_text(strip=True)
-                            stock_match = re.search(r'(\d[\d,]*)', stock_text)
-                            if stock_match:
-                                stock = int(stock_match.group(1).replace(",", ""))
-
-                        # Extract lead time from description
-                        desc_cell = row.find("td", class_="td-desc")
-                        row_lead_time = None
-                        if desc_cell:
-                            desc_text = desc_cell.get_text()
-                            lead_match = re.search(r'Lead time:\s*([^<\n]+)', desc_text)
-                            if lead_match:
-                                row_lead_time = lead_match.group(1).strip()
-
-                        # Extract price tiers
-                        price_tiers = []
-                        price_cell = row.find("td", class_="td-price")
-                        if price_cell:
-                            price_items = price_cell.find_all("li", class_="price-item")
-                            for item in price_items:
-                                label = item.find("span", class_="label")
-                                value = item.find("span", class_="value")
-                                if label and value:
-                                    try:
-                                        qty_text = label.get_text(strip=True).replace(",", "")
-                                        price_text = value.get_text(strip=True).replace("$", "").replace(",", "")
-                                        qty = int(qty_text)
-                                        price = float(price_text)
-                                        price_tiers.append({"quantity": qty, "price": price})
-                                    except (ValueError, AttributeError):
-                                        continue
-
-                        if distributor and (price_tiers or stock > 0):
-                            meta["offers"].append({
-                                "distributor": distributor,
-                                "stock": stock,
-                                "currency": "USD",
-                                "price_tiers": sorted(price_tiers, key=lambda x: x["quantity"]),
-                                "lead_time": row_lead_time or meta.get("lead_time"),
-                                "moq": min(tier["quantity"] for tier in price_tiers) if price_tiers else None
-                            })
-                    except Exception:
-                        continue
-
-        return meta
-
-class JSONStorage:
-    """JSON-based storage system to replace SQLite database"""
-    def __init__(self, path="bom_costing_data.json"):
-        self.path = path
-        self.data = self._load()
-
-    def _load(self):
-        """Load data from JSON file"""
-        if os.path.exists(self.path):
-            try:
-                with open(self.path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error loading JSON data: {e}")
-                return {}
-        return {}
-
-    def _save(self):
-        """Save data to JSON file"""
-        try:
-            # Create backup of existing file
-            if os.path.exists(self.path):
-                backup_path = f"{self.path}.backup"
-                if os.path.exists(backup_path):
-                    os.remove(backup_path)
-                os.rename(self.path, backup_path)
-            
-            with open(self.path, 'w', encoding='utf-8') as f:
-                json.dump(self.data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Error saving JSON data: {e}")
-            # Restore backup if save failed
-            backup_path = f"{self.path}.backup"
-            if os.path.exists(backup_path):
-                os.rename(backup_path, self.path)
-
-    def upsert_offer(
-        self, mpn, distributor, manufacturer, price_tiers, stock, currency,
-        lead_time=None, life_cycle_code=None, package_code=None,
-        length_mm=None, width_mm=None, default_currency=None, part_type=None
-    ):
-        """Insert or update component offer data"""
-        if mpn not in self.data:
-            self.data[mpn] = {}
-        
-        if distributor not in self.data[mpn]:
-            self.data[mpn][distributor] = {}
-        
-        # Sort price tiers
-        tiers_sorted = sorted(price_tiers or [], key=lambda x: x["quantity"])
-        
-        # Update offer data
-        offer_data = {
-            "manufacturer": manufacturer,
-            "price_tiers": tiers_sorted,
-            "stock": max(self.data[mpn][distributor].get("stock", 0), int(stock or 0)),
-            "currency": currency or "USD",
-            "lead_time": lead_time or self.data[mpn][distributor].get("lead_time"),
-            "life_cycle_code": life_cycle_code or self.data[mpn][distributor].get("life_cycle_code"),
-            "package_code": package_code or self.data[mpn][distributor].get("package_code"),
-            "length_mm": length_mm if length_mm is not None else self.data[mpn][distributor].get("length_mm"),
-            "width_mm": width_mm if width_mm is not None else self.data[mpn][distributor].get("width_mm"),
-            "default_currency": default_currency or self.data[mpn][distributor].get("default_currency", "USD"),
-            "part_type": part_type or self.data[mpn][distributor].get("part_type"),
-            "scraped_date": datetime.now().isoformat()
-        }
-        
-        self.data[mpn][distributor].update(offer_data)
-        self._save()
-
-    def offers_by_mpn(self, mpn):
-        """Get all offers for a specific MPN"""
-        if mpn not in self.data:
-            return []
-        
-        offers = []
-        for distributor, offer_data in self.data[mpn].items():
-            offers.append({
-                "distributor": distributor,
-                "manufacturer": offer_data.get("manufacturer", ""),
-                "price_tiers": offer_data.get("price_tiers", []),
-                "stock": offer_data.get("stock", 0),
-                "currency": offer_data.get("currency", "USD"),
-                "lead_time": offer_data.get("lead_time"),
-                "life_cycle_code": offer_data.get("life_cycle_code"),
-                "package_code": offer_data.get("package_code"),
-                "length_mm": offer_data.get("length_mm"),
-                "width_mm": offer_data.get("width_mm"),
-                "default_currency": offer_data.get("default_currency", "USD"),
-                "part_type": offer_data.get("part_type")
-            })
-        
-        return sorted(offers, key=lambda x: x["distributor"])
-
-    def part_meta(self, mpn):
-        """Get metadata for a part"""
-        offers = self.offers_by_mpn(mpn)
-        
-        life = next((o["life_cycle_code"] for o in offers if o.get("life_cycle_code")), "")
-        pkg = next((o["package_code"] for o in offers if o.get("package_code")), "")
-        L = next((o["length_mm"] for o in offers if o.get("length_mm") is not None), None)
-        W = next((o["width_mm"] for o in offers if o.get("width_mm") is not None), None)
-        defcur = next((o["default_currency"] for o in offers if o.get("default_currency")), "USD")
-        ptype = next((o["part_type"] for o in offers if o.get("part_type")), "")
-        lead = next((o["lead_time"] for o in offers if o.get("lead_time")), "")
-        
-        return {
-            "life": life, "package": pkg, "L": L, "W": W, 
-            "default_currency": defcur, "part_type": ptype, "lead_time": lead
-        }
-
-    def update_size_for_mpn(self, mpn, length_mm, width_mm):
-        """Update length and width for all distributors of a specific MPN"""
-        if mpn in self.data:
-            for distributor in self.data[mpn]:
-                self.data[mpn][distributor]["length_mm"] = length_mm
-                self.data[mpn][distributor]["width_mm"] = width_mm
-            self._save()
-            return len(self.data[mpn])
-        return 0
-
-    def update_package_for_mpn(self, mpn, new_package):
-        """Update package code for all distributors of a specific MPN"""
-        if mpn in self.data:
-            for distributor in self.data[mpn]:
-                self.data[mpn][distributor]["package_code"] = new_package
-            self._save()
-            return len(self.data[mpn])
-        return 0
-    
-    def is_data_fresh(self, mpn, hours=6):
-        """Check if MPN data is fresh (within specified hours)"""
-        if mpn not in self.data:
-            return False
-        
-        # Check if any distributor has recent data
-        for distributor_data in self.data[mpn].values():
-            scraped_date_str = distributor_data.get("scraped_date")
-            if scraped_date_str:
-                try:
-                    scraped_date = datetime.fromisoformat(scraped_date_str)
-                    time_diff = datetime.now() - scraped_date
-                    if time_diff < timedelta(hours=hours):
-                        return True
-                except Exception:
-                    continue
-        return False
-    
-    def get_data_age_hours(self, mpn):
-        """Get the age of data in hours for an MPN"""
-        if mpn not in self.data:
-            return float('inf')
-        
-        oldest_hours = 0
-        for distributor_data in self.data[mpn].values():
-            scraped_date_str = distributor_data.get("scraped_date")
-            if scraped_date_str:
-                try:
-                    scraped_date = datetime.fromisoformat(scraped_date_str)
-                    hours_old = (datetime.now() - scraped_date).total_seconds() / 3600
-                    oldest_hours = max(oldest_hours, hours_old)
-                except Exception:
-                    continue
-        return oldest_hours if oldest_hours > 0 else float('inf')
-
-class ScrapeThread(QThread):
-    progress = pyqtSignal(int)
-    log = pyqtSignal(str)
-    done = pyqtSignal()
-
-    def __init__(self, mpns, storage: JSONStorage):
-        super().__init__()
-        self.mpns = mpns
-        self.storage = storage
-        self.client = FindchipsClient()
-        self.cancelled = False
-
-    def cancel(self, _):
-        """Cancel the Fatching process"""
-        self.cancelled = True
-        self.log.emit("Fatching cancelled by user")
-
-    def run(self):
-        total = len(self.mpns)
-        fresh_count = 0
-        scraped_count = 0
-        
-        for i, mpn in enumerate(self.mpns):
-            # Check for cancellation
-            if self.cancelled:
-                self.log.emit("Fatching process was cancelled")
-                self.done.emit()
-                return
-                
-            try:
-                # Check if data is fresh (less than 6 hours old)
-                if self.storage.is_data_fresh(mpn, hours=6):
-                    data_age = self.storage.get_data_age_hours(mpn)
-                    self.log.emit(f"Using cached data for {mpn} (age: {data_age:.1f} hours)")
-                    fresh_count += 1
-                    self.progress.emit(int((i + 1) * 100 / total))
-                    continue
-                
-                # Data is stale or doesn't exist, scrape from Findchips
-                data_age = self.storage.get_data_age_hours(mpn)
-                age_text = f"{data_age:.1f} hours old" if data_age != float('inf') else "not found"
-                self.log.emit(f"Fatching {mpn} (existing data: {age_text})")
-                
-                # Step 1: Get manufacturers from search page
-                search_results = self.client.search(mpn)
-                if not search_results:
-                    self.log.emit(f"No manufacturers found for {mpn}")
-                    self.progress.emit(int((i + 1) * 100 / total))
-                    time.sleep(0.1)
-                    continue
-
-                # Step 1.5: Filter search results - exact matches first, then max 1 partial match
-                filtered_results = filter_search_results(mpn, search_results)
-                if not filtered_results:
-                    self.log.emit(f"No suitable matches found for {mpn}")
-                    self.progress.emit(int((i + 1) * 100 / total))
-                    time.sleep(0.1)
-                    continue
-
-                self.log.emit(f"Found {len(filtered_results)} suitable matches for {mpn}")
-
-                # Step 2: For each filtered manufacturer, get detailed data from detail page
-                for result in filtered_results:
-                    # Check for cancellation before each detail request
-                    if self.cancelled:
-                        self.log.emit("Fatching process was cancelled")
-                        self.done.emit()
-                        return
-                        
-                    result_mpn = result["mpn"]
-                    manufacturer = result["manufacturer"]
-
-                    # Determine if this is exact match or alternate
-                    is_exact = result_mpn.strip().lower() == mpn.strip().lower()
-                    part_type = "Precise Match" if is_exact else "Alternate Parts"
-
-                    self.log.emit(f"Getting details: {result_mpn} / {manufacturer} ({'Exact' if is_exact else 'Partial'} match)")
-
-                    # Get detailed data from detail page
-                    detail_data = self.client.detail(result_mpn, manufacturer)
-
-                    # Store offers from detail page
-                    offers = detail_data.get("offers", [])
-                    if not offers:
-                        # If no offers, create a placeholder entry
-                        offers = [{"distributor": "Unknown", "stock": 0, "price_tiers": [], "currency": "USD"}]
-
-                    for offer in offers:
-                        self.storage.upsert_offer(
-                            mpn=mpn,  # Store under the searched MPN
-                            distributor=offer.get("distributor", "Unknown"),
-                            manufacturer=manufacturer,
-                            price_tiers=offer.get("price_tiers", []),
-                            stock=offer.get("stock", 0),
-                            currency=offer.get("currency", "USD"),
-                            lead_time=offer.get("lead_time"),
-                            life_cycle_code=detail_data.get("life_cycle_code"),
-                            package_code=detail_data.get("package_code"),
-                            length_mm=detail_data.get("length_mm"),
-                            width_mm=detail_data.get("width_mm"),
-                            default_currency=detail_data.get("default_currency", "USD"),
-                            part_type=part_type
-                        )
-
-                scraped_count += 1
-                self.log.emit(f"Completed: {mpn} - processed {len(filtered_results)} manufacturers")
-
-            except Exception as e:
-                self.log.emit(f"Error processing {mpn}: {e}")
-
-            self.progress.emit(int((i + 1) * 100 / total))
-            time.sleep(0.1)
-
-        # Final summary
-        self.log.emit(f"Fatching completed - Used cached: {fresh_count}, Scraped fresh: {scraped_count}")
-        self.done.emit()
-
-
-
-def convert_price(price, src, dst, usd_to_inr):
-    if src == dst:
-        return price
-    if src == "USD" and dst == "INR":
-        return price * usd_to_inr
-    if src == "INR" and dst == "USD" and usd_to_inr:
-        return price / usd_to_inr
-    return price
-
-def select_tier_for_qty(tiers, required_qty):
-    if not tiers:
-        return None, None, None
-    tiers = sorted(tiers, key=lambda x: x["quantity"])
-    chosen = None
-    next_t = None
-    for t in tiers:
-        if required_qty >= t["quantity"]:
-            chosen = t
-        elif required_qty < t["quantity"] and next_t is None:
-            next_t = t
-            break
-    if chosen is None:
-        chosen = tiers[0]
-    moq = tiers[0]["quantity"]
-    return chosen, next_t, moq
-
-def choose_best_option(offers, total_required_qty, currency, usd_to_inr, package_code, L, W):
-    """
-    REVISED: Choose best option with distributor priority and corrected MOQ/Procure Qty logic
-    Priority: 1st - Digikey, 2nd - Mouser, 3rd - Others
-    MOQ = lowest available quantity tier
-    Procure Qty = follows detailed buffer rules based on package and price
-    """
-    # Distributor priority list
-    priority_list = ['Digikey', 'Mouser']
-
-    # Group offers by distributor priority
-    prioritized_offers = {d: [] for d in priority_list}
-    others = []
-
-    for off in offers:
-        dist_lower = off.get('distributor', '').lower()
-        matched = None
-        for p in priority_list:
-            if p.lower() in dist_lower:
-                prioritized_offers[p].append(off)
-                matched = p
-                break
-        if not matched:
-            others.append(off)
-
-    # Select offers to consider based on priority
-    final_offers_to_consider = []
-    for d in priority_list:
-        if prioritized_offers[d]:
-            final_offers_to_consider.extend(prioritized_offers[d])
-            break
-    else:
-        final_offers_to_consider.extend(others)
-
-    def pct_or_floor(trq, pct, floor_add):
-        return max(int(math.ceil(trq * pct / 100)), floor_add)
-
-    def calculate_procure_qty(trq, price_usd, pkg_code, max_dim):
-        """Calculate procurement quantity based on detailed rules"""
-        
-        # Special case: price > $20 USD
-        if price_usd > 10:
-            return trq if trq < 250 else trq + 1
-        
-        is_low_price = price_usd < 1.0
-        
-        # Determine package group
-        pkg_group = None
-        if pkg_code in ['0201', '0402', '0603']:
-            pkg_group = '0201-0603'
-        elif pkg_code in ['0805', '1206', '1210']:
-            pkg_group = '0805-1210'
-        elif pkg_code in ['1812', '2010', '2512', '2920']:
-            pkg_group = '1210-8060'
-        
-        if is_low_price:
-            if pkg_group == '0201-0603':
-                if trq < 100:
-                    return trq + 50
-                elif trq < 250:
-                    return trq + 80
-                elif trq < 500:
-                    return trq + pct_or_floor(trq, 15, 80)
-                elif trq < 1000:
-                    return trq + pct_or_floor(trq, 8, 80)
-                else:
-                    return trq + pct_or_floor(trq, 5, 80)
-                    
-            elif pkg_group == '0805-1210':
-                if trq < 100:
-                    return trq + 25
-                elif trq < 250:
-                    return trq + 40
-                elif trq < 500:
-                    return trq + pct_or_floor(trq, 10, 40)
-                elif trq < 1000:
-                    return trq + pct_or_floor(trq, 7, 40)
-                else:
-                    return trq + pct_or_floor(trq, 3, 40)
-                    
-            elif pkg_group == '1210-8060':
-                if trq < 100:
-                    return trq + 12
-                elif trq < 250:
-                    return trq + 20
-                elif trq < 500:
-                    return trq + pct_or_floor(trq, 5, 20)
-                elif trq < 1000:
-                    return trq + pct_or_floor(trq, 3, 20)
-                else:
-                    return trq + pct_or_floor(trq, 2, 20)
-            else:
-                # Unknown package with size info
-                if max_dim and max_dim < 5:
-                    # Use 0805-1210 logic
-                    if trq < 100:
-                        return trq + 25
-                    elif trq < 250:
-                        return trq + 40
-                    elif trq < 500:
-                        return trq + pct_or_floor(trq, 10, 40)
-                    elif trq < 1000:
-                        return trq + pct_or_floor(trq, 7, 40)
-                    else:
-                        return trq + pct_or_floor(trq, 3, 40)
-                else:
-                    # Default fallback
-                    return trq + (2 if trq < 250 else 3)
-                    
-        else: # High price (>= $1 USD)
-            if pkg_group in ['0201-0603', '0805-1210']:
-                if trq < 100:
-                    return trq + 15
-                elif trq < 250:
-                    return trq + 20
-                elif trq < 500:
-                    return trq + pct_or_floor(trq, 4, 20)
-                elif trq < 1000:
-                    return trq + pct_or_floor(trq, 3, 20)
-                else:
-                    return trq + pct_or_floor(trq, 2, 20)
-                    
-            elif pkg_group == '1210-8060':
-                if trq < 250:
-                    return trq + 5
-                elif trq < 500:
-                    return trq + pct_or_floor(trq, 3, 5)
-                elif trq < 1000:
-                    return trq + pct_or_floor(trq, 2, 5)
-                else:
-                    return trq + pct_or_floor(trq, 1, 5)
-            else:
-                # Unknown package handling
-                if max_dim and max_dim >= 5:
-                    # Use 0201-1210 high price logic
-                    if trq < 100:
-                        return trq + 15
-                    elif trq < 250:
-                        return trq + 20
-                    elif trq < 500:
-                        return trq + pct_or_floor(trq, 4, 20)
-                    elif trq < 1000:
-                        return trq + pct_or_floor(trq, 3, 20)
-                    else:
-                        return trq + pct_or_floor(trq, 2, 20)
-                elif max_dim and max_dim >= 5 and 10 <= price_usd <= 20:
-                    # Special case
-                    return trq + 1 if trq < 250 else trq + 1
-                else:
-                    return trq + (2 if trq < 250 else 3)
-        
-        return trq + 5  # Default fallback
-
-    best = None
-    for off in final_offers_to_consider:
-        tiers = off.get("price_tiers") or []
-        if not tiers:
-            continue
-
-        tiers_conv = []
-        for t in tiers:
-            price_converted = convert_price(t["price"], off.get("currency", "USD"), currency, usd_to_inr)
-            tiers_conv.append({"quantity": int(t["quantity"]), "price": float(price_converted)})
-
-        tiers_conv = sorted(tiers_conv, key=lambda x: x["quantity"])
-
-        # MOQ = lowest available quantity tier
-        moq = tiers_conv[0]["quantity"] if tiers_conv else 1
-
-        # Find tier for total_required_qty
-        chosen, next_t, _ = select_tier_for_qty(tiers_conv, total_required_qty)
-        if not chosen:
-            continue
-
-        price_usd = convert_price(chosen["price"], currency, "USD", usd_to_inr)
-        max_dim = max_dim_mm_from_package_or_size(package_code, L, W)
-        
-        # Calculate procurement quantity
-        proc_qty = calculate_procure_qty(total_required_qty, price_usd, package_code, max_dim)
-        
-        # Find the tier for procurement quantity
-        chosen_proc, next_proc, _ = select_tier_for_qty(tiers_conv, proc_qty)
-        if not chosen_proc:
-            chosen_proc = chosen
-
-        # Calculate costs: current quantity vs next tier quantity
-        cost_current = proc_qty * chosen_proc["price"]
-        cost_next = float('inf')
-        
-        if next_proc:
-            cost_next = next_proc["quantity"] * next_proc["price"]
-
-        # Choose the lower cost option
-        if cost_next < cost_current:
-            final_procure_qty = next_proc["quantity"]
-            final_unit_price = next_proc["price"]
-            final_qty_tier = next_proc["quantity"]
-            final_total_cost = cost_next
-        else:
-            final_procure_qty = proc_qty
-            final_unit_price = chosen_proc["price"]
-            final_qty_tier = chosen_proc["quantity"]
-            final_total_cost = cost_current
-
-        option = {
-            "distributor": off["distributor"],
-            "moq": moq,
-            "qty_tier": final_qty_tier,
-            "unit_price": final_unit_price,
-            "procure_qty": final_procure_qty,
-            "total_cost": final_total_cost,
-            "stock": off.get("stock", 0)
-        }
-
-        if best is None or option["total_cost"] < best["total_cost"]:
-            best = option
-
-    return best
-
-class RobustBOMLoader:
-    """Enhanced BOM file loader with better error handling and format support"""
-    
-    @staticmethod
-    def load_bom_file(file_path: str) -> pd.DataFrame:
-        """Load BOM file with robust error handling and format detection"""
-        
-        # Detect file extension
-        file_ext = os.path.splitext(file_path)[1].lower()
-        
-        try:
-            if file_ext == '.csv':
-                return RobustBOMLoader._load_csv(file_path)
-            elif file_ext in ['.xlsx', '.xls']:
-                return RobustBOMLoader._load_excel(file_path)
-            else:
-                raise ValueError(f"Unsupported file format: {file_ext}")
-        except Exception as e:
-            raise Exception(f"Failed to load BOM file: {str(e)}")
-    
-    @staticmethod
-    def _load_csv(file_path: str) -> pd.DataFrame:
-        """Load CSV file with encoding and delimiter detection"""
-        
-        # Detect encoding
-        encoding = detect_file_encoding(file_path)
-        
-        # Detect delimiter
-        delimiter = detect_csv_delimiter(file_path, encoding)
-        
-        # Try different encoding options if detection fails
-        encodings_to_try = [encoding, 'utf-8', 'utf-8-sig', 'iso-8859-1', 'cp1252']
-        
-        for enc in encodings_to_try:
-            try:
-                # Read with pandas
-                df = pd.read_csv(
-                    file_path, 
-                    delimiter=delimiter, 
-                    encoding=enc,
-                    engine='python',  # More flexible parser
-                    on_bad_lines='skip',  # Skip bad lines instead of failing
-                    dtype=str  # Read all as strings initially
-                )
-                
-                # Basic validation
-                if df.empty:
-                    raise ValueError("CSV file is empty")
-                
-                if len(df.columns) < 2:
-                    raise ValueError("CSV file must have at least 2 columns")
-                
-                # Clean up column names (remove extra whitespace)
-                df.columns = df.columns.str.strip()
-                
-                return df
-                
-            except UnicodeDecodeError:
-                continue  # Try next encoding
-            except Exception as e:
-                if enc == encodings_to_try[-1]:  # Last encoding failed
-                    raise Exception(f"Failed to read CSV: {str(e)}")
-                continue
-        
-        raise Exception("Could not read CSV file with any supported encoding")
-    
-    @staticmethod
-    def _load_excel(file_path: str) -> pd.DataFrame:
-        """Load Excel file with sheet selection and error handling"""
-        
-        try:
-            # Try to read Excel file and get sheet names
-            excel_file = pd.ExcelFile(file_path)
-            sheet_names = excel_file.sheet_names
-            
-            if len(sheet_names) == 0:
-                raise ValueError("Excel file contains no worksheets")
-            
-            # If multiple sheets, we need to let user choose
-            # For now, just use the first sheet, but in the GUI we can add sheet selection
-            selected_sheet = sheet_names[0]
-            
-            # Read the selected sheet
-            df = pd.read_excel(
-                file_path,
-                sheet_name=selected_sheet,
-                dtype=str,  # Read all as strings initially
-                engine='openpyxl'
-            )
-            
-            # Basic validation
-            if df.empty:
-                raise ValueError("Excel sheet is empty")
-            
-            if len(df.columns) < 2:
-                raise ValueError("Excel sheet must have at least 2 columns")
-            
-            # Clean up column names
-            df.columns = df.columns.str.strip()
-            
-            # Remove completely empty rows
-            df = df.dropna(how='all')
-            
-            return df
-            
-        except Exception as e:
-            raise Exception(f"Failed to read Excel file: {str(e)}")
-
-class BOMDataCache:
-    """Cache frequently accessed data to avoid repeated JSON queries"""
-    def __init__(self):
-        self.offers_cache = {}
-        self.meta_cache = {}
-        self.last_update = {}
-        
-    def get_offers(self, mpn, storage):
-        """Get cached offers or fetch from storage"""
-        if mpn not in self.offers_cache:
-            self.offers_cache[mpn] = storage.offers_by_mpn(mpn)
-            self.last_update[mpn] = time.time()
-        return self.offers_cache[mpn]
-    
-    def get_meta(self, mpn, storage):
-        """Get cached metadata or fetch from storage"""
-        if mpn not in self.meta_cache:
-            self.meta_cache[mpn] = storage.part_meta(mpn)
-            self.last_update[mpn] = time.time()
-        return self.meta_cache[mpn]
-    
-    def invalidate(self, mpn=None):
-        """Invalidate cache for specific MPN or all"""
-        if mpn:
-            self.offers_cache.pop(mpn, None)
-            self.meta_cache.pop(mpn, None)
-            self.last_update.pop(mpn, None)
-        else:
-            self.offers_cache.clear()
-            self.meta_cache.clear()
-            self.last_update.clear()
-
-
-class App(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Sienna BOM Cal V1.1                    © 2025 Sienna ECAD Technologies. All Rights Reserved.")
-        
-        logo_path = resource_path("bomlogo.ico")
-        if os.path.exists(logo_path):
-            self.setWindowIcon(QIcon(logo_path))
-        else:
-            print(f"Icon not found at: {logo_path}")
-
-        self.resize(1250, 750)
-        self.storage = JSONStorage()
-        self.client = FindchipsClient()
-        self.exchange = {"USD": 1.0, "INR": 87.0}
-        self._manufacturer_overrides = {}
-        self._package_overrides = {}
-        
-        # ADD THESE LINES:
-        self.data_cache = BOMDataCache()
-        self._calculation_in_progress = False
-        self._signal_connected = True  # NEW: Track signal connection state
-        
-        self._build_ui()
-        self._apply_white_backgrounds()
-        self.bom_df = None
-        self.loader = RobustBOMLoader()
-
-    def _build_ui(self):
-        tb = QToolBar(); self.addToolBar(tb)
-        act_open = QAction("Upload BOM", self); act_open.triggered.connect(self.on_open); tb.addAction(act_open)
-        tb.addSeparator()
-        act_fetch = QAction("Fetch Data", self); act_fetch.triggered.connect(self.on_fetch); tb.addAction(act_fetch)
-        tb.addSeparator()
-        act_export = QAction("Export to Excel", self); act_export.triggered.connect(self.on_export_smart); tb.addAction(act_export)
-
-        top = QHBoxLayout()
-
-        # MPN Column
-        mpn_layout = QHBoxLayout()
-        mpn_layout.addWidget(QLabel("MPN Column:"))
-        self.cmb_mpn = QComboBox()
-        self.cmb_mpn.setMinimumWidth(200)
-        mpn_layout.addWidget(self.cmb_mpn)
-        mpn_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        top.addLayout(mpn_layout)
-        
-
-        # QTY Column
-        qty_layout = QHBoxLayout()
-        qty_layout.addWidget(QLabel("QTY Column:"))
-        self.cmb_qty = QComboBox()
-        self.cmb_qty.setMinimumWidth(200)
-        qty_layout.addWidget(self.cmb_qty)
-        qty_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        top.addLayout(qty_layout)
-
-        # PCB Qty
-        pcb_layout = QHBoxLayout()
-        pcb_layout.addWidget(QLabel("PCB Qty:"))
-        self.sp_pcb = QSpinBox()
-        self.sp_pcb.setRange(1, 1000000)
-        self.sp_pcb.setEnabled(True)
-        self.sp_pcb.setValue(1)
-        self.sp_pcb.setMinimumWidth(150)
-        pcb_layout.addWidget(self.sp_pcb)
-        pcb_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        top.addLayout(pcb_layout)
-
-        # Currency
-        cur_layout = QHBoxLayout()
-        cur_layout.addWidget(QLabel("Currency:"))
-        self.cmb_cur = QComboBox()
-        self.cmb_cur.addItems(["USD", "INR"])
-        self.cmb_cur.setMinimumWidth(120)
-        cur_layout.addWidget(self.cmb_cur)
-        cur_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        top.addLayout(cur_layout)
-
-        # Exchange Rate
-        rate_layout = QHBoxLayout()
-        rate_layout.addWidget(QLabel("USD→INR:"))
-        self.sp_rate = QDoubleSpinBox()
-        self.sp_rate.setRange(0.01, 1000.0)
-        self.sp_rate.setDecimals(2)
-        self.sp_rate.setValue(87.0)
-        self.sp_rate.setMinimumWidth(120)
-        rate_layout.addWidget(self.sp_rate)
-        rate_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        top.addLayout(rate_layout)
-
-        img1_layout = QHBoxLayout()
-        img_label = QLabel()
-        pixmap = QPixmap(os.path.join(os.path.dirname(__file__), "SiennaLogo.png"))
-        img_label.setPixmap(pixmap.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation))
-        img_label.setMinimumWidth(80)  # Optional scaling
-        img1_layout.addWidget(img_label)
-        img1_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
-        top.addLayout(img1_layout)
-
-        # Set the layout to a widget
-        topw = QWidget()
-        topw.setLayout(top)
-
-
-        self.tabs = QTabWidget()
-        self.tbl_results = QTableWidget()
-        self.tbl_details = QTableWidget()
-        self.tabs.addTab(self.tbl_results, "BOM Results")
-        self.tabs.addTab(self.tbl_details, "Component Details")
-
-        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setMaximumHeight(160)
-        # Progress bar with cancel button
-        progress_layout = QHBoxLayout()
-        self.progress = QProgressBar()
-        self.progress.setVisible(False)
-        
-        self.cancel_btn = QPushButton("Cancel")
-        self.cancel_btn.setVisible(False)
-        self.cancel_btn.clicked.connect(self.on_cancel_scraping)
-        
-        progress_layout.addWidget(self.progress)
-        progress_layout.addWidget(self.cancel_btn)
-        progress_widget = QWidget()
-        progress_widget.setLayout(progress_layout)
-
-        spl = QSplitter(Qt.Orientation.Vertical)
-        spl.addWidget(self.tabs); spl.addWidget(self.log); spl.setStretchFactor(0, 3); spl.setStretchFactor(1, 1)
-
-        root = QVBoxLayout(); root.addWidget(topw); root.addWidget(progress_widget); root.addWidget(spl)
-        cw = QWidget(); cw.setLayout(root); self.setCentralWidget(cw)
-
-        self._setup_debounced_recalc()
-        self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
-
-    def on_cancel_scraping(self, _):
-        """Cancel the current Fatching operation"""
-        if hasattr(self, 'worker') and self.worker.isRunning():
-            self.worker.cancel()
-            self.cancel_btn.setEnabled(False)
-            self.cancel_btn.setText("Cancelling...")
-
-    def on_fetch(self, _):
-        if self.bom_df is None:
-            QMessageBox.warning(self, "Warning", "Upload BOM first")
-            return
-
-        mpn_col = self.cmb_mpn.currentText()
-        if not mpn_col:
-            QMessageBox.warning(self, "Warning", "Select MPN column")
-            return
-
-        # Get unique MPNs, handling NaN values
-        mpns = []
-        for val in self.bom_df[mpn_col].dropna().astype(str).str.strip().unique():
-            if val and val.lower() != 'nan':
-                mpns.append(val)
-
-        if not mpns:
-            QMessageBox.warning(self, "Warning", "No valid MPNs found")
-            return
-
-        # Show cache status
-        fresh_mpns = [mpn for mpn in mpns if self.storage.is_data_fresh(mpn, hours=6)]
-        stale_mpns = [mpn for mpn in mpns if not self.storage.is_data_fresh(mpn, hours=6)]
-        
-        self.log_msg(f"Starting fetch for {len(mpns)} unique MPNs")
-        self.log_msg(f"Fresh data (< 6 hours): {len(fresh_mpns)} MPNs")
-        self.log_msg(f"Will scrape: {len(stale_mpns)} MPNs")
-
-        self.progress.setVisible(True)
-        self.progress.setValue(0)
-        self.cancel_btn.setVisible(True)
-        self.cancel_btn.setEnabled(True)
-        self.cancel_btn.setText("Cancel")
-
-        self.worker = ScrapeThread(mpns, self.storage)
-        self.worker.progress.connect(self.progress.setValue)
-        self.worker.log.connect(self.log_msg)
-        self.worker.done.connect(self.on_scrape_done)
-        self.worker.start()
-
-        self._details_needs_refresh = True
-
-    # 6. UPDATE on_scrape_done to invalidate cache
-    def on_scrape_done(self):
-        self.progress.setVisible(False)
-        self.cancel_btn.setVisible(False)
-        self._details_needs_refresh = True
-        
-        # INVALIDATE CACHE after scraping new data
-        self.data_cache.invalidate()
-        
-        self.log_msg("Processing completed")
-        self.recalc_all()
-
-    def _apply_white_backgrounds(self):
-        """Apply white backgrounds to log and table widgets for better readability"""
-        white_style = """
-            background-color: white;
-            color: black;
-            border: 2px solid rgb(0, 150, 50);
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-        """
-        
-        table_style = """
-            QTableWidget {
-                background-color: white;
-                color: black;
-                border: 2px solid rgb(0, 150, 50);
-                selection-background-color: rgb(0, 150, 50);
-                selection-color: white;
-            }
-            QTableWidget::item {
-                padding: 3px;
-            }
-            QTableWidget::item:selected {
-                background-color: rgb(0, 150, 50);
-                color: white;
-            }
-            /* Horizontal headers (column headers) - GREEN background, WHITE text */
-            QHeaderView::section:horizontal {
-                background-color: rgb(0, 150, 50);
-                color: white;
-                padding: 5px;
-                border: 1px solid rgb(200, 200, 200);
-                font-weight: bold;
-                font-size: 11pt;
-            }
-            
-            /* Vertical headers (row numbers) - WHITE background, BLACK text */
-            QHeaderView::section:vertical {
-                background-color: white;
-                color: black;
-                padding: 3px;
-                border: 1px solid rgb(200, 200, 200);
-                font-weight: bold;
-            }
-            
-            /* Corner button (top-left corner) */
-            QTableCornerButton::section {
-                background-color: rgb(0, 150, 50);
-                border: 1px solid rgb(200, 200, 200);
-            }
-        """
-        
-        self.log.setStyleSheet(white_style)
-        self.tbl_results.setStyleSheet(table_style)
-        self.tbl_details.setStyleSheet(table_style)
-
-    def log_msg(self, m):
-        self.log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {m}")
-
-    def on_open(self, _):
-        path, _ = QFileDialog.getOpenFileName(
-            self, 
-            "Open BOM", 
-            "", 
-            "Excel (*.xlsx *.xls);;CSV (*.csv);;All Files (*.*)"
-        )
-        if not path: 
-            return
-        
-        try:
-            self.log_msg(f"Loading file: {os.path.basename(path)}")
-            
-            # Use robust BOM loader
-            self.bom_df = self.loader.load_bom_file(path)
-            
-            # Update UI
-            self.cmb_mpn.clear()
-            self.cmb_qty.clear()
-            cols = list(self.bom_df.columns)
-            self.cmb_mpn.addItems(cols)
-            self.cmb_qty.addItems(cols)
-            
-            # Try to auto-detect MPN and QTY columns
-            self._auto_detect_columns(cols)
-            
-            self.show_bom(self.bom_df)
-            self.populate_details_initial()
-            self.log_msg(f"Successfully loaded BOM with {len(self.bom_df)} rows and {len(self.bom_df.columns)} columns")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Error Loading BOM", str(e))
-            self.log_msg(f"Error loading BOM: {str(e)}")
-
-    def _setup_debounced_recalc(self):
-        """Setup debounced recalculation to prevent rapid-fire updates"""
-        
-        # Create debounce timer
-        self.debounce_timer = QTimer(self)
-        self.debounce_timer.setSingleShot(True)  # Only fire once
-        self.debounce_timer.setInterval(300)     # 300ms delay
-        self.debounce_timer.timeout.connect(self.recalc_all)
-        
-        # Connect signals to start/restart the debounce timer
-        self.cmb_cur.currentTextChanged.connect(self._trigger_debounced_recalc)
-        self.sp_rate.valueChanged.connect(self._trigger_debounced_recalc)
-        self.sp_pcb.valueChanged.connect(self._trigger_debounced_recalc)
-
-    def _trigger_debounced_recalc(self, _):
-        """Start/restart the debounce timer"""
-        self.debounce_timer.start()  # Restarts timer if alrea
-
-    def _auto_detect_columns(self, columns):
-        """Auto-detect MPN and QTY columns based on common naming patterns"""
-        mpn_patterns = ['mpn', 'part', 'partno', 'part_no', 'part number']
-        qty_patterns = ['qty', 'quantity']
-        
-        # Find MPN column
-        for i, col in enumerate(columns):
-            col_lower = col.lower().strip()
-            if any(pattern in col_lower for pattern in mpn_patterns):
-                self.cmb_mpn.setCurrentIndex(i)
-                break
-        
-        # Find QTY column
-        for i, col in enumerate(columns):
-            col_lower = col.lower().strip()
-            if any(pattern in col_lower for pattern in qty_patterns):
-                self.cmb_qty.setCurrentIndex(i)
-                break
-
-    def show_bom(self, df):
-        self.tbl_results.setRowCount(len(df))
-        self.tbl_results.setColumnCount(len(df.columns))
-        self.tbl_results.setHorizontalHeaderLabels(list(df.columns))
-        for r in range(len(df)):
-            for c in range(len(df.columns)):
-                val = df.iloc[r, c]
-                # Handle NaN values
-                display_val = str(val) if pd.notna(val) else ""
-                self.tbl_results.setItem(r, c, QTableWidgetItem(display_val))
-
-    def populate_details_initial(self):
-        if self.bom_df is None: 
-            return
-        self.tbl_details.setRowCount(len(self.bom_df))
-        self.tbl_details.setColumnCount(len(self.bom_df.columns))
-        self.tbl_details.setHorizontalHeaderLabels(list(self.bom_df.columns))
-        for r in range(len(self.bom_df)):
-            for c in range(len(self.bom_df.columns)):
-                val = self.bom_df.iloc[r, c]
-                display_val = str(val) if pd.notna(val) else ""
-                self.tbl_details.setItem(r, c, QTableWidgetItem(display_val))
-
-
-    def recalc_all(self):
-        if self.bom_df is None:
-            return
-        try:
-            self.calc_bom_results()
-            self.refresh_details_view()
-        except Exception as e:
-            self.log_msg(f"Recalc error: {e}")
-
-    def refresh_details_view(self):
-        if self.bom_df is None: 
-            return
-        
-        if not hasattr(self, '_details_needs_refresh'):
-            self._details_needs_refresh = True
-        
-        if not self._details_needs_refresh:
-            return
-
-        mpn_col = self.cmb_mpn.currentText() or self.bom_df.columns[0]
-        df = self.bom_df.copy()
-
-        add_cols = ["Manufacturer", "Part Type", "Life Cycle", "Package", "Size (L*W mm)", "Default Currency", "Lead Time"]
-        for col in add_cols:
-            df[col] = ""
-
-        fixed_dists = ['Digikey', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'RS Components', 'Element14']
-        max_tiers = 5
-
-        for d in fixed_dists:
-            df[f"{d} Stock"] = ""
-            for t in range(1, max_tiers + 1):
-                df[f"{d} T{t} Qty"] = ""
-                df[f"{d} T{t} Price"] = ""
-
-        for idx, row in df.iterrows():
-            mpn_val = row[mpn_col]
-            if pd.isna(mpn_val):
-                continue
-            mpn = str(mpn_val).strip()
-            if not mpn or mpn.lower() == 'nan':
-                continue
-
-            offers = self.storage.offers_by_mpn(mpn)
-            manuf = sorted({o["manufacturer"] for o in offers if o.get("manufacturer")})
-            meta = self.storage.part_meta(mpn)
-
-            df.at[idx, "Manufacturer"] = " | ".join(manuf) if manuf else ""
-            df.at[idx, "Part Type"] = meta.get("part_type", "")
-            df.at[idx, "Life Cycle"] = meta.get("life", "")
-            df.at[idx, "Lead Time"] = meta.get("lead_time", "")
-            pkg = meta.get("package") or ""
-            L = meta.get("L")
-            W = meta.get("W")
-            df.at[idx, "Package"] = pkg or ""
-            if L is not None or W is not None:
-                df.at[idx, "Size (L*W mm)"] = f"{(L or '')}*{(W or '')}"
-            df.at[idx, "Default Currency"] = meta.get("default_currency", "USD")
-
-            for o in offers:
-                dname_raw = o["distributor"] or ""
-                matched = next((d for d in fixed_dists if d.lower() in dname_raw.lower()), None)
-                if not matched:
-                    continue
-
-                df.at[idx, f"{matched} Stock"] = str(o.get("stock", 0))
-                tiers = sorted(o.get("price_tiers") or [], key=lambda x: x["quantity"])
-                for ti, t in enumerate(tiers[:max_tiers], start=1):
-                    df.at[idx, f"{matched} T{ti} Qty"] = str(t["quantity"])
-                    df.at[idx, f"{matched} T{ti} Price"] = f"{t['price']:.6f}"
-
-        self.tbl_details.setRowCount(len(df))
-        self.tbl_details.setColumnCount(len(df.columns))
-        self.tbl_details.setHorizontalHeaderLabels(list(df.columns))
-        for r in range(len(df)):
-            for c in range(len(df.columns)):
-                val = df.iloc[r, c]
-                display_val = str(val) if pd.notna(val) else ""
-                self.tbl_details.setItem(r, c, QTableWidgetItem(display_val))
-
-        self._details_needs_refresh = False
-
-    # 3. REPLACE calc_bom_results with OPTIMIZED VERSION
-    def calc_bom_results(self):
-        """Optimized BOM calculation with caching and batch processing"""
-        
-        # Prevent recursive calculations
-        if self._calculation_in_progress:
-            return
-        
-        mpn_col = self.cmb_mpn.currentText()
-        qty_col = self.cmb_qty.currentText()
-        if not mpn_col or not qty_col:
-            return
-
-        self._calculation_in_progress = True
-        
-        try:
-            df = self.bom_df.copy()
-
-            result_cols = [
-                "Part Type", "MPN", "Manufacturer", "Part Life Cycle Code", "Package",
-                "Size (L*W mm)", "Lead Time", "In Stock", "MOQ", "Total Required Qty",
-                "Procure Qty", "Distributor", "Qty Tier", "Unit Price", "PCB Per Unit Price", "Total Project Price"
-            ]
-
-            for col in result_cols:
-                df[col] = ""
-
-            pcb_qty = int(self.sp_pcb.value())
-            currency = self.cmb_cur.currentText()
-            usd_to_inr = float(self.sp_rate.value())
-
-            # OPTIMIZATION: Pre-fetch all unique MPNs at once
-            unique_mpns = set()
-            for idx, row in df.iterrows():
-                mpn_val = row[mpn_col]
-                if pd.notna(mpn_val):
-                    mpn = str(mpn_val).strip()
-                    if mpn and mpn.lower() != 'nan':
-                        unique_mpns.add(mpn)
-            
-            # OPTIMIZATION: Batch process rows
-            rows_data = []
-            for idx, row in df.iterrows():
-                mpn_val = row[mpn_col]
-                if pd.isna(mpn_val):
-                    continue
-                mpn = str(mpn_val).strip()
-                if not mpn or mpn.lower() == 'nan':
-                    continue
-
-                qty_val = row[qty_col]
-                if pd.isna(qty_val):
-                    bom_qty = 0.0
-                else:
-                    try:
-                        bom_qty = float(qty_val)
-                    except (ValueError, TypeError):
-                        bom_qty = 0.0
-                
-                total_required = int(bom_qty * pcb_qty)
-
-                # OPTIMIZATION: Use cached data instead of repeated storage queries
-                offers = self.data_cache.get_offers(mpn, self.storage)
-                meta = self.data_cache.get_meta(mpn, self.storage)
-
-                # Filter by manufacturer if user selected one
-                selected_manufacturer = self._manufacturer_overrides.get(mpn)
-                if selected_manufacturer:
-                    offers = [o for o in offers if o.get("manufacturer") == selected_manufacturer]
-                    if offers:
-                        life = next((o["life_cycle_code"] for o in offers if o.get("life_cycle_code")), "")
-                        pkg = next((o["package_code"] for o in offers if o.get("package_code")), "")
-                        L = next((o["length_mm"] for o in offers if o.get("length_mm") is not None), None)
-                        W = next((o["width_mm"] for o in offers if o.get("width_mm") is not None), None)
-                        defcur = next((o["default_currency"] for o in offers if o.get("default_currency")), "USD")
-                        ptype = next((o["part_type"] for o in offers if o.get("part_type")), "")
-                        lead = next((o["lead_time"] for o in offers if o.get("lead_time")), "")
-                        meta = {"life": life, "package": pkg, "L": L, "W": W, "default_currency": defcur, "part_type": ptype, "lead_time": lead}
-
-                pkg_code = meta.get("package") or ""
-                L = meta.get("L")
-                W = meta.get("W")
-
-                # Convert prices (this is still needed per-row)
-                offers_conv = []
-                for o in offers:
-                    tiers = []
-                    for t in o.get("price_tiers") or []:
-                        price_conv = convert_price(t["price"], o.get("currency", "USD"), currency, usd_to_inr)
-                        tiers.append({"quantity": int(t["quantity"]), "price": float(price_conv)})
-
-                    offers_conv.append({
-                        "distributor": o["distributor"], 
-                        "price_tiers": sorted(tiers, key=lambda x: x["quantity"]),
-                        "stock": o.get("stock", 0), 
-                        "currency": currency
-                    })
-
-                best = choose_best_option(offers_conv, total_required, currency, usd_to_inr, norm_eia_code(pkg_code), L, W)
-
-                # Store row data for batch update
-                row_data = {
-                    'idx': idx,
-                    'mpn': mpn,
-                    'bom_qty': bom_qty,
-                    'total_required': total_required,
-                    'best': best,
-                    'meta': meta,
-                    'offers': self.data_cache.get_offers(mpn, self.storage)  # Get from cache
-                }
-                rows_data.append(row_data)
-
-            # OPTIMIZATION: Batch update DataFrame
-            for row_data in rows_data:
-                idx = row_data['idx']
-                best = row_data['best']
-                meta = row_data['meta']
-                
-                if best:
-                    df.at[idx, "In Stock"] = str(best.get("stock", 0))
-                    df.at[idx, "MOQ"] = str(best.get("moq", ""))
-                    df.at[idx, "Total Required Qty"] = str(row_data['total_required'])
-                    df.at[idx, "Procure Qty"] = str(best.get("procure_qty", row_data['total_required']))
-                    df.at[idx, "Distributor"] = best.get("distributor", "")
-                    df.at[idx, "Qty Tier"] = str(best.get("qty_tier", ""))
-                    df.at[idx, "Unit Price"] = f"{best.get('unit_price', 0):.6f}"
-                    df.at[idx, "PCB Per Unit Price"] = f"{float(best.get('unit_price', 0)) * row_data['bom_qty']:.6f}"
-                    df.at[idx, "Total Project Price"] = f"{float(best.get('total_cost', 0)):.4f}"
-
-                df.at[idx, "Part Type"] = meta.get("part_type", "")
-                df.at[idx, "MPN"] = row_data['mpn']
-                df.at[idx, "Part Life Cycle Code"] = meta.get("life", "")
-                df.at[idx, "Package"] = meta.get("package", "")
-                df.at[idx, "Lead Time"] = meta.get("lead_time", "")
-                
-                if meta.get("L") is not None or meta.get("W") is not None:
-                    df.at[idx, "Size (L*W mm)"] = f"{(meta.get('L') or '')}*{(meta.get('W') or '')}"
-
-                # Set manufacturer
-                all_offers = row_data['offers']
-                manufacturers = sorted({o["manufacturer"] for o in all_offers if o.get("manufacturer")})
-                if manufacturers:
-                    selected_manufacturer = self._manufacturer_overrides.get(row_data['mpn'])
-                    df.at[idx, "Manufacturer"] = selected_manufacturer or manufacturers[0]
-
-            # Calculate totals
-            sums_cols = ["PCB Per Unit Price", "Total Project Price"]
-            totals = {}
-            for c in sums_cols:
-                vals = pd.to_numeric(df[c].replace("", 0), errors="coerce").fillna(0) if c in df.columns else pd.Series()
-                totals[c] = vals.sum()
-
-            # OPTIMIZATION: Disable updates during bulk changes
-            self.tbl_results.setUpdatesEnabled(False)
-            
-            # FIXED: Only disconnect if currently connected
-            if self._signal_connected:
-                try:
-                    self.tbl_results.itemChanged.disconnect(self._on_package_edit_changed)
-                    self._signal_connected = False
-                except TypeError:
-                    pass  # Already disconnected
-            
-            try:
-                self.tbl_results.setRowCount(len(df) + 1)
-                self.tbl_results.setColumnCount(len(df.columns))
-                self.tbl_results.setHorizontalHeaderLabels(list(df.columns))
-
-                # Batch update table
-                for r in range(len(df)):
-                    for c in range(len(df.columns)):
-                        col_name = df.columns[c]
-                        val = df.iloc[r, c]
-                        display_val = str(val) if pd.notna(val) else ""
-                        it = QTableWidgetItem(display_val)
-                        
-                        if col_name == "In Stock":
-                            try:
-                                s = int(display_val) if display_val else 0
-                            except Exception:
-                                s = 0
-                            if s == 0: 
-                                it.setBackground(QColor(255, 200, 200))
-                            elif s < 100: 
-                                it.setBackground(QColor(255, 255, 200))
-                            elif s < 1000: 
-                                it.setBackground(QColor(255, 255, 150))
-                            else: 
-                                it.setBackground(QColor(200, 255, 200))
-                            f = QFont(); f.setBold(True); it.setFont(f)
-                        
-                        elif col_name == "Package":
-                            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
-                            it.setBackground(QColor(240, 255, 240))
-
-                        elif col_name == "Size (L*W mm)":
-                            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
-                            it.setBackground(QColor(240, 240, 255))
-
-                        self.tbl_results.setItem(r, c, it)
-
-                # Add manufacturer dropdowns (optimized)
-                self._add_manufacturer_dropdowns_optimized(df, rows_data)
-
-                # Add totals row
-                tr = len(df)
-                for c in range(len(df.columns)):
-                    name = df.columns[c]
-                    if c == 0:
-                        tit = QTableWidgetItem("TOTAL")
-                    elif name in totals:
-                        tit = QTableWidgetItem(f"{totals[name]:.4f}")
-                    else:
-                        tit = QTableWidgetItem("")
-                    f = QFont(); f.setBold(True); tit.setFont(f); tit.setBackground(QColor(220, 220, 220))
-                    self.tbl_results.setItem(tr, c, tit)
-            
-            finally:
-                # FIXED: Only reconnect if we disconnected it
-                if not self._signal_connected:
-                    try:
-                        self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
-                        self._signal_connected = True
-                    except TypeError:
-                        pass  # Already connected
-                
-                self.tbl_results.setUpdatesEnabled(True)
-                
-        finally:
-            self._calculation_in_progress = False
-
-    # 5. MODIFY _on_package_edit_changed to invalidate cache
-    def _on_package_edit_changed(self, item):
-        """Handle manual package and size edits and update storage"""
-        if not item or self._calculation_in_progress:
-            return
-
-        # Skip last TOTAL row
-        if item.row() >= self.tbl_results.rowCount() - 1:
-            return
-
-        col = item.column()
-        header = self.tbl_results.horizontalHeaderItem(col)
-        if not header:
-            return
-        
-        col_name = header.text()
-        
-        if col_name not in ["Package", "Size (L*W mm)"]:
-            return
-
-        row = item.row()
-        mpn_col_idx = None
-        for c in range(self.tbl_results.columnCount()):
-            h = self.tbl_results.horizontalHeaderItem(c)
-            if h and h.text() == "MPN":
-                mpn_col_idx = c
-                break
-
-        if mpn_col_idx is None:
-            return
-
-        mpn_item = self.tbl_results.item(row, mpn_col_idx)
-        if not mpn_item:
-            return
-
-        mpn = mpn_item.text().strip()
-        new_value = item.text().strip()
-
-        if not mpn:
-            return
-
-        orig_meta = self.storage.part_meta(mpn)
-        
-        # Disconnect signal only if currently connected
-        if self._signal_connected:
-            try:
-                self.tbl_results.itemChanged.disconnect(self._on_package_edit_changed)
-                self._signal_connected = False
-            except TypeError:
-                pass
-        
-        try:
-            if col_name == "Package":
-                original_package = orig_meta.get("package", "")
-                if new_value != original_package:
-                    # Store the override in memory for immediate use
-                    self._package_overrides[mpn] = new_value
-                    
-                    # Also update storage for persistence
-                    rows_affected = self.storage.update_package_for_mpn(mpn, new_value)
-                    self.log_msg(f"Package updated for {mpn}: '{new_value}' - {rows_affected} records")
-                    self.data_cache.invalidate(mpn)
-                    self.recalc_all()
-                elif mpn in self._package_overrides and new_value == original_package:
-                    # User changed it back to original, remove override
-                    del self._package_overrides[mpn]
-                    self.log_msg(f"Package override removed for {mpn}")
-                    self.recalc_all()
-            
-            elif col_name == "Size (L*W mm)":
-                original_l = orig_meta.get("L")
-                original_w = orig_meta.get("W")
-                original_size = f"{(original_l or '')}*{(original_w or '')}" if (original_l is not None or original_w is not None) else ""
-                
-                if new_value != original_size:
-                    length_mm, width_mm = self._parse_size_input(new_value)
-                    
-                    if length_mm is None and width_mm is None and new_value:
-                        self.log_msg(f"Error: Invalid size format '{new_value}'")
-                        item.setText(original_size)
-                        return
-                    
-                    rows_affected = self.storage.update_size_for_mpn(mpn, length_mm, width_mm)
-                    new_size_display = f"{(length_mm or '')}*{(width_mm or '')}" if (length_mm is not None or width_mm is not None) else ""
-                    self.log_msg(f"Size updated for {mpn}: '{new_size_display}' - {rows_affected} records")
-                    item.setText(new_size_display)
-                    self.data_cache.invalidate(mpn)
-                    self.recalc_all()
-
-        except Exception as e:
-            self.log_msg(f"Error updating {col_name}: {e}")
-            if col_name == "Package":
-                item.setText(orig_meta.get("package", ""))
-            elif col_name == "Size (L*W mm)":
-                original_l = orig_meta.get("L")
-                original_w = orig_meta.get("W")
-                original_size = f"{(original_l or '')}*{(original_w or '')}" if (original_l is not None or original_w is not None) else ""
-                item.setText(original_size)
-        
-        finally:
-            # Reconnect signal only if we disconnected it
-            if not self._signal_connected:
-                try:
-                    self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
-                    self._signal_connected = True
-                except TypeError:
-                    pass
-
-    def _parse_size_input(self, size_text):
-        """Parse size input like '1.6*0.8' or '1.6x0.8' into length and width"""
-        if not size_text or size_text.strip() == "*" or size_text.strip() == "x":
-            return None, None
-
-        # Look for patterns like "1.6*0.8", "1.6x0.8", "1.6 x 0.8", etc.
-        pattern = r'([0-9]*\.?[0-9]+)\s*[*x]\s*([0-9]*\.?[0-9]+)'
-        match = re.search(pattern, size_text.strip())
-        
-        if match:
-            try:
-                length = float(match.group(1))
-                width = float(match.group(2))
-                return length, width
-            except ValueError:
-                pass
-        
-        # Try to parse single number (assume it's length only)
-        try:
-            single_value = float(size_text.strip())
-            return single_value, None
-        except ValueError:
-            pass
-        
-        return None, None
-
-    # 4. ADD OPTIMIZED MANUFACTURER DROPDOWN METHOD
-    def _add_manufacturer_dropdowns_optimized(self, df, rows_data):
-        """Optimized manufacturer dropdowns - only create when needed"""
-        if "Manufacturer" not in df.columns:
-            return
-        
-        manf_col_idx = list(df.columns).index("Manufacturer")
-        
-        # Create lookup for fast access
-        mpn_to_row = {rd['mpn']: rd for rd in rows_data}
-        
-        for r in range(len(df)):
-            mpn = df.iloc[r, list(df.columns).index("MPN")]
-            if pd.isna(mpn) or not mpn:
-                continue
-            
-            mpn = str(mpn).strip()
-            if not mpn or mpn.lower() == 'nan':
-                continue
-            
-            # Get cached offers
-            row_data = mpn_to_row.get(mpn)
-            if not row_data:
-                continue
-                
-            manufacturers = sorted({o["manufacturer"] for o in row_data['offers'] if o.get("manufacturer")})
-            
-            if len(manufacturers) <= 1:
-                continue
-            
-            # Only create dropdown if multiple manufacturers exist
-            combo = QComboBox()
-            combo.addItems(manufacturers)
-            
-            current_manf = self._manufacturer_overrides.get(mpn, manufacturers[0])
-            combo.setCurrentText(current_manf)
-            
-            # Use lambda with default argument to avoid closure issues
-            combo.currentTextChanged.connect(
-                lambda selected_manf, mpn=mpn: self._on_manufacturer_changed(mpn, selected_manf)
-            )
-            
-            self.tbl_results.setCellWidget(r, manf_col_idx, combo)
-
-    def _on_manufacturer_changed(self, mpn, selected_manufacturer):
-        """Handle manufacturer dropdown change"""
-        self._manufacturer_overrides[mpn] = selected_manufacturer
-        self.log_msg(f"Manufacturer changed for {mpn}: {selected_manufacturer}")
-        
-        # Recalculate results with new manufacturer selection
-        self.recalc_all()
-
-    def on_export_smart(self, _):
-        """Smart export - detects active tab and exports accordingly"""
-        current_tab_index = self.tabs.currentIndex()
-        current_tab_text = self.tabs.tabText(current_tab_index)
-        
-        if "Results" in current_tab_text:
-            self.on_export_results()
-        elif "Details" in current_tab_text:
-            self.on_export_details()
-        else:
-            # Default to results if unclear
-            self.on_export_results()
-
-
-    def on_export_results(self):
-        """Export BOM Results to Excel with summary table and green headers"""
-        if self.tbl_results.rowCount() == 0:
-            QMessageBox.warning(self, "Warning", "No data to export")
-            return
-
-        path, _ = QFileDialog.getSaveFileName(self, "Save Results Excel", "", "Excel (*.xlsx)")
-        if not path:
-            return
-
-        try:
-            # Get results data
-            headers = [self.tbl_results.horizontalHeaderItem(i).text() for i in range(self.tbl_results.columnCount())]
-            data = []
-            
-            for r in range(self.tbl_results.rowCount()):
-                row = []
-                for c in range(self.tbl_results.columnCount()):
-                    it = self.tbl_results.item(r, c)
-                    row.append(it.text() if it else "")
-                data.append(row)
-
-            df = pd.DataFrame(data, columns=headers)
-            
-
-            
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "BOM Results"
-            
-            # Create summary table at top
-            self._add_summary_table(ws, df)
-            
-            # Add spacing
-            current_row = ws.max_row + 3
-            
-            # Add main data table
-            for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), start=current_row):
-                for c_idx, value in enumerate(row, start=1):
-                    ws.cell(row=r_idx, column=c_idx, value=value)
-            
-            # Style the main table headers
-            self._style_table_headers(ws, current_row, len(headers))
-            
-            # Auto-adjust column widths
-            self._auto_adjust_columns(ws)
-            
-            wb.save(path)
-            self.log_msg(f"Results exported: {path}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
-            self.log_msg(f"Results export failed: {e}")
-
-    def _add_summary_table(self, ws, df):
-        """Add summary table with image at the top of the worksheet"""
-        
-        # Calculate summary statistics
-        total_rows = len(df) - 1  # Subtract TOTAL row
-        if total_rows < 0:
-            total_rows = 0
-        
-        # Try to get totals from the TOTAL row
-        total_project_cost = 0
-        total_pcb_cost = 0
-        
-        try:
-            total_row = df.iloc[-1]  # Last row should be TOTAL
-            if 'Total Project Price' in df.columns:
-                total_project_str = str(total_row['Total Project Price']).replace(',', '')
-                if total_project_str and total_project_str != 'TOTAL':
-                    total_project_cost = float(total_project_str)
-            
-            if 'PCB Per Unit Price' in df.columns:
-                total_pcb_str = str(total_row['PCB Per Unit Price']).replace(',', '')
-                if total_pcb_str and total_pcb_str != 'TOTAL':
-                    total_pcb_cost = float(total_pcb_str)
-        except:
-            pass
-        
-        currency = self.cmb_cur.currentText()
-        pcb_qty = self.sp_pcb.value()
-        
-        # Title styling
-        title_font = Font(size=16, bold=True, color="00962F")
-        header_font = Font(size=12, bold=True, color="FFFFFF")
-        value_font = Font(size=11)
-        
-        green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
-        light_green_fill = PatternFill(start_color="E8F5E8", end_color="E8F5E8", fill_type="solid")
-        
-        center_align = Alignment(horizontal="center", vertical="center")
-        
-        # Add title
-        ws['A1'] = 'Sienna ECAD Technologies'
-        ws['A1'].font = title_font
-        ws['A1'].alignment = center_align
-        ws.merge_cells('A1:F1')
-        
-        # Add summary table
-        summary_start_row = 3
-        
-        # Summary headers
-        summary_headers = [
-            ('Metric', 'A'), ('Value', 'B'), ('', 'C'), 
-            ('Metric', 'D'), ('Value', 'E'), ('Unit', 'F')
-        ]
-        
-        for header, col in summary_headers:
-            cell = ws[f'{col}{summary_start_row}']
-            cell.value = header
-            cell.font = header_font
-            cell.fill = green_fill
-            cell.alignment = center_align
-        
-        # Summary data
-        summary_data = [
-            ('Total Components', total_rows, '', 'PCB Quantity', pcb_qty, 'pcs'),
-            ('Currency', currency, '', 'PCB Unit Cost', f'{total_pcb_cost:.2f}', currency),
-            ('Project Total', f'{total_project_cost:.2f}', currency, 'Cost per PCB', f'{total_project_cost/pcb_qty if pcb_qty > 0 else 0:.2f}', f'{currency}/pcb'),
-            ('Generated On', datetime.now().strftime('%Y-%m-%d %H:%M'), '', 'Exchange Rate', f'${1:.2f} = ₹{self.sp_rate.value():.2f}' if currency == 'INR' else 'N/A', ''),
-        ]
-        
-        for row_idx, (metric1, value1, unit1, metric2, value2, unit2) in enumerate(summary_data, start=summary_start_row + 1):
-            # Left side
-            ws[f'A{row_idx}'].value = metric1
-            ws[f'B{row_idx}'].value = value1
-            ws[f'C{row_idx}'].value = unit1
-            
-            # Right side  
-            ws[f'D{row_idx}'].value = metric2
-            ws[f'E{row_idx}'].value = value2
-            ws[f'F{row_idx}'].value = unit2
-            
-            # Style alternating rows
-            fill = light_green_fill if row_idx % 2 == 0 else PatternFill()
-            for col in ['A', 'B', 'C', 'D', 'E', 'F']:
-                cell = ws[f'{col}{row_idx}']
-                cell.fill = fill
-                cell.alignment = center_align if col in ['B', 'E', 'F'] else Alignment(horizontal="left", vertical="center")
-
-    def _style_table_headers(self, ws, header_row, num_cols):
-        """Apply green background and white text to table headers"""
-        
-        green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
-        white_font = Font(color="FFFFFF", bold=True, size=11)
-        center_alignment = Alignment(horizontal="center", vertical="center")
-        
-        for col in range(1, num_cols + 1):
-            cell = ws.cell(row=header_row, column=col)
-            cell.fill = green_fill
-            cell.font = white_font
-            cell.alignment = center_alignment
-
-    def _auto_adjust_columns(self, ws):
-        """Auto-adjust column widths based on content - handles merged cells"""
-        
-        # Get column letters and calculate max widths
-        column_widths = {}
-        
-        for row in ws.iter_rows():
-            for cell in row:
-                # Skip merged cells
-                if isinstance(cell, MergedCell):
-                    continue
-                    
-                column_letter = cell.column_letter
-                
-                try:
-                    # Calculate content length
-                    content_length = len(str(cell.value)) if cell.value is not None else 0
-                    
-                    # Update max width for this column
-                    if column_letter not in column_widths:
-                        column_widths[column_letter] = content_length
-                    else:
-                        column_widths[column_letter] = max(column_widths[column_letter], content_length)
-                        
-                except Exception:
-                    continue
-        
-        # Apply calculated widths
-        for column_letter, max_length in column_widths.items():
-            adjusted_width = min(max_length + 2, 50)  # Add padding, cap at 50
-            ws.column_dimensions[column_letter].width = adjusted_width
-
-
-    def on_export_details(self):
-        """Export Component Details view to Excel with styling"""
-        if self.tbl_details.rowCount() == 0:
-            QMessageBox.warning(self, "Warning", "No details data to export")
-            return
-
-        path, _ = QFileDialog.getSaveFileName(self, "Save Details Excel", "", "Excel (*.xlsx)")
-        if not path:
-            return
-
-        try:
-            # Get data from details table
-            headers = [self.tbl_details.horizontalHeaderItem(i).text() for i in range(self.tbl_details.columnCount())]
-            data = []
-            
-            for r in range(self.tbl_details.rowCount()):
-                row = []
-                for c in range(self.tbl_details.columnCount()):
-                    it = self.tbl_details.item(r, c)
-                    row.append(it.text() if it else "")
-                data.append(row)
-
-            # Create DataFrame and export with custom styling
-            df = pd.DataFrame(data, columns=headers)
-            
-
-            
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Component Details"
-            
-            # Add DataFrame to worksheet
-            for r in dataframe_to_rows(df, index=False, header=True):
-                ws.append(r)
-            
-            # Style headers - Green background, white text
-            green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
-            white_font = Font(color="FFFFFF", bold=True, size=11)
-            center_alignment = Alignment(horizontal="center", vertical="center")
-            
-            # Apply header styling to first row
-            for col in range(1, len(headers) + 1):
-                cell = ws.cell(row=1, column=col)
-                cell.fill = green_fill
-                cell.font = white_font
-                cell.alignment = center_alignment
-            
-            # Auto-adjust column widths
-            for column in ws.columns:
-                max_length = 0
-                column_letter = column[0].column_letter
-                for cell in column:
-                    try:
-                        if len(str(cell.value)) > max_length:
-                            max_length = len(str(cell.value))
-                    except:
-                        pass
-                adjusted_width = min(max_length + 2, 50)
-                ws.column_dimensions[column_letter].width = adjusted_width
-            
-            wb.save(path)
-            self.log_msg(f"Details exported: {path}")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Export Error", str(e))
-            self.log_msg(f"Details export failed: {e}")
-
-
-
-def run_app():
-    app = QApplication(sys.argv)
-    
-    # Apply dark green theme to the entire application
-    apply_dark_green_theme(app)
-    
-    # Create and show the main window
-    w = App()
-    w.show()
-    
-    # Set window icon if desired
-    w.setWindowIcon(w.style().standardIcon(w.style().StandardPixmap.SP_ComputerIcon))
-    
-    sys.exit(app.exec())
-
-# Optional: still run if executing directly
-if __name__ == "__main__":
-    run_app()
+// ============================================================================
+// Database Models
+// ============================================================================
+
+type User struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Username     string    `gorm:"unique;not null" json:"username"`
+	Email        string    `gorm:"unique;not null" json:"email"`
+	PasswordHash string    `gorm:"not null" json:"-"`
+	Role         string    `gorm:"default:'employee'" json:"role"`
+	CreatedAt    time.Time `gorm:"default:current_timestamp" json:"created_at"`
+}
+
+type Project struct {
+	ID                      uint      `gorm:"primaryKey" json:"id"`
+	Name                    string    `gorm:"not null" json:"name"`
+	Description             string    `gorm:"type:text" json:"description"`
+	Status                  string    `gorm:"default:'active'" json:"status"`
+	StartDate               time.Time `gorm:"type:date" json:"start_date"`
+	EndDate                 time.Time `gorm:"type:date" json:"end_date"`
+	Progress                int       `gorm:"default:0" json:"progress"`
+	CreatedBy               uint      `json:"created_by"`
+	CreatedAt               time.Time `gorm:"default:current_timestamp" json:"created_at"`
+	WorkingSaturdays        string    `gorm:"type:text;default:'[]'" json:"working_saturdays"` // Stored as JSON string
+	CurrentRescheduleNumber int       `gorm:"default:0" json:"current_reschedule_number"`
+}
+
+type ProjectStage struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	ProjectID    uint      `gorm:"not null" json:"project_id"`
+	Name         string    `gorm:"not null" json:"name"`
+	Order        int       `gorm:"not null" json:"order"`
+	DurationDays int       `gorm:"default:0" json:"duration_days"`
+	Status       string    `gorm:"default:'pending'" json:"status"`
+	Progress     int       `gorm:"default:0" json:"progress"`
+	StartDate    time.Time `gorm:"type:date" json:"start_date"`
+	EndDate      time.Time `gorm:"type:date" json:"end_date"`
+	ManagerID    *uint     `json:"manager_id"`
+}
+
+type ProjectMember struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	ProjectID uint      `gorm:"not null" json:"project_id"`
+	UserID    uint      `gorm:"not null" json:"user_id"`
+	AddedAt   time.Time `gorm:"default:current_timestamp" json:"added_at"`
+}
+
+type Task struct {
+	ID          uint       `gorm:"primaryKey" json:"id"`
+	Title       string     `gorm:"not null" json:"title"`
+	Description string     `gorm:"type:text" json:"description"`
+	ProjectID   *uint      `json:"project_id"`
+	AssignedTo  *uint      `json:"assigned_to"`
+	Priority    string     `gorm:"default:'medium'" json:"priority"`
+	Status      string     `gorm:"default:'pending'" json:"status"`
+	Deadline    *time.Time `gorm:"type:date" json:"deadline"`
+	CreatedAt   time.Time  `gorm:"default:current_timestamp" json:"created_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+}
+
+type ScheduleHistory struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	ProjectID        uint      `gorm:"not null" json:"project_id"`
+	StageID          *uint     `json:"stage_id"`
+	RescheduleNumber int       `gorm:"default:1" json:"reschedule_number"`
+	OriginalDate     time.Time `gorm:"type:date" json:"original_date"`
+	NewDate          time.Time `gorm:"type:date" json:"new_date"`
+	Reason           string    `gorm:"type:text" json:"reason"`
+	RescheduledBy    uint      `json:"rescheduled_by"`
+	RescheduledAt    time.Time `gorm:"default:current_timestamp" json:"rescheduled_at"`
+}
+
+type Notification struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    uint      `gorm:"not null" json:"user_id"`
+	Message   string    `gorm:"not null" json:"message"`
+	IsRead    bool      `gorm:"default:false" json:"is_read"`
+	CreatedAt time.Time `gorm:"default:current_timestamp" json:"created_at"`
+}
+
+type ActivityLog struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	UserID    uint      `gorm:"not null" json:"user_id"`
+	Action    string    `gorm:"not null" json:"action"`
+	Timestamp time.Time `gorm:"default:current_timestamp" json:"timestamp"`
+}
+
+type StageDailyTask struct {
+	ID                 uint       `gorm:"primaryKey" json:"id"`
+	StageID            uint       `gorm:"not null" json:"stage_id"`
+	ProjectID          uint       `gorm:"not null" json:"project_id"`
+	DayNumber          int        `gorm:"not null" json:"day_number"`
+	ScheduledDate      time.Time  `gorm:"type:date;not null" json:"scheduled_date"`
+	OriginalDate       *time.Time `gorm:"type:date" json:"original_date"`
+	Status             string     `gorm:"default:'pending'" json:"status"`
+	CompletedAt        *time.Time `json:"completed_at"`
+	RescheduledReason  string     `gorm:"type:text" json:"rescheduled_reason"`
+	RescheduleCount    int        `gorm:"default:0" json:"reschedule_count"`
+	CreatedAt          time.Time  `gorm:"default:current_timestamp" json:"created_at"`
+}
+
+type DailyTaskRescheduleHistory struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	ProjectID        uint      `gorm:"not null" json:"project_id"`
+	StageID          uint      `gorm:"not null" json:"stage_id"`
+	TaskID           uint      `gorm:"not null" json:"task_id"`
+	DayNumber        int       `gorm:"not null" json:"day_number"`
+	RescheduleNumber int       `gorm:"default:1" json:"reschedule_number"`
+	OriginalDate     time.Time `gorm:"type:date;not null" json:"original_date"`
+	NewDate          time.Time `gorm:"type:date;not null" json:"new_date"`
+	DaysShifted      int       `gorm:"not null" json:"days_shifted"`
+	Reason           string    `gorm:"type:text" json:"reason"`
+	RescheduledBy    uint      `json:"rescheduled_by"`
+	RescheduledAt    time.Time `gorm:"default:current_timestamp" json:"rescheduled_at"`
+}
+
+type HoldDate struct {
+	ID        uint      `gorm:"primaryKey" json:"id"`
+	ProjectID uint      `gorm:"not null" json:"project_id"`
+	StageID   uint      `gorm:"not null" json:"stage_id"`
+	HoldDate  time.Time `gorm:"type:date;not null" json:"hold_date"`
+	Reason    string    `gorm:"type:text" json:"reason"`
+	CreatedBy uint      `json:"created_by"`
+	CreatedAt time.Time `gorm:"default:current_timestamp" json:"created_at"`
+}
+
+// ============================================================================
+// Configuration Constants
+// ============================================================================
+
+var DEFAULT_STAGES = []map[string]interface{}{
+	{"name": "Foot prints - library - FP-LIB", "order": 1, "duration_days": 3},
+	{"name": "Scrubbing - SCRB", "order": 2, "duration_days": 2},
+	{"name": "Schematic - SCH", "order": 3, "duration_days": 7},
+	{"name": "Length Matching - LM", "order": 4, "duration_days": 4},
+	{"name": "Deliverables - DLBS", "order": 5, "duration_days": 3},
+	{"name": "Placement - PLC", "order": 6, "duration_days": 5},
+	{"name": "Placement - review - PLC-R", "order": 7, "duration_days": 3},
+	{"name": "Routing - RTNG", "order": 8, "duration_days": 2},
+	{"name": "Routing - Review - RTNG-R", "order": 9, "duration_days": 7},
+	{"name": "Post Screen - P-SI", "order": 10, "duration_days": 4},
+	{"name": "Fan out - FNT", "order": 11, "duration_days": 3},
+	{"name": "Silk Screen - SLK", "order": 12, "duration_days": 5},
+	{"name": "Approval - APRVL", "order": 13, "duration_days": 3},
+	{"name": "Fab setup - FB-STP", "order": 14, "duration_days": 5},
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+func getCurrentUser(c *gin.Context) *User {
+	session := sessions.Default(c)
+	userID := session.Get("user_id")
+	if userID == nil {
+		return nil
+	}
+	var user User
+	if err := db.First(&user, userID).Error; err != nil {
+		return nil
+	}
+	return &user
+}
+
+func logActivity(userID uint, action string) {
+	logEntry := ActivityLog{UserID: userID, Action: action, Timestamp: time.Now()}
+	db.Create(&logEntry)
+}
+
+func createNotification(userID uint, message string) {
+	notif := Notification{UserID: userID, Message: message, IsRead: false}
+	db.Create(&notif)
+}
+
+// Auth Middleware
+func AuthRequired() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		session := sessions.Default(c)
+		user := session.Get("user_id")
+		if user == nil {
+			// If it's an API call, return 401, otherwise redirect
+			if strings.HasPrefix(c.Request.URL.Path, "/api/") {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+			} else {
+				c.Redirect(http.StatusFound, "/login")
+			}
+			c.Abort()
+			return
+		}
+		c.Next()
+	}
+}
+
+// Date Logic Helpers
+func isWorkingDay(date time.Time, includeSaturday bool, workingSaturdays map[string]bool) bool {
+	weekday := date.Weekday()
+	dateStr := date.Format("2006-01-02")
+
+	if weekday == time.Sunday {
+		return false
+	}
+	if weekday == time.Saturday {
+		if _, exists := workingSaturdays[dateStr]; exists {
+			return true
+		}
+		return false
+	}
+	return true
+}
+
+func addWorkingDays(startDate time.Time, days int, includeSaturday bool, workingSaturdays map[string]bool) time.Time {
+	if days == 0 {
+		return startDate
+	}
+	currentDate := startDate
+	direction := 1
+	if days < 0 {
+		direction = -1
+	}
+	daysRemaining := abs(days)
+
+	for daysRemaining > 0 {
+		currentDate = currentDate.AddDate(0, 0, direction)
+		if isWorkingDay(currentDate, includeSaturday, workingSaturdays) {
+			daysRemaining--
+		}
+	}
+	return currentDate
+}
+
+func getNextWorkingDay(date time.Time, includeSaturday bool, workingSaturdays map[string]bool) time.Time {
+	checkDate := date
+	for !isWorkingDay(checkDate, includeSaturday, workingSaturdays) {
+		checkDate = checkDate.AddDate(0, 0, 1)
+	}
+	return checkDate
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// Struct for calculation stages
+type StageCalculation struct {
+	Name         string    `json:"name"`
+	Order        int       `json:"order"`
+	DurationDays int       `json:"duration_days"`
+	StartDate    time.Time `json:"start_date"`
+	EndDate      time.Time `json:"end_date"`
+	ManagerID    *uint     `json:"manager_id"`
+}
+
+type StageInput struct {
+	Name         string `json:"name"`
+	Order        int    `json:"order"`
+	DurationDays int    `json:"duration_days"`
+	StartDate    string `json:"start_date"` // "YYYY-MM-DD"
+	ManagerID    *uint  `json:"manager_id"`
+}
+
+func calculateStageDates(projectStartDate time.Time, stagesData []StageInput, includeSaturday bool, workingSaturdays map[string]bool) []StageCalculation {
+	var calculatedStages []StageCalculation
+	currentDate := getNextWorkingDay(projectStartDate, false, workingSaturdays)
+
+	for _, stageInfo := range stagesData {
+		var stageStartDate time.Time
+		if stageInfo.StartDate != "" {
+			parsedStart, _ := time.Parse("2006-01-02", stageInfo.StartDate)
+			stageStartDate = getNextWorkingDay(parsedStart, false, workingSaturdays)
+		} else {
+			stageStartDate = currentDate
+		}
+
+		duration := stageInfo.DurationDays
+		if duration == 0 {
+			duration = 1
+		}
+		
+		var stageEndDate time.Time
+		if stageInfo.DurationDays > 0 {
+			stageEndDate = addWorkingDays(stageStartDate, stageInfo.DurationDays-1, false, workingSaturdays)
+		} else {
+			stageEndDate = stageStartDate
+		}
+
+		calculatedStages = append(calculatedStages, StageCalculation{
+			Name:         stageInfo.Name,
+			Order:        stageInfo.Order,
+			DurationDays: stageInfo.DurationDays,
+			StartDate:    stageStartDate,
+			EndDate:      stageEndDate,
+			ManagerID:    stageInfo.ManagerID,
+		})
+
+		if stageInfo.StartDate == "" {
+			currentDate = addWorkingDays(stageEndDate, 1, false, workingSaturdays)
+		}
+	}
+	return calculatedStages
+}
+
+func generateDailyTasksForProject(projectID uint, workingSaturdays map[string]bool) error {
+	var project Project
+	if err := db.First(&project, projectID).Error; err != nil {
+		return err
+	}
+
+	var stages []ProjectStage
+	db.Where("project_id = ?", projectID).Order("\"order\" asc").Find(&stages)
+
+	for _, stage := range stages {
+		// Delete existing
+		db.Where("stage_id = ?", stage.ID).Delete(&StageDailyTask{})
+
+		if stage.StartDate.IsZero() || stage.EndDate.IsZero() {
+			continue
+		}
+
+		currentDate := stage.StartDate
+		dayNumber := 1
+
+		for !currentDate.After(stage.EndDate) {
+			if isWorkingDay(currentDate, false, workingSaturdays) {
+				task := StageDailyTask{
+					StageID:       stage.ID,
+					ProjectID:     projectID,
+					DayNumber:     dayNumber,
+					ScheduledDate: currentDate,
+					Status:        "pending",
+				}
+				db.Create(&task)
+				dayNumber++
+			}
+			currentDate = currentDate.AddDate(0, 0, 1)
+		}
+	}
+	return nil
+}
+
+func updateProjectProgress(projectID uint) {
+	var stages []ProjectStage
+	db.Where("project_id = ?", projectID).Find(&stages)
+
+	if len(stages) == 0 {
+		return
+	}
+
+	totalProgress := 0
+	completedCount := 0
+	inProgressCount := 0
+
+	for _, s := range stages {
+		totalProgress += s.Progress
+		if s.Status == "completed" {
+			completedCount++
+		}
+		if s.Status == "in-progress" {
+			inProgressCount++
+		}
+	}
+
+	avgProgress := totalProgress / len(stages)
+	
+	status := "active"
+	if completedCount == len(stages) {
+		status = "completed"
+	} else if inProgressCount > 0 || completedCount > 0 {
+		status = "active"
+	}
+
+	db.Model(&Project{}).Where("id = ?", projectID).Updates(map[string]interface{}{
+		"progress": avgProgress,
+		"status":   status,
+	})
+}
+
+// ============================================================================
+// Controllers / Handlers
+// ============================================================================
+
+func loginHandler(c *gin.Context) {
+	if c.Request.Method == "GET" {
+		c.HTML(http.StatusOK, "login.html", nil)
+		return
+	}
+
+	var input struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "Invalid input"})
+		return
+	}
+
+	var user User
+	if err := db.Where("username = ?", input.Username).First(&user).Error; err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Invalid credentials"})
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(input.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"success": false, "message": "Invalid credentials"})
+		return
+	}
+
+	session := sessions.Default(c)
+	session.Set("user_id", user.ID)
+	session.Set("username", user.Username)
+	session.Save()
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+func logoutHandler(c *gin.Context) {
+	session := sessions.Default(c)
+	session.Clear()
+	session.Save()
+	c.Redirect(http.StatusFound, "/login")
+}
+
+func createProjectHandler(c *gin.Context) {
+	var input struct {
+		Name             string       `json:"name"`
+		Description      string       `json:"description"`
+		StartDate        string       `json:"start_date"` // YYYY-MM-DD
+		IncludeSaturday  bool         `json:"include_saturday"`
+		WorkingSaturdays []string     `json:"working_saturdays"`
+		Stages           []StageInput `json:"stages"`
+		Members          []uint       `json:"members"`
+	}
+
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user := getCurrentUser(c)
+	
+	// Parse Start Date
+	projectStartDate := time.Now()
+	if input.StartDate != "" {
+		parsed, err := time.Parse("2006-01-02", input.StartDate)
+		if err == nil {
+			projectStartDate = parsed
+		}
+	}
+
+	// Prepare Working Saturdays Set
+	wsMap := make(map[string]bool)
+	for _, d := range input.WorkingSaturdays {
+		wsMap[d] = true
+	}
+	wsJSON, _ := json.Marshal(input.WorkingSaturdays)
+
+	// Calculate Stages
+	calcStages := calculateStageDates(projectStartDate, input.Stages, input.IncludeSaturday, wsMap)
+
+	projectEndDate := projectStartDate
+	if len(calcStages) > 0 {
+		projectEndDate = calcStages[len(calcStages)-1].EndDate
+	}
+
+	// Transaction
+	tx := db.Begin()
+
+	project := Project{
+		Name:             input.Name,
+		Description:      input.Description,
+		StartDate:        projectStartDate,
+		EndDate:          projectEndDate,
+		CreatedBy:        user.ID,
+		WorkingSaturdays: string(wsJSON),
+	}
+
+	if err := tx.Create(&project).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	for _, cs := range calcStages {
+		stage := ProjectStage{
+			ProjectID:    project.ID,
+			Name:         cs.Name,
+			Order:        cs.Order,
+			DurationDays: cs.DurationDays,
+			StartDate:    cs.StartDate,
+			EndDate:      cs.EndDate,
+			ManagerID:    cs.ManagerID,
+		}
+		tx.Create(&stage)
+	}
+
+	for _, memberID := range input.Members {
+		member := ProjectMember{ProjectID: project.ID, UserID: memberID}
+		tx.Create(&member)
+		// Notification would go here (need helper inside tx)
+	}
+
+	tx.Commit()
+
+	// Generate Daily Tasks (post commit)
+	generateDailyTasksForProject(project.ID, wsMap)
+	logActivity(user.ID, fmt.Sprintf("Created job: %s", project.Name))
+
+	c.JSON(http.StatusCreated, gin.H{"success": true, "id": project.ID})
+}
+
+func getProjectDetailsHandler(c *gin.Context) {
+	idStr := c.Param("project_id")
+	pid, _ := strconv.Atoi(idStr)
+	projectID := uint(pid)
+
+	var project Project
+	if err := db.First(&project, projectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	var stages []ProjectStage
+	db.Where("project_id = ?", projectID).Order("\"order\" asc").Find(&stages)
+
+	var tasks []Task
+	db.Where("project_id = ?", projectID).Find(&tasks)
+
+	var members []ProjectMember
+	db.Where("project_id = ?", projectID).Find(&members)
+
+	var history []ScheduleHistory
+	db.Where("project_id = ?", projectID).Order("rescheduled_at desc").Find(&history)
+
+	// Parse JSON
+	var wsList []string
+	json.Unmarshal([]byte(project.WorkingSaturdays), &wsList)
+
+	// Build Response
+	memberList := []gin.H{}
+	for _, m := range members {
+		var u User
+		db.First(&u, m.UserID)
+		memberList = append(memberList, gin.H{
+			"id": u.ID, "username": u.Username, "email": u.Email,
+		})
+	}
+
+	// Task Stats
+	taskStats := map[string]int{"pending": 0, "in-progress": 0, "completed": 0}
+	for _, t := range tasks {
+		taskStats[t.Status]++
+	}
+
+	// Stage Completion
+	completedStages := 0
+	for _, s := range stages {
+		if s.Status == "completed" {
+			completedStages++
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":                  project.ID,
+		"name":                project.Name,
+		"description":         project.Description,
+		"status":              project.Status,
+		"progress":            project.Progress,
+		"start_date":          project.StartDate.Format("2006-01-02"),
+		"end_date":            project.EndDate.Format("2006-01-02"),
+		"saturdayWorkingDays": wsList,
+		"stages":              stages,
+		"members":             memberList,
+		"task_stats":          taskStats,
+		"stage_completion": gin.H{
+			"completed": completedStages,
+			"total":     len(stages),
+		},
+		"schedule_history": history,
+	})
+}
+
+func rescheduleStageHandler(c *gin.Context) {
+	idStr := c.Param("project_id")
+	pid, _ := strconv.Atoi(idStr)
+	projectID := uint(pid)
+
+	var input struct {
+		StageID          uint     `json:"stage_id"`
+		Days             int      `json:"days"`
+		Reason           string   `json:"reason"`
+		WorkingSaturdays []string `json:"working_saturdays"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	user := getCurrentUser(c)
+
+	var project Project
+	if err := db.First(&project, projectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	var stage ProjectStage
+	if err := db.First(&stage, input.StageID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Stage not found"})
+		return
+	}
+
+	// Logic
+	project.CurrentRescheduleNumber++
+	globalResNum := project.CurrentRescheduleNumber
+
+	wsMap := make(map[string]bool)
+	for _, d := range input.WorkingSaturdays {
+		wsMap[d] = true
+	}
+
+	originalStart := stage.StartDate
+	originalEnd := stage.EndDate
+
+	// Calculate HOLD dates
+	if input.Days != 0 && !originalStart.IsZero() && !originalEnd.IsZero() {
+		// Collect original working dates
+		origDates := make(map[string]bool)
+		curr := originalStart
+		for !curr.After(originalEnd) {
+			if isWorkingDay(curr, false, wsMap) {
+				origDates[curr.Format("2006-01-02")] = true
+			}
+			curr = curr.AddDate(0, 0, 1)
+		}
+
+		newStart := addWorkingDays(originalStart, input.Days, false, wsMap)
+		newEnd := addWorkingDays(originalEnd, input.Days, false, wsMap)
+
+		// Collect new working dates
+		newDates := make(map[string]bool)
+		curr = newStart
+		for !curr.After(newEnd) {
+			if isWorkingDay(curr, false, wsMap) {
+				newDates[curr.Format("2006-01-02")] = true
+			}
+			curr = curr.AddDate(0, 0, 1)
+		}
+
+		// Find diff -> Hold Dates
+		for dStr := range origDates {
+			if !newDates[dStr] {
+				hDate, _ := time.Parse("2006-01-02", dStr)
+				db.Create(&HoldDate{
+					ProjectID: projectID,
+					StageID:   stage.ID,
+					HoldDate:  hDate,
+					Reason:    input.Reason,
+					CreatedBy: user.ID,
+				})
+			}
+		}
+
+		// Update Stage Dates
+		stage.StartDate = newStart
+		stage.EndDate = newEnd
+		db.Save(&stage)
+
+		// Update Subsequent Stages
+		var subsequentStages []ProjectStage
+		db.Where("project_id = ? AND \"order\" > ? AND status != 'completed'", projectID, stage.Order).Order("\"order\" asc").Find(&subsequentStages)
+
+		for _, sub := range subsequentStages {
+			if !sub.StartDate.IsZero() {
+				sub.StartDate = addWorkingDays(sub.StartDate, input.Days, false, wsMap)
+			}
+			if !sub.EndDate.IsZero() {
+				sub.EndDate = addWorkingDays(sub.EndDate, input.Days, false, wsMap)
+			}
+			db.Save(&sub)
+		}
+	}
+
+	// Create History
+	history := ScheduleHistory{
+		ProjectID:        projectID,
+		StageID:          &stage.ID,
+		RescheduleNumber: globalResNum,
+		OriginalDate:     originalStart,
+		NewDate:          stage.StartDate,
+		Reason:           input.Reason,
+		RescheduledBy:    user.ID,
+	}
+	db.Create(&history)
+
+	// Update Project Metadata
+	var allStages []ProjectStage
+	db.Where("project_id = ?", projectID).Find(&allStages)
+	maxEnd := time.Time{}
+	for _, s := range allStages {
+		if s.EndDate.After(maxEnd) {
+			maxEnd = s.EndDate
+		}
+	}
+	wsJSON, _ := json.Marshal(input.WorkingSaturdays)
+	project.EndDate = maxEnd
+	project.WorkingSaturdays = string(wsJSON)
+	db.Save(&project)
+
+	// Regenerate Daily Tasks
+	generateDailyTasksForProject(projectID, wsMap)
+
+	logActivity(user.ID, fmt.Sprintf("Rescheduled stage '%s' (Global #%d)", stage.Name, globalResNum))
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":           true,
+		"reschedule_number": globalResNum,
+		"new_start":         stage.StartDate.Format("2006-01-02"),
+		"new_end":           stage.EndDate.Format("2006-01-02"),
+	})
+}
+
+func rescheduleDailyTaskHandler(c *gin.Context) {
+	// Parse params
+	pid, _ := strconv.Atoi(c.Param("project_id"))
+	sid, _ := strconv.Atoi(c.Param("stage_id"))
+	tid, _ := strconv.Atoi(c.Param("task_id"))
+	projectID, stageID, taskID := uint(pid), uint(sid), uint(tid)
+
+	var input struct {
+		Days             int      `json:"days"`
+		Reason           string   `json:"reason"`
+		WorkingSaturdays []string `json:"working_saturdays"`
+	}
+	if err := c.ShouldBindJSON(&input); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	
+	user := getCurrentUser(c)
+	
+	var task StageDailyTask
+	if err := db.First(&task, taskID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	}
+	
+	if task.Status == "completed" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot reschedule completed task"})
+		return
+	}
+
+	var project Project
+	db.First(&project, projectID)
+	project.CurrentRescheduleNumber++
+	globalResNum := project.CurrentRescheduleNumber
+	db.Save(&project)
+
+	task.RescheduleCount++
+	
+	originalDate := task.ScheduledDate
+	if task.OriginalDate != nil {
+		originalDate = *task.OriginalDate
+	}
+	
+	if task.OriginalDate == nil {
+		cp := task.ScheduledDate
+		task.OriginalDate = &cp
+	}
+
+	wsMap := make(map[string]bool)
+	for _, d := range input.WorkingSaturdays {
+		wsMap[d] = true
+	}
+
+	newDate := addWorkingDays(task.ScheduledDate, input.Days, false, wsMap)
+	task.ScheduledDate = newDate
+	task.Status = "rescheduled"
+	task.RescheduledReason = input.Reason
+	db.Save(&task)
+
+	// Create Histories
+	taskHist := DailyTaskRescheduleHistory{
+		ProjectID: projectID, StageID: stageID, TaskID: taskID,
+		DayNumber: task.DayNumber, RescheduleNumber: globalResNum,
+		OriginalDate: originalDate, NewDate: newDate,
+		DaysShifted: abs(input.Days), Reason: input.Reason,
+		RescheduledBy: user.ID,
+	}
+	db.Create(&taskHist)
+
+	// Also stage history for excel compatibility
+	var stage ProjectStage
+	db.First(&stage, stageID)
+	stageHist := ScheduleHistory{
+		ProjectID: projectID, StageID: &stageID, RescheduleNumber: globalResNum,
+		OriginalDate: stage.StartDate, NewDate: newDate, 
+		Reason: fmt.Sprintf("Daily task reschedule: Day %d", task.DayNumber),
+		RescheduledBy: user.ID,
+	}
+	db.Create(&stageHist)
+
+	// Update Subsequent
+	var nextTasks []StageDailyTask
+	db.Where("stage_id = ? AND day_number > ? AND status != 'completed'", stageID, task.DayNumber).Find(&nextTasks)
+	for _, nt := range nextTasks {
+		nt.RescheduleCount++
+		ntOrig := nt.ScheduledDate
+		if nt.OriginalDate != nil {
+			ntOrig = *nt.OriginalDate
+		} else {
+			cp := nt.ScheduledDate
+			nt.OriginalDate = &cp
+		}
+
+		newNextDate := addWorkingDays(nt.ScheduledDate, input.Days, false, wsMap)
+		nt.ScheduledDate = newNextDate
+		nt.Status = "rescheduled"
+		if nt.RescheduledReason == "" {
+			nt.RescheduledReason = fmt.Sprintf("Auto-shifted due to Day %d", task.DayNumber)
+		}
+		db.Save(&nt)
+
+		db.Create(&DailyTaskRescheduleHistory{
+			ProjectID: projectID, StageID: stageID, TaskID: nt.ID,
+			DayNumber: nt.DayNumber, RescheduleNumber: globalResNum,
+			OriginalDate: ntOrig, NewDate: newNextDate,
+			DaysShifted: abs(input.Days), Reason: "Auto-reschedule",
+			RescheduledBy: user.ID,
+		})
+	}
+
+	// Update Stage Range
+	var allTasks []StageDailyTask
+	db.Where("stage_id = ?", stageID).Order("scheduled_date asc").Find(&allTasks)
+	if len(allTasks) > 0 {
+		stage.StartDate = allTasks[0].ScheduledDate
+		stage.EndDate = allTasks[len(allTasks)-1].ScheduledDate
+		db.Save(&stage)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "new_date": newDate})
+}
+
+func exportExcelHandler(c *gin.Context) {
+	pid, _ := strconv.Atoi(c.Param("project_id"))
+	projectID := uint(pid)
+
+	var project Project
+	if err := db.First(&project, projectID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	var stages []ProjectStage
+	db.Where("project_id = ?", projectID).Order("\"order\" asc").Find(&stages)
+
+	// Parse Saturdays
+	wsMap := make(map[string]bool)
+	var wsList []string
+	if err := json.Unmarshal([]byte(project.WorkingSaturdays), &wsList); err == nil {
+		for _, s := range wsList {
+			wsMap[s] = true
+		}
+	}
+
+	// 1. Prepare Reschedule Map
+	// Map: row (1-4) -> date string -> list of stage abbrs
+	rescheduleMap := make(map[int]map[string][]string)
+	for i := 1; i <= 4; i++ {
+		rescheduleMap[i] = make(map[string][]string)
+	}
+
+	for _, stage := range stages {
+		parts := strings.Split(stage.Name, "-")
+		abbr := stage.Name
+		if len(parts) > 1 {
+			abbr = strings.TrimSpace(parts[len(parts)-1])
+		} else if len(stage.Name) > 6 {
+			abbr = stage.Name[:6]
+		}
+
+		var histories []DailyTaskRescheduleHistory
+		db.Where("project_id = ? AND stage_id = ?", projectID, stage.ID).Find(&histories)
+		
+		uniqueNums := make(map[int]bool)
+		for _, h := range histories {
+			uniqueNums[h.RescheduleNumber] = true
+		}
+		var sortedNums []int
+		for k := range uniqueNums {
+			sortedNums = append(sortedNums, k)
+		}
+		sort.Ints(sortedNums)
+
+		for idx, rNum := range sortedNums {
+			targetRow := idx + 1
+			if targetRow > 4 {
+				continue
+			}
+			for _, h := range histories {
+				if h.RescheduleNumber == rNum {
+					dStr := h.NewDate.Format("2006-01-02")
+					if _, exists := rescheduleMap[targetRow][dStr]; !exists {
+						rescheduleMap[targetRow][dStr] = []string{}
+					}
+					// check duplicate
+					exists := false
+					for _, v := range rescheduleMap[targetRow][dStr] {
+						if v == abbr { exists = true; break }
+					}
+					if !exists {
+						rescheduleMap[targetRow][dStr] = append(rescheduleMap[targetRow][dStr], abbr)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Setup Excel
+	f := excelize.NewFile()
+	sheetName := "Schedule_Tracker"
+	f.SetSheetName("Sheet1", sheetName)
+
+	// Styles
+	styleOrangeHeader, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#FFA500"}, Pattern: 1}, Font: &excelize.Font{Bold: true}})
+	styleGrayHeader, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#C0C0C0"}, Pattern: 1}})
+	styleLightBlue, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#B4C7E7"}, Pattern: 1}, Font: &excelize.Font{Bold: true}})
+	styleYellow, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#FFFF00"}, Pattern: 1}})
+	styleGreen, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#00FF00"}, Pattern: 1}})
+	styleCyan, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#00FFFF"}, Pattern: 1}})
+	styleOrange, _ := f.NewStyle(&excelize.Style{Fill: excelize.Fill{Type: "pattern", Color: []string{"#FFA500"}, Pattern: 1}})
+	styleBorder, _ := f.NewStyle(&excelize.Style{Border: []excelize.Border{{Type: "left", Color: "000000", Style: 1}, {Type: "top", Color: "000000", Style: 1}, {Type: "bottom", Color: "000000", Style: 1}, {Type: "right", Color: "000000", Style: 1}}})
+	
+	// Timeline
+	allDates := []time.Time{}
+	curr := project.StartDate
+	for !curr.After(project.EndDate) {
+		allDates = append(allDates, curr)
+		curr = curr.AddDate(0, 0, 1)
+	}
+
+	currentRow := 1
+
+	// Stage Legend Table
+	stageList := []string{}
+	for _, s := range stages {
+		parts := strings.Split(s.Name, "-")
+		if len(parts) >= 2 {
+			cat := strings.TrimSpace(strings.Join(parts[:len(parts)-1], "-"))
+			abbr := strings.TrimSpace(parts[len(parts)-1])
+			stageList = append(stageList, fmt.Sprintf("%s -%s", cat, abbr))
+		} else {
+			stageList = append(stageList, s.Name)
+		}
+	}
+
+	colIdx := 0
+	tableRow := currentRow
+	for _, txt := range stageList {
+		colName, _ := excelize.ColumnNumberToName(colIdx + 1)
+		cell := fmt.Sprintf("%s%d", colName, tableRow)
+		f.SetCellValue(sheetName, cell, txt)
+		f.SetCellStyle(sheetName, cell, cell, styleBorder)
+		colIdx++
+		if colIdx >= 5 {
+			colIdx = 0
+			tableRow++
+		}
+	}
+	if colIdx > 0 {
+		tableRow++
+	}
+	currentRow = tableRow + 2
+
+	// Headers
+	// Month-Year
+	startColName, _ := excelize.ColumnNumberToName(3)
+	endColName, _ := excelize.ColumnNumberToName(len(allDates) + 2)
+	f.MergeCell(sheetName, fmt.Sprintf("%s%d", startColName, currentRow), fmt.Sprintf("%s%d", endColName, currentRow))
+	f.SetCellValue(sheetName, fmt.Sprintf("C%d", currentRow), allDates[0].Format("Jan-06"))
+	f.SetCellStyle(sheetName, fmt.Sprintf("C%d", currentRow), fmt.Sprintf("C%d", currentRow), styleOrangeHeader)
+	f.SetCellStyle(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("B%d", currentRow), styleGrayHeader)
+	headerRow1 := currentRow
+	currentRow++
+
+	// Days
+	f.SetCellStyle(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("B%d", currentRow), styleGrayHeader)
+	for i, d := range allDates {
+		colName, _ := excelize.ColumnNumberToName(i + 3)
+		cell := fmt.Sprintf("%s%d", colName, currentRow)
+		f.SetCellValue(sheetName, cell, d.Day())
+		f.SetCellStyle(sheetName, cell, cell, styleLightBlue)
+		f.SetCellStyle(sheetName, cell, cell, styleBorder)
+	}
+	headerRow2 := currentRow
+	currentRow++
+
+	// Merge Left Headers
+	f.MergeCell(sheetName, fmt.Sprintf("A%d", headerRow1), fmt.Sprintf("A%d", headerRow2))
+	f.SetCellValue(sheetName, fmt.Sprintf("A%d", headerRow1), project.Name)
+	f.SetCellStyle(sheetName, fmt.Sprintf("A%d", headerRow1), fmt.Sprintf("A%d", headerRow1), styleLightBlue)
+	
+	f.MergeCell(sheetName, fmt.Sprintf("B%d", headerRow1), fmt.Sprintf("B%d", headerRow2))
+	f.SetCellValue(sheetName, fmt.Sprintf("B%d", headerRow1), "Date")
+	f.SetCellStyle(sheetName, fmt.Sprintf("B%d", headerRow1), fmt.Sprintf("B%d", headerRow1), styleLightBlue)
+
+	// PLANNED
+	f.SetCellValue(sheetName, fmt.Sprintf("B%d", currentRow), "Planned")
+	f.SetCellStyle(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("B%d", currentRow), styleBorder)
+
+	plannedMap := make(map[string][]string)
+	for _, s := range stages {
+		if !s.StartDate.IsZero() && !s.EndDate.IsZero() {
+			parts := strings.Split(s.Name, "-")
+			abbr := strings.TrimSpace(parts[len(parts)-1])
+			d := s.StartDate
+			for !d.After(s.EndDate) {
+				if isWorkingDay(d, false, wsMap) {
+					ds := d.Format("2006-01-02")
+					plannedMap[ds] = append(plannedMap[ds], abbr)
+				}
+				d = d.AddDate(0, 0, 1)
+			}
+		}
+	}
+
+	for i, d := range allDates {
+		ds := d.Format("2006-01-02")
+		colName, _ := excelize.ColumnNumberToName(i + 3)
+		cell := fmt.Sprintf("%s%d", colName, currentRow)
+		
+		if vals, ok := plannedMap[ds]; ok {
+			uniqueVals := removeDuplicateStrings(vals)
+			f.SetCellValue(sheetName, cell, strings.Join(uniqueVals, ","))
+		}
+		f.SetCellStyle(sheetName, cell, cell, styleBorder)
+		
+		isSun := d.Weekday() == time.Sunday
+		isNonWorkSat := d.Weekday() == time.Saturday && !wsMap[ds]
+		if isSun || isNonWorkSat {
+			f.SetCellStyle(sheetName, cell, cell, styleYellow)
+		}
+	}
+	currentRow++
+
+	// RESCHEDULES 1-4
+	for r := 1; r <= 4; r++ {
+		f.SetCellValue(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("Reschedule -%d", r))
+		f.SetCellStyle(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("B%d", currentRow), styleBorder)
+		
+		rData := rescheduleMap[r]
+		for i, d := range allDates {
+			ds := d.Format("2006-01-02")
+			colName, _ := excelize.ColumnNumberToName(i + 3)
+			cell := fmt.Sprintf("%s%d", colName, currentRow)
+
+			if vals, ok := rData[ds]; ok {
+				uniqueVals := removeDuplicateStrings(vals)
+				f.SetCellValue(sheetName, cell, strings.Join(uniqueVals, ","))
+			}
+			f.SetCellStyle(sheetName, cell, cell, styleBorder)
+			
+			isSun := d.Weekday() == time.Sunday
+			isNonWorkSat := d.Weekday() == time.Saturday && !wsMap[ds]
+			if isSun || isNonWorkSat {
+				f.SetCellStyle(sheetName, cell, cell, styleYellow)
+			}
+		}
+		currentRow++
+	}
+
+	// ACTUAL
+	f.SetCellValue(sheetName, fmt.Sprintf("B%d", currentRow), "Actual")
+	f.SetCellStyle(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("B%d", currentRow), styleGrayHeader)
+
+	// Build Actual Maps
+	actualMap := make(map[string][]struct{abbr string; status string})
+	holdMap := make(map[string][]string)
+
+	for _, s := range stages {
+		parts := strings.Split(s.Name, "-")
+		abbr := strings.TrimSpace(parts[len(parts)-1])
+		
+		var sTasks []StageDailyTask
+		db.Where("stage_id = ?", s.ID).Find(&sTasks)
+		for _, t := range sTasks {
+			ds := t.ScheduledDate.Format("2006-01-02")
+			actualMap[ds] = append(actualMap[ds], struct{abbr string; status string}{abbr, t.Status})
+
+			if t.OriginalDate != nil && !t.OriginalDate.Equal(t.ScheduledDate) {
+				hds := t.OriginalDate.Format("2006-01-02")
+				holdMap[hds] = append(holdMap[hds], abbr)
+			}
+		}
+	}
+
+	for i, d := range allDates {
+		ds := d.Format("2006-01-02")
+		colName, _ := excelize.ColumnNumberToName(i + 3)
+		cell := fmt.Sprintf("%s%d", colName, currentRow)
+		f.SetCellStyle(sheetName, cell, cell, styleBorder)
+
+		activeItems := actualMap[ds]
+		activeAbbrs := make(map[string]bool)
+		for _, item := range activeItems { activeAbbrs[item.abbr] = true }
+
+		holds := holdMap[ds]
+		realHolds := []string{}
+		for _, h := range holds {
+			if !activeAbbrs[h] {
+				realHolds = append(realHolds, h)
+			}
+		}
+
+		parts := []string{}
+		if len(realHolds) > 0 {
+			parts = append(parts, fmt.Sprintf("%s=HOLD", strings.Join(removeDuplicateStrings(realHolds), ",")))
+		}
+		if len(activeItems) > 0 {
+			sl := []string{}
+			for k := range activeAbbrs { sl = append(sl, k) }
+			parts = append(parts, strings.Join(sl, ","))
+		}
+		f.SetCellValue(sheetName, cell, strings.Join(parts, ","))
+
+		// Coloring
+		isSun := d.Weekday() == time.Sunday
+		isNonWorkSat := d.Weekday() == time.Saturday && !wsMap[ds]
+
+		if isSun || isNonWorkSat {
+			f.SetCellStyle(sheetName, cell, cell, styleYellow)
+		} else if len(realHolds) > 0 {
+			f.SetCellStyle(sheetName, cell, cell, styleOrange)
+		} else if len(activeItems) > 0 {
+			hasCompleted := false
+			hasRescheduled := false
+			for _, item := range activeItems {
+				if item.status == "completed" { hasCompleted = true }
+				if item.status == "rescheduled" { hasRescheduled = true }
+			}
+			if hasCompleted {
+				f.SetCellStyle(sheetName, cell, cell, styleGreen)
+			} else if hasRescheduled {
+				f.SetCellStyle(sheetName, cell, cell, styleCyan)
+			}
+		}
+	}
+	currentRow++
+
+	// REMARKS
+	f.SetCellValue(sheetName, fmt.Sprintf("B%d", currentRow), "Remarks")
+	f.SetCellStyle(sheetName, fmt.Sprintf("B%d", currentRow), fmt.Sprintf("B%d", currentRow), styleBorder)
+	
+	for i, d := range allDates {
+		ds := d.Format("2006-01-02")
+		colName, _ := excelize.ColumnNumberToName(i + 3)
+		cell := fmt.Sprintf("%s%d", colName, currentRow)
+		f.SetCellStyle(sheetName, cell, cell, styleBorder)
+
+		// Check for hold to add remark
+		activeItems := actualMap[ds]
+		activeAbbrs := make(map[string]bool)
+		for _, item := range activeItems { activeAbbrs[item.abbr] = true }
+		holds := holdMap[ds]
+		realHolds := []string{}
+		for _, h := range holds {
+			if !activeAbbrs[h] { realHolds = append(realHolds, h) }
+		}
+
+		if len(realHolds) > 0 {
+			// Find reason
+			reason := "Waiting for issue tracker"
+			// Logic to find specific task reason is complex in loop, simplifying:
+			f.SetCellValue(sheetName, cell, reason)
+		}
+
+		isSun := d.Weekday() == time.Sunday
+		isNonWorkSat := d.Weekday() == time.Saturday && !wsMap[ds]
+		if isSun || isNonWorkSat {
+			f.SetCellStyle(sheetName, cell, cell, styleYellow)
+		}
+	}
+
+	// Buffer output
+	buf, _ := f.WriteToBuffer()
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s_Tracker.xlsx", project.Name))
+	c.Data(http.StatusOK, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", buf.Bytes())
+}
+
+func removeDuplicateStrings(strSlice []string) []string {
+	allKeys := make(map[string]bool)
+	list := []string{}
+	for _, item := range strSlice {
+		if _, value := allKeys[item]; !value {
+			allKeys[item] = true
+			list = append(list, item)
+		}
+	}
+	sort.Strings(list)
+	return list
+}
+
+// ============================================================================
+// Main Application Setup
+// ============================================================================
+
+func createDefaultAdmin() {
+	var user User
+	err := db.Where("username = ?", "admin").First(&user).Error
+	if err == gorm.ErrRecordNotFound {
+		hash, _ := bcrypt.GenerateFromPassword([]byte("admin123"), bcrypt.DefaultCost)
+		admin := User{
+			Username:     "admin",
+			Email:        "admin@example.com",
+			PasswordHash: string(hash),
+			Role:         "admin",
+		}
+		db.Create(&admin)
+		log.Println("Default admin user created")
+	}
+}
+
+func main() {
+	initDB()
+
+	r := gin.Default()
+
+	// Session Middleware
+	store := cookie.NewStore([]byte("secret123")) // Replace with secure key
+	r.Use(sessions.Sessions("mysession", store))
+
+	// Load HTML Templates (Assuming you have a 'templates' folder like Flask)
+	// You need to copy your .html files to a folder named "templates"
+	r.LoadHTMLGlob("templates/*")
+	
+	// Routes
+	r.GET("/", AuthRequired(), func(c *gin.Context) {
+		c.Redirect(http.StatusFound, "/dashboard")
+	})
+
+	r.GET("/login", loginHandler)
+	r.POST("/login", loginHandler)
+	r.GET("/logout", logoutHandler)
+
+	r.GET("/dashboard", AuthRequired(), func(c *gin.Context) {
+		user := getCurrentUser(c)
+		c.HTML(http.StatusOK, "index.html", gin.H{"current_user": user})
+	})
+	
+	r.GET("/stage_popup.html", func(c *gin.Context) {
+		c.HTML(http.StatusOK, "stage_popup.html", nil)
+	})
+
+	// API Group
+	api := r.Group("/api")
+	api.Use(AuthRequired())
+	{
+		api.GET("/default-stages", func(c *gin.Context) {
+			c.JSON(http.StatusOK, DEFAULT_STAGES)
+		})
+
+		api.GET("/stats", func(c *gin.Context) {
+			var totalP, activeP, totalT, compT, totalE int64
+			db.Model(&Project{}).Count(&totalP)
+			db.Model(&Project{}).Where("status = ?", "active").Count(&activeP)
+			db.Model(&Task{}).Count(&totalT)
+			db.Model(&Task{}).Where("status = ?", "completed").Count(&compT)
+			db.Model(&User{}).Where("role = ?", "employee").Count(&totalE)
+			c.JSON(http.StatusOK, gin.H{
+				"total_projects": totalP, "active_projects": activeP,
+				"total_tasks": totalT, "completed_tasks": compT,
+				"total_employees": totalE,
+			})
+		})
+
+		api.GET("/projects", func(c *gin.Context) {
+			var projects []Project
+			db.Order("created_at desc").Find(&projects)
+			c.JSON(http.StatusOK, projects)
+		})
+		api.POST("/projects", createProjectHandler)
+		api.GET("/projects/:project_id/details", getProjectDetailsHandler)
+		api.POST("/projects/:project_id/reschedule", rescheduleStageHandler)
+		
+		api.DELETE("/projects/:project_id", func(c *gin.Context) {
+			pid := c.Param("project_id")
+			// Cascade Delete logic usually handled by DB FKs, but explicit here:
+			db.Where("project_id = ?", pid).Delete(&ProjectStage{})
+			db.Where("project_id = ?", pid).Delete(&ProjectMember{})
+			db.Where("project_id = ?", pid).Delete(&Task{})
+			db.Where("project_id = ?", pid).Delete(&ScheduleHistory{})
+			db.Where("id = ?", pid).Delete(&Project{})
+			c.JSON(http.StatusOK, gin.H{"success": true})
+		})
+
+		api.GET("/projects/:project_id/stages/:stage_id/daily-tasks", func(c *gin.Context) {
+			pid := c.Param("project_id")
+			sid := c.Param("stage_id")
+			var tasks []StageDailyTask
+			db.Where("project_id = ? AND stage_id = ?", pid, sid).Order("day_number asc").Find(&tasks)
+			c.JSON(http.StatusOK, tasks)
+		})
+
+		api.PUT("/projects/:project_id/stages/:stage_id/daily-tasks/:task_id/complete", func(c *gin.Context) {
+			tid := c.Param("task_id")
+			now := time.Now()
+			db.Model(&StageDailyTask{}).Where("id = ?", tid).Updates(map[string]interface{}{
+				"status": "completed",
+				"completed_at": now,
+			})
+			c.JSON(http.StatusOK, gin.H{"success": true})
+		})
+
+		api.POST("/projects/:project_id/stages/:stage_id/daily-tasks/:task_id/reschedule", rescheduleDailyTaskHandler)
+		
+		api.GET("/projects/:project_id/export-excel", exportExcelHandler)
+
+		// Basic Task Routes (Kanban/List)
+		api.GET("/tasks", func(c *gin.Context) {
+			var tasks []Task
+			db.Order("created_at desc").Find(&tasks)
+			c.JSON(http.StatusOK, tasks)
+		})
+		api.POST("/tasks", func(c *gin.Context) {
+			var t Task
+			if err := c.ShouldBindJSON(&t); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+				return
+			}
+			db.Create(&t)
+			c.JSON(http.StatusCreated, gin.H{"success": true, "id": t.ID})
+		})
+		
+		api.GET("/employees", func(c *gin.Context) {
+			var users []User
+			db.Find(&users)
+			c.JSON(http.StatusOK, users)
+		})
+		
+		api.GET("/activity-logs", func(c *gin.Context) {
+			var logs []ActivityLog
+			db.Order("timestamp desc").Limit(10).Find(&logs)
+			// Join with user name manually or via preload
+			result := []gin.H{}
+			for _, l := range logs {
+				var u User
+				db.First(&u, l.UserID)
+				result = append(result, gin.H{
+					"user": u.Username, "action": l.Action, "timestamp": l.Timestamp.Format("2006-01-02 15:04"),
+				})
+			}
+			c.JSON(http.StatusOK, result)
+		})
+	}
+
+	r.Run(":5000")
+}
