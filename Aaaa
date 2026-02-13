@@ -1,104 +1,1882 @@
-
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.cell import MergedCell
+import sys, re, json, time, urllib.parse, math, os, chardet
+from datetime import datetime, timedelta
 import requests
-import json
 import urllib3
-
-# Disable SSL warnings
+# Disable SSL warnings to match testapi.py
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+from bs4 import BeautifulSoup
+import pandas as pd
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QVBoxLayout, QHBoxLayout, QWidget, QToolBar,
+    QFileDialog, QTableWidget, QTableWidgetItem, QComboBox, QLabel,
+    QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox, QTabWidget, QProgressBar,
+    QSplitter, QDialog, QListWidget, QPushButton
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QColor, QAction, QFont, QPalette, QPixmap, QIcon
 
-class DigiKeySimpleChecker:
-    def __init__(self):
-        # --- CONFIGURATION ---
-        # PASTE YOUR CREDENTIALS HERE
-        self.client_id = "y9dDhzo67gdr0XAAnu2D5oJFOmtGCshaPUzAcH9WYqJXeK40"
-        self.client_secret = "IMpq2URpHg6ZWNsVSYdEZy5IobJoIS3GEgwUGg4eYQDDmAcER12HCfxdtEOdcGGU"
-        
-        self.token = None
-        self.base_url = "https://api.digikey.com"
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.join(sys._MEIPASS, relative_path)
+    return os.path.join(os.path.abspath("."), relative_path)
 
-    def get_token(self):
-        """
-        Gets a token using 'Client Credentials' flow.
-        NO BROWSER REQUIRED.
-        """
-        url = "https://api.digikey.com/v1/oauth2/token"
-        
-        payload = {
-            'grant_type': 'client_credentials', # <--- This is the magic switch
-            'client_id': self.client_id,
-            'client_secret': self.client_secret
-        }
-        
-        print("Authenticating...")
-        try:
-            # verify=False prevents SSL errors
-            response = requests.post(url, data=payload, verify=False)
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.token = data['access_token']
-                print("✅ Authentication Successful! (No browser needed)")
-                return True
-            else:
-                print(f"❌ Auth Failed: {response.status_code}")
-                print(response.text)
-                return False
-        except Exception as e:
-            print(f"Connection Error: {e}")
-            return False
 
-    def search_part(self, part_number):
-        if not self.token:
-            return
-            
-        endpoint = "/products/v4/search/keyword"
-        url = self.base_url + endpoint
-        
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "X-DIGIKEY-Client-Id": self.client_id,
-            "Content-Type": "application/json",
-            "X-DIGIKEY-Locale-Site": "US",
-            "X-DIGIKEY-Locale-Currency": "USD"
-        }
-        
-        body = {
-            "Keywords": part_number,
-            "RecordCount": 1
-        }
-        
-        print(f"Searching for {part_number}...")
-        response = requests.post(url, headers=headers, json=body, verify=False)
-        
-        if response.status_code == 200:
-            return response.json()
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+
+# Common MLCC/EIA size mapping for fallbacks and grouping
+EIA_TO_MM = {
+    "008004": (0.25, 0.13), "0075": (0.3, 0.15), "01005": (0.4, 0.2),
+    "15015": (0.4, 0.4), "0201": (0.6, 0.3), "0202": (0.5, 0.5),
+    "0302": (0.8, 0.5), "0303": (0.8, 0.8), "0504": (1.3, 1.0),
+    "0402": (1.0, 0.5), "0603": (1.6, 0.8), "0805": (2.0, 1.25),
+    "1008": (2.5, 2.0), "1111": (2.8, 2.8), "1206": (3.2, 1.6),
+    "1210": (3.2, 2.5), "1410": (3.6, 2.5), "1515": (3.81, 3.81),
+    "1806": (4.5, 1.6), "1808": (4.5, 2.0), "1812": (4.5, 3.2),
+    "1825": (4.5, 6.4), "2010": (5.0, 2.5), "2020": (5.08, 5.08),
+    "2220": (5.7, 5.0), "2225": (5.7, 6.4), "2512": (6.4, 3.2),
+    "2520": (6.4, 5.0), "2920": (7.4, 5.0), "3333": (8.38, 8.38),
+    "3640": (9.2, 10.16), "4040": (10.2, 10.2), "5550": (14.0, 12.7),
+    "8060": (20.3, 15.3)
+}
+
+def apply_dark_green_theme(app):
+    """Apply dark green theme to the entire application"""
+    palette = QPalette()
+
+    # Window background - Dark gray/black
+    palette.setColor(QPalette.ColorRole.Window, QColor(25, 35, 25))
+    palette.setColor(QPalette.ColorRole.WindowText, QColor(0, 255, 100))
+
+    # Base background for input fields
+    palette.setColor(QPalette.ColorRole.Base, QColor(35, 45, 35))
+    palette.setColor(QPalette.ColorRole.AlternateBase, QColor(45, 55, 45))
+
+    # Text colors
+    palette.setColor(QPalette.ColorRole.Text, QColor(0, 255, 100))
+
+    # Button styling
+    palette.setColor(QPalette.ColorRole.Button, QColor(35, 55, 35))
+    palette.setColor(QPalette.ColorRole.ButtonText, QColor(0, 255, 100))
+
+    # Highlight colors
+    palette.setColor(QPalette.ColorRole.Highlight, QColor(0, 150, 50))
+    palette.setColor(QPalette.ColorRole.HighlightedText, QColor(255, 255, 255))
+
+    # Links
+    palette.setColor(QPalette.ColorRole.Link, QColor(100, 255, 150))
+
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.WindowText, QColor(100, 100, 100))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor(100, 100, 100))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text, QColor(100, 100, 100))
+
+    app.setPalette(palette)
+    app.setStyleSheet("""
+        QMainWindow { background-color: rgb(25, 35, 25); color: rgb(0, 255, 100); }
+        QToolBar { background-color: rgb(35, 45, 35); border: 1px solid rgb(0, 150, 50); spacing: 3px; }
+        QToolBar::separator { background-color: rgb(0, 150, 50); width: 2px; margin: 2px; }
+        QPushButton, QToolButton { background-color: rgb(35, 55, 35); color: rgb(0, 255, 100); border: 2px solid rgb(0, 150, 50); border-radius: 5px; padding: 5px 10px; font-weight: bold; }
+        QPushButton:hover, QToolButton:hover { background-color: rgb(0, 150, 50); color: white; }
+        QPushButton:pressed, QToolButton:pressed { background-color: rgb(0, 100, 30); }
+        QComboBox { background-color: rgb(35, 45, 35); color: rgb(0, 255, 100); border: 2px solid rgb(0, 150, 50); border-radius: 3px; padding: 2px 5px; }
+        QComboBox::drop-down { border: none; }
+        QComboBox::down-arrow { image: none; border-left: 5px solid transparent; border-right: 5px solid transparent; border-top: 5px solid rgb(0, 255, 100); }
+        QSpinBox, QDoubleSpinBox { background-color: rgb(35, 45, 35); color: rgb(0, 255, 100); border: 2px solid rgb(0, 150, 50); border-radius: 3px; padding: 2px; }
+        QLabel { color: rgb(0, 255, 100); font-weight: bold; }
+        QTabBar::tab { background-color: rgb(35, 45, 35); color: rgb(0, 255, 100); border: 2px solid rgb(0, 150, 50); padding: 8px 15px; margin: 2px; }
+        QTabBar::tab:selected { background-color: rgb(0, 150, 50); color: white; }
+        QTabBar::tab:hover { background-color: rgb(0, 120, 40); }
+        QProgressBar { background-color: rgb(35, 45, 35); border: 2px solid rgb(0, 150, 50); border-radius: 5px; color: white; text-align: center; }
+        QProgressBar::chunk { background-color: rgb(0, 200, 50); border-radius: 3px; }
+        QSplitter::handle { background-color: rgb(0, 150, 50); }
+        QMessageBox { background-color: rgb(25, 35, 25); color: rgb(0, 255, 100); }
+        QDialog { background-color: rgb(25, 35, 25); color: rgb(0, 255, 100); }
+        QListWidget { background-color: white; color: black; border: 2px solid rgb(0, 150, 50); }
+    """)
+
+def norm_eia_code(text: str | None) -> str | None:
+    if not text: return None
+    cleaned = text.replace('-', '').replace('_', '')
+    m = re.search(r'\b(008004|01005|0201|0302|0303|0402|0504|0603|0805|1008|1206|1210|1812|2010|2220|2225|2512|2920|3333|3640|4040|5550|8060)\b', cleaned)
+    return m.group(1) if m else None
+
+def max_dim_mm_from_package_or_size(package_code: str | None, L: float | None, W: float | None) -> float | None:
+    if package_code and package_code in EIA_TO_MM:
+        l, w = EIA_TO_MM[package_code]
+        return max(l, w)
+    if L is not None and W is not None:
+        return max(L, W)
+    if L is not None: return L
+    if W is not None: return W
+    return None
+
+def filter_search_results(mpn: str, search_results: list[dict]) -> list[dict]:
+    exact_matches = []
+    partial_matches = []
+    mpn_lower = mpn.strip().lower()
+    
+    for result in search_results:
+        result_mpn = result["mpn"].strip().lower()
+        if result_mpn == mpn_lower:
+            exact_matches.append(result)
         else:
-            print(f"Search Error: {response.status_code}")
-            print(response.text)
+            partial_matches.append(result)
+            
+    if exact_matches:
+        return exact_matches
+    elif partial_matches:
+        return partial_matches[:1]
+    else:
+        return []
+
+def detect_file_encoding(file_path: str) -> str:
+    try:
+        with open(file_path, 'rb') as f:
+            raw_data = f.read(10000)
+            result = chardet.detect(raw_data)
+            return result['encoding'] or 'utf-8'
+    except:
+        return 'utf-8'
+
+def detect_csv_delimiter(file_path: str, encoding: str = 'utf-8') -> str:
+    delimiters = [',', ';', '\t', '|']
+    try:
+        with open(file_path, 'r', encoding=encoding) as f:
+            sample = f.read(1024)
+        delimiter_scores = {}
+        for delim in delimiters:
+            lines = sample.split('\n')[:3]
+            scores = []
+            for line in lines:
+                if line.strip():
+                    scores.append(line.count(delim))
+            if scores and max(scores) > 0:
+                delimiter_scores[delim] = max(scores)
+        if delimiter_scores:
+            return max(delimiter_scores.items(), key=lambda x: x[1])[0]
+        return ','
+    except:
+        return ','
+
+class APIClient:
+    def __init__(self, timeout=15):
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "BOMCostingTool/1.0",
+            "Accept": "application/json"
+        })
+        self.timeout = timeout
+        
+        # NOTE: Be sure to verify your API Keys!
+        self.config = {
+            "digikey": {
+                "client_id": "y9dDhzo67gdr0XAAnu2D5oJFOmtGCshaPUzAcH9WYqJXeK40",
+                "client_secret": "IMpq2URpHg6ZWNsVSYdEZy5IobJoIS3GEgwUGg4eYQDDmAcER12HCfxdtEOdcGGU",
+                "token_url": "https://api.digikey.com/v1/oauth2/token",
+                "search_url": "https://api.digikey.com/products/v4/search/keyword",
+                "access_token": None,
+                "token_expiry": 0
+            },
+            "mouser": {
+                "api_key": "82248c57-3262-4a5b-8be8-b29e0cac5121",
+                "search_url": "https://api.mouser.com/api/v1/search/partnumber"
+            },
+            "element14": {
+                "api_key": "YOUR_ELEMENT14_API_KEY",
+                "search_url": "https://api.element14.com/catalog/v1/search"
+            },
+            "tme": {
+                "token": "YOUR_TME_TOKEN",
+                "app_secret": "YOUR_TME_APP_SECRET",
+                "search_url": "https://api.tme.eu/products/get_prices"
+            }
+        }
+        self._meta_cache = {} 
+
+    def _get_digikey_token(self):
+        conf = self.config["digikey"]
+        if conf["access_token"] and time.time() < conf["token_expiry"]:
+            return conf["access_token"]
+        try:
+            payload = {
+                'grant_type': 'client_credentials',
+                'client_id': conf["client_id"],
+                'client_secret': conf["client_secret"]
+            }
+            # Using verify=False just like testapi.py
+            r = self.session.post(conf["token_url"], data=payload, verify=False, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                conf["access_token"] = data["access_token"]
+                conf["token_expiry"] = time.time() + data.get("expires_in", 3600) - 60
+                return conf["access_token"]
+            else:
+                print(f"DigiKey Auth Failed: {r.status_code} - {r.text}")
+        except Exception as e:
+            print(f"DigiKey Auth Error: {e}")
+        return None
+
+    def search(self, mpn: str, usd_to_inr: float = 87.0) -> list[dict]:
+        self._meta_cache[mpn] = {
+            "life_cycle_code": None, "package_code": None,
+            "length_mm": None, "width_mm": None,
+            "default_currency": "USD", "lead_time": None,
+            "product_desc": None, "detailed_desc": None, 
+            "datasheet": None, "pin_count": None
+        }
+        
+        results = []
+        if "YOUR_DIGIKEY" not in self.config["digikey"]["client_id"]:
+            results.extend(self._search_digikey(mpn, usd_to_inr))
+        if "YOUR_MOUSER" not in self.config["mouser"]["api_key"]:
+            results.extend(self._search_mouser(mpn, usd_to_inr))
+        if "YOUR_ELEMENT14" not in self.config["element14"]["api_key"]:
+            results.extend(self._search_element14(mpn, usd_to_inr))
+        if "YOUR_TME" not in self.config["tme"]["token"]:
+            results.extend(self._search_tme(mpn, usd_to_inr))
+            
+        return results
+
+    def detail(self, mpn: str, manufacturer: str) -> dict:
+        if mpn in self._meta_cache:
+            return self._meta_cache[mpn]
+        return {
+            "life_cycle_code": None, "package_code": None,
+            "length_mm": None, "width_mm": None,
+            "default_currency": "USD", "lead_time": None,
+            "product_desc": None, "detailed_desc": None, 
+            "datasheet": None, "pin_count": None
+        }
+
+    def _search_digikey(self, mpn, usd_to_inr):
+            token = self._get_digikey_token()
+            if not token: return []
+            
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "X-DIGIKEY-Client-Id": self.config["digikey"]["client_id"],
+                "Content-Type": "application/json",
+                "X-DIGIKEY-Locale-Site": "US",
+                "X-DIGIKEY-Locale-Currency": "USD"
+            }
+            
+            payload = {
+                "Keywords": mpn,
+                "RecordCount": 10
+            }
+            offers = []
+            
+            try:
+                # Using verify=False just like testapi.py
+                r = self.session.post(self.config["digikey"]["search_url"], json=payload, headers=headers, verify=False, timeout=self.timeout)
+                if r.status_code == 200:
+                    data = r.json()
+                    
+                    products = []
+                    
+                    # --- UPDATE: Priority Logic to prevent Overwriting ---
+                    # 1. Collect high-confidence matches first
+                    exact_found = False
+                    
+                    if data.get("ExactMatches"):
+                        products.extend(data["ExactMatches"])
+                        exact_found = True
+                        
+                    if data.get("ExactDigiKeyProduct"):
+                        products.append(data["ExactDigiKeyProduct"])
+                        exact_found = True
+                        
+                    if data.get("ExactManufacturerProducts"):
+                        products.extend(data["ExactManufacturerProducts"])
+                        exact_found = True
+                    
+                    # 2. ONLY add loose matches ('Products') if NO exact matches were found.
+                    # This prevents the Amphenol part (loose match) from overwriting the Adam Tech part (exact match).
+                    if not exact_found and data.get("Products"):
+                        products.extend(data["Products"])
+                    
+                    if products:
+                        # Use the first product (Highest Priority) for metadata
+                        p_meta = products[0]
+                        
+                        desc_obj = p_meta.get("Description", {}) if isinstance(p_meta.get("Description"), dict) else {}
+                        
+                        self._meta_cache[mpn]["product_desc"] = (
+                            p_meta.get("ProductDescription") or 
+                            desc_obj.get("ProductDescription") or ""
+                        )
+                        self._meta_cache[mpn]["detailed_desc"] = (
+                            p_meta.get("DetailedDescription") or 
+                            desc_obj.get("DetailedDescription") or ""
+                        )
+                        
+                        self._meta_cache[mpn]["datasheet"] = p_meta.get("DatasheetUrl", "")
+                        
+                        status = p_meta.get("ProductStatus", {})
+                        self._meta_cache[mpn]["life_cycle_code"] = status.get("Status") if isinstance(status, dict) else status
+                        self._meta_cache[mpn]["lead_time"] = p_meta.get("ManufacturerLeadWeeks")
+                        
+                        # --- NEW: Reach and RoHS Status Extraction ---
+                        classifications = p_meta.get("Classifications", {})
+                        self._meta_cache[mpn]["reach_status"] = classifications.get("ReachStatus", "")
+                        self._meta_cache[mpn]["rohs_status"] = classifications.get("RohsStatus", "")
+
+                        params_map = {}
+                        for p in p_meta.get("Parameters", []):
+                            key = p.get("ParameterText") or p.get("Parameter") or ""
+                            val = p.get("ValueText") or p.get("Value") or ""
+                            if key:
+                                params_map[key] = val
+                        
+                        pkg_val = params_map.get("Package / Case", "")
+                        if pkg_val:
+                            self._meta_cache[mpn]["package_code"] = self._normalize_package(pkg_val)
+                        
+                        dim_val = params_map.get("Size / Dimension", "")
+                        if dim_val:
+                            mm_match = re.search(r'([\d\.]+)\s*mm\s*[xX]\s*([\d\.]+)\s*mm', dim_val)
+                            if mm_match:
+                                self._meta_cache[mpn]["length_mm"] = float(mm_match.group(1))
+                                self._meta_cache[mpn]["width_mm"] = float(mm_match.group(2))
+
+                        pin_count = params_map.get("Number of Positions")
+                        if not pin_count:
+                            check_pkg = self._meta_cache[mpn]["package_code"]
+                            if check_pkg and check_pkg in EIA_TO_MM:
+                                pin_count = "2"
+                        if not pin_count and pkg_val:
+                            match = re.search(r'^(\d+)[-\s]', pkg_val)
+                            if match:
+                                pin_count = match.group(1)
+                        self._meta_cache[mpn]["pin_count"] = pin_count
+
+                    for p in products:
+                        mfg = p.get("Manufacturer", {})
+                        mfg_name = mfg.get("Name") if isinstance(mfg, dict) else mfg
+                        actual_mpn = p.get("ManufacturerPartNumber", mpn)
+                        
+                        variations = p.get("ProductVariations", [])
+                        found_pricing = False
+
+                        # Case A: Variations
+                        for var in variations:
+                            tiers = []
+                            for break_ in var.get("StandardPricing", []):
+                                try:
+                                    tiers.append({
+                                        "quantity": int(break_.get("BreakQuantity", 0)),
+                                        "price": float(break_.get("UnitPrice", 0)) 
+                                    })
+                                except: pass
+                            
+                            stock_qty = int(var.get("QuantityAvailableforPackageType", 0))
+                            
+                            if tiers or stock_qty > 0:
+                                offers.append({
+                                    "mpn": actual_mpn,
+                                    "manufacturer": mfg_name,
+                                    "distributor": "Digikey",
+                                    "stock": stock_qty,
+                                    "price_tiers": tiers,
+                                    "currency": "USD"
+                                })
+                                found_pricing = True
+                        
+                        # Case B: Root level
+                        if not found_pricing:
+                            tiers = []
+                            stock_qty = int(p.get("QuantityAvailableforPackageType", 0))
+                            
+                            for break_ in p.get("StandardPricing", []):
+                                try:
+                                    tiers.append({
+                                        "quantity": int(break_.get("BreakQuantity", 0)),
+                                        "price": float(break_.get("UnitPrice", 0))
+                                    })
+                                except: pass
+
+                            if tiers or stock_qty > 0:
+                                offers.append({
+                                    "mpn": actual_mpn,
+                                    "manufacturer": mfg_name,
+                                    "distributor": "Digikey",
+                                    "stock": stock_qty,
+                                    "price_tiers": tiers,
+                                    "currency": "USD"
+                                })
+
+                else:
+                    print(f"DigiKey API Error: {r.status_code} - {r.text}")
+            except Exception as e:
+                print(f"DigiKey Exception: {e}")
+                
+            return offers
+
+    def _search_mouser(self, mpn, usd_to_inr):
+        api_key = self.config["mouser"]["api_key"]
+        headers = {"Content-Type": "application/json"}
+        payload = {"SearchByPartRequest": {"mouserPartNumber": mpn, "partSearchOptions": "string"}}
+        offers = []
+        
+        try:
+            url = f"{self.config['mouser']['search_url']}?apiKey={api_key}"
+            r = self.session.post(url, json=payload, headers=headers, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                parts = data.get("SearchResults", {}).get("Parts", [])
+                
+                for p in parts:
+                    tiers = []
+                    for pb in p.get("PriceBreaks", []):
+                        try:
+                            price_str = str(pb.get("Price", "0")).replace("$", "").replace("₹", "").replace(",", "")
+                            qty = int(pb.get("Quantity", 0))
+                            price = float(price_str)
+                            currency = p.get("PriceBreaks", [{}])[0].get("Currency", "USD")
+                            if currency == "INR": price = price / usd_to_inr
+                            tiers.append({"quantity": qty, "price": price})
+                        except: continue
+
+                    if tiers:
+                        offers.append({
+                            "mpn": p.get("ManufacturerPartNumber"),
+                            "manufacturer": p.get("Manufacturer"),
+                            "distributor": "Mouser",
+                            "stock": int(p.get("Availability", "0").split(" ")[0].replace(",", "")),
+                            "price_tiers": tiers,
+                            "currency": "USD"
+                        })
+        except Exception as e:
+            pass
+        return offers
+
+    def _search_element14(self, mpn, usd_to_inr):
+        api_key = self.config["element14"]["api_key"]
+        offers = []
+        try:
+            params = {
+                "term": f"manufPartNum:{mpn}",
+                "storeInfo.id": "newark.com",
+                "resultsSettings.offset": 0,
+                "resultsSettings.numberOfResults": 10,
+                "callInfo.responseDataFormat": "json",
+                "callInfo.apiKey": api_key
+            }
+            r = self.session.get(self.config["element14"]["search_url"], params=params, timeout=self.timeout)
+            if r.status_code == 200:
+                data = r.json()
+                products = data.get("keywordSearchReturn", {}).get("products", [])
+                for p in products:
+                    tiers = []
+                    for price in p.get("prices", []):
+                        try:
+                            qty = int(price.get("from", 0))
+                            cost = float(price.get("cost", 0))
+                            tiers.append({"quantity": qty, "price": cost})
+                        except: continue
+                        
+                    if tiers:
+                        offers.append({
+                            "mpn": p.get("translatedManufacturerPartNumber"),
+                            "manufacturer": p.get("brandName"),
+                            "distributor": "Element14",
+                            "stock": int(p.get("inv", 0)),
+                            "price_tiers": tiers,
+                            "currency": "USD"
+                        })
+        except Exception as e:
+            pass
+        return offers
+
+    def _search_tme(self, mpn, usd_to_inr):
+        return [] # Implement TME HMAC Logic as needed
+
+    def _parse_dim(self, dim_str):
+        if not dim_str: return None
+        try:
+            val_str = str(dim_str).lower().strip()
+            val = float(re.findall(r"[\d\.]+", val_str)[0])
+            if "inch" in val_str or "in" in val_str:
+                return val * 25.4
+            return val
+        except:
             return None
 
-# --- RUN THE SCRIPT ---
-if __name__ == "__main__":
-    app = DigiKeySimpleChecker()
-    
-    # Check if user forgot to paste credentials
-    if "PASTE_YOUR" in app.client_id:
-        # If credentials are not in the code, ask for them
-        app.client_id = input("Enter Client ID: ").strip()
-        app.client_secret = input("Enter Client Secret: ").strip()
+    def _normalize_package(self, text):
+        if not text: return None
+        cleaned = text.replace('-', '').replace('_', '')
+        m = re.search(r'\b(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b', cleaned)
+        return m.group(1) if m else text
 
-    if app.get_token():
-        # Search for a test part
-        part = "CL21B106KOQNFNE"
-        data = app.search_part(part)
-        
-        if data:
+class JSONStorage:
+    def __init__(self, path="bom_costing_data.json"):
+        self.path = path
+        self.data = self._load()
+
+    def _load(self):
+        if os.path.exists(self.path):
             try:
-                product = data['Products'][0]
-                price = product['ProductVariations'][0]['StandardPricing'][0]['UnitPrice']
-                print(f"\n--- RESULT ---")
-                print(f"Part: {product['ProductDescription']}")
-                print(f"Price: ${price}")
+                with open(self.path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
             except:
-                print("\nRaw Data Found:")
-                print(json.dumps(data, indent=2))
+                return {}
+        return {}
+
+    def _save(self):
+        try:
+            if os.path.exists(self.path):
+                backup_path = f"{self.path}.backup"
+                if os.path.exists(backup_path):
+                    os.remove(backup_path)
+                os.rename(self.path, backup_path)
+            with open(self.path, 'w', encoding='utf-8') as f:
+                json.dump(self.data, f, indent=2, ensure_ascii=False)
+        except:
+            pass
+
+    def upsert_offer(
+        self, mpn, distributor, manufacturer, price_tiers, stock, currency,
+        lead_time=None, life_cycle_code=None, package_code=None,
+        length_mm=None, width_mm=None, default_currency=None, part_type=None,
+        product_desc=None, detailed_desc=None, datasheet=None, pin_count=None,
+        reach_status=None, rohs_status=None
+    ):
+        if mpn not in self.data:
+            self.data[mpn] = {}
+        if distributor not in self.data[mpn]:
+            self.data[mpn][distributor] = {}
+        
+        tiers_sorted = sorted(price_tiers or [], key=lambda x: x["quantity"])
+        
+        offer_data = {
+            "manufacturer": manufacturer,
+            "price_tiers": tiers_sorted,
+            "stock": max(self.data[mpn][distributor].get("stock", 0), int(stock or 0)),
+            "currency": currency or "USD",
+            "lead_time": lead_time or self.data[mpn][distributor].get("lead_time"),
+            "life_cycle_code": life_cycle_code or self.data[mpn][distributor].get("life_cycle_code"),
+            "package_code": package_code or self.data[mpn][distributor].get("package_code"),
+            "length_mm": length_mm if length_mm is not None else self.data[mpn][distributor].get("length_mm"),
+            "width_mm": width_mm if width_mm is not None else self.data[mpn][distributor].get("width_mm"),
+            "default_currency": default_currency or self.data[mpn][distributor].get("default_currency", "USD"),
+            "part_type": part_type or self.data[mpn][distributor].get("part_type"),
+            
+            # New fields
+            "product_desc": product_desc or self.data[mpn][distributor].get("product_desc"),
+            "detailed_desc": detailed_desc or self.data[mpn][distributor].get("detailed_desc"),
+            "datasheet": datasheet or self.data[mpn][distributor].get("datasheet"),
+            "pin_count": pin_count or self.data[mpn][distributor].get("pin_count"),
+            
+            "reach_status": reach_status or self.data[mpn][distributor].get("reach_status"),
+            "rohs_status": rohs_status or self.data[mpn][distributor].get("rohs_status"),            
+            "scraped_date": datetime.now().isoformat()
+        }
+        
+        self.data[mpn][distributor].update(offer_data)
+        self._save()
+
+
+
+    def offers_by_mpn(self, mpn):
+        if mpn not in self.data:
+            return []
+        offers = []
+        for distributor, offer_data in self.data[mpn].items():
+            offers.append({
+                "distributor": distributor,
+                "manufacturer": offer_data.get("manufacturer", ""),
+                "price_tiers": offer_data.get("price_tiers", []),
+                "stock": offer_data.get("stock", 0),
+                "currency": offer_data.get("currency", "USD"),
+                "lead_time": offer_data.get("lead_time"),
+                "life_cycle_code": offer_data.get("life_cycle_code"),
+                "package_code": offer_data.get("package_code"),
+                "length_mm": offer_data.get("length_mm"),
+                "width_mm": offer_data.get("width_mm"),
+                "default_currency": offer_data.get("default_currency", "USD"),
+                "part_type": offer_data.get("part_type"),
+                "product_desc": offer_data.get("product_desc"),
+                "detailed_desc": offer_data.get("detailed_desc"),
+                "datasheet": offer_data.get("datasheet"),
+                "pin_count": offer_data.get("pin_count"),
+                "reach_status": offer_data.get("reach_status"),
+                "rohs_status": offer_data.get("rohs_status")                
+            })
+        return sorted(offers, key=lambda x: x["distributor"])
+
+    def part_meta(self, mpn):
+        offers = self.offers_by_mpn(mpn)
+        life = next((o["life_cycle_code"] for o in offers if o.get("life_cycle_code")), "")
+        pkg = next((o["package_code"] for o in offers if o.get("package_code")), "")
+        L = next((o["length_mm"] for o in offers if o.get("length_mm") is not None), None)
+        W = next((o["width_mm"] for o in offers if o.get("width_mm") is not None), None)
+        defcur = next((o["default_currency"] for o in offers if o.get("default_currency")), "USD")
+        ptype = next((o["part_type"] for o in offers if o.get("part_type")), "")
+        lead = next((o["lead_time"] for o in offers if o.get("lead_time")), "")
+        
+        # New fields
+        p_desc = next((o["product_desc"] for o in offers if o.get("product_desc")), "")
+        d_desc = next((o["detailed_desc"] for o in offers if o.get("detailed_desc")), "")
+        sheet = next((o["datasheet"] for o in offers if o.get("datasheet")), "")
+        pins = next((o["pin_count"] for o in offers if o.get("pin_count")), "")
+        
+        # --- NEW: Retrieve ---
+        reach = next((o.get("reach_status") for o in offers if o.get("reach_status")), "")
+        rohs = next((o.get("rohs_status") for o in offers if o.get("rohs_status")), "")
+
+        return {
+            "life": life, "package": pkg, "L": L, "W": W, "default_currency": defcur, 
+            "part_type": ptype, "lead_time": lead,
+            "product_desc": p_desc, "detailed_desc": d_desc, "datasheet": sheet, "pin_count": pins,
+            "reach_status": reach, "rohs_status": rohs
+        }
+
+    def update_size_for_mpn(self, mpn, length_mm, width_mm):
+        if mpn in self.data:
+            for distributor in self.data[mpn]:
+                self.data[mpn][distributor]["length_mm"] = length_mm
+                self.data[mpn][distributor]["width_mm"] = width_mm
+            self._save()
+            return len(self.data[mpn])
+        return 0
+
+    def update_package_for_mpn(self, mpn, new_package):
+        if mpn in self.data:
+            for distributor in self.data[mpn]:
+                self.data[mpn][distributor]["package_code"] = new_package
+            self._save()
+            return len(self.data[mpn])
+        return 0
+    
+    def is_data_fresh(self, mpn, hours=6):
+        if mpn not in self.data: return False
+        for distributor_data in self.data[mpn].values():
+            scraped_date_str = distributor_data.get("scraped_date")
+            if scraped_date_str:
+                try:
+                    scraped_date = datetime.fromisoformat(scraped_date_str)
+                    if datetime.now() - scraped_date < timedelta(hours=hours):
+                        return True
+                except: continue
+        return False
+    
+    def get_data_age_hours(self, mpn):
+        if mpn not in self.data: return float('inf')
+        oldest_hours = 0
+        for distributor_data in self.data[mpn].values():
+            scraped_date_str = distributor_data.get("scraped_date")
+            if scraped_date_str:
+                try:
+                    scraped_date = datetime.fromisoformat(scraped_date_str)
+                    hours_old = (datetime.now() - scraped_date).total_seconds() / 3600
+                    oldest_hours = max(oldest_hours, hours_old)
+                except: continue
+        return oldest_hours if oldest_hours > 0 else float('inf')
+
+
+class ScrapeThread(QThread):
+    progress = pyqtSignal(int)
+    log = pyqtSignal(str)
+    done = pyqtSignal()
+
+    def __init__(self, mpns, storage: JSONStorage, usd_to_inr: float = 87.0):
+        super().__init__()
+        self.mpns = mpns
+        self.storage = storage
+        self.usd_to_inr = usd_to_inr
+        # FIX: Removed the unsupported `headless=True` parameter 
+        self.client = APIClient(timeout=30)
+        self.cancelled = False
+
+    def cancel(self):
+        self.cancelled = True
+        self.log.emit("Fetching cancelled by user")
+
+    def run(self):
+        total = len(self.mpns)
+        fresh_count = 0
+        scraped_count = 0
+        
+        for i, mpn in enumerate(self.mpns):
+            if self.cancelled:
+                self.log.emit("Fetching process was cancelled")
+                self.done.emit()
+                return
+                
+            try:
+                if self.storage.is_data_fresh(mpn, hours=6):
+                    data_age = self.storage.get_data_age_hours(mpn)
+                    self.log.emit(f"Using cached data for {mpn} (age: {data_age:.1f} hours)")
+                    fresh_count += 1
+                    self.progress.emit(int((i + 1) * 100 / total))
+                    continue
+                
+                self.log.emit(f"Fetching API data for: {mpn}")
+                
+                # Step 1: Execute search which populates _meta_cache and retrieves pricing
+                search_results = self.client.search(mpn, self.usd_to_inr)
+                
+                if not search_results:
+                    self.log.emit(f"No match found for {mpn}")
+                    self.progress.emit(int((i + 1) * 100 / total))
+                    time.sleep(0.1)
+                    continue
+
+                # Filter exact/partial
+                filtered_results = filter_search_results(mpn, search_results)
+                if not filtered_results:
+                    self.log.emit(f"No suitable matches found for {mpn}")
+                    self.progress.emit(int((i + 1) * 100 / total))
+                    time.sleep(0.1)
+                    continue
+
+                # Group results by manufacturer
+                by_manufacturer = {}
+                for result in filtered_results:
+                    mfg = result["manufacturer"]
+                    if mfg not in by_manufacturer:
+                        by_manufacturer[mfg] = []
+                    by_manufacturer[mfg].append(result)
+
+                # Process each manufacturer group
+                for manufacturer, dist_results in by_manufacturer.items():
+                    if self.cancelled: return
+                        
+                    result_mpn = dist_results[0]["mpn"]
+                    is_exact = result_mpn.strip().lower() == mpn.strip().lower()
+                    part_type = "Precise Match" if is_exact else "Alternate Parts"
+
+                    self.log.emit(f"Saving data: {result_mpn} / {manufacturer}")
+                    
+                    # Metadata was gathered inside the search() method into _meta_cache
+                    detail_data = self.client.detail(result_mpn, manufacturer)
+
+                    # Save all distributor offers
+                    for dist_offer in dist_results:
+                        self.storage.upsert_offer(
+                            mpn=mpn,
+                            distributor=dist_offer.get("distributor", "Unknown"),
+                            manufacturer=manufacturer,
+                            price_tiers=dist_offer.get("price_tiers", []),
+                            stock=dist_offer.get("stock", 0),
+                            currency=dist_offer.get("currency", "USD"),
+                            lead_time=detail_data.get("lead_time"),
+                            life_cycle_code=detail_data.get("life_cycle_code"),
+                            package_code=detail_data.get("package_code"),
+                            length_mm=detail_data.get("length_mm"),
+                            width_mm=detail_data.get("width_mm"),
+                            default_currency=detail_data.get("default_currency", "USD"),
+                            part_type=part_type,
+                            # Pass new fields
+                            product_desc=detail_data.get("product_desc"),
+                            detailed_desc=detail_data.get("detailed_desc"),
+                            datasheet=detail_data.get("datasheet"),
+                            pin_count=detail_data.get("pin_count"),
+                            # --- NEW: Pass Status ---
+                            reach_status=detail_data.get("reach_status"),
+                            rohs_status=detail_data.get("rohs_status")                           
+                        )
+
+                scraped_count += 1
+
+            except Exception as e:
+                self.log.emit(f"Error processing {mpn}: {e}")
+
+            self.progress.emit(int((i + 1) * 100 / total))
+            time.sleep(0.1)
+
+        self.log.emit(f"Fetching completed - Used cached: {fresh_count}, Fetched fresh: {scraped_count}")
+        self.done.emit()
+
+def convert_price(price, src, dst, usd_to_inr):
+    if src == dst: return price
+    if src == "USD" and dst == "INR": return price * usd_to_inr
+    if src == "INR" and dst == "USD" and usd_to_inr: return price / usd_to_inr
+    return price
+
+def select_tier_for_qty(tiers, required_qty):
+    if not tiers: return None, None, None
+    tiers = sorted(tiers, key=lambda x: x["quantity"])
+    chosen = None
+    next_t = None
+    for t in tiers:
+        if required_qty >= t["quantity"]:
+            chosen = t
+        elif required_qty < t["quantity"] and next_t is None:
+            next_t = t
+            break
+    if chosen is None: chosen = tiers[0]
+    moq = tiers[0]["quantity"]
+    return chosen, next_t, moq
+
+def choose_best_option(offers, total_required_qty, currency, usd_to_inr, package_code, L, W):
+    priority_list = ['Digikey', 'Mouser']
+    prioritized_offers = {d: [] for d in priority_list}
+    others = []
+
+    for off in offers:
+        dist_lower = off.get('distributor', '').lower()
+        matched = None
+        for p in priority_list:
+            if p.lower() in dist_lower:
+                prioritized_offers[p].append(off)
+                matched = p
+                break
+        if not matched: others.append(off)
+
+    final_offers_to_consider = []
+    for d in priority_list:
+        if prioritized_offers[d]:
+            final_offers_to_consider.extend(prioritized_offers[d])
+            break
+    else:
+        final_offers_to_consider.extend(others)
+
+    def pct_or_floor(trq, pct, floor_add):
+        return max(int(math.ceil(trq * pct / 100)), floor_add)
+
+    def calculate_procure_qty(trq, price_usd, pkg_code, max_dim):
+        if price_usd > 10: return trq if trq < 250 else trq + 1
+        is_low_price = price_usd < 1.0
+        pkg_group = None
+        if pkg_code in ['0201', '0402', '0603']: pkg_group = '0201-0603'
+        elif pkg_code in ['0805', '1206', '1210']: pkg_group = '0805-1210'
+        elif pkg_code in ['1812', '2010', '2512', '2920']: pkg_group = '1210-8060'
+        
+        if is_low_price:
+            if pkg_group == '0201-0603':
+                if trq < 100: return trq + 50
+                elif trq < 250: return trq + 80
+                elif trq < 500: return trq + pct_or_floor(trq, 15, 80)
+                elif trq < 1000: return trq + pct_or_floor(trq, 8, 80)
+                else: return trq + pct_or_floor(trq, 5, 80)
+            elif pkg_group == '0805-1210':
+                if trq < 100: return trq + 25
+                elif trq < 250: return trq + 40
+                elif trq < 500: return trq + pct_or_floor(trq, 10, 40)
+                elif trq < 1000: return trq + pct_or_floor(trq, 7, 40)
+                else: return trq + pct_or_floor(trq, 3, 40)
+            elif pkg_group == '1210-8060':
+                if trq < 100: return trq + 12
+                elif trq < 250: return trq + 20
+                elif trq < 500: return trq + pct_or_floor(trq, 5, 20)
+                elif trq < 1000: return trq + pct_or_floor(trq, 3, 20)
+                else: return trq + pct_or_floor(trq, 2, 20)
+            else:
+                if max_dim and max_dim < 5:
+                    if trq < 100: return trq + 25
+                    elif trq < 250: return trq + 40
+                    elif trq < 500: return trq + pct_or_floor(trq, 10, 40)
+                    elif trq < 1000: return trq + pct_or_floor(trq, 7, 40)
+                    else: return trq + pct_or_floor(trq, 3, 40)
+                else: return trq + (2 if trq < 250 else 3)
+        else:
+            if pkg_group in ['0201-0603', '0805-1210']:
+                if trq < 100: return trq + 15
+                elif trq < 250: return trq + 20
+                elif trq < 500: return trq + pct_or_floor(trq, 4, 20)
+                elif trq < 1000: return trq + pct_or_floor(trq, 3, 20)
+                else: return trq + pct_or_floor(trq, 2, 20)
+            elif pkg_group == '1210-8060':
+                if trq < 250: return trq + 5
+                elif trq < 500: return trq + pct_or_floor(trq, 3, 5)
+                elif trq < 1000: return trq + pct_or_floor(trq, 2, 5)
+                else: return trq + pct_or_floor(trq, 1, 5)
+            else:
+                if max_dim and max_dim >= 5:
+                    if trq < 100: return trq + 15
+                    elif trq < 250: return trq + 20
+                    elif trq < 500: return trq + pct_or_floor(trq, 4, 20)
+                    elif trq < 1000: return trq + pct_or_floor(trq, 3, 20)
+                    else: return trq + pct_or_floor(trq, 2, 20)
+                elif max_dim and max_dim >= 5 and 10 <= price_usd <= 20:
+                    return trq + 1 if trq < 250 else trq + 1
+                else: return trq + (2 if trq < 250 else 3)
+        return trq + 5
+
+    best = None
+    for off in final_offers_to_consider:
+        tiers = off.get("price_tiers") or []
+        if not tiers: continue
+
+        tiers_conv = []
+        for t in tiers:
+            price_converted = convert_price(t["price"], off.get("currency", "USD"), currency, usd_to_inr)
+            tiers_conv.append({"quantity": int(t["quantity"]), "price": float(price_converted)})
+
+        tiers_conv = sorted(tiers_conv, key=lambda x: x["quantity"])
+        moq = tiers_conv[0]["quantity"] if tiers_conv else 1
+        chosen, next_t, _ = select_tier_for_qty(tiers_conv, total_required_qty)
+        if not chosen: continue
+
+        price_usd = convert_price(chosen["price"], currency, "USD", usd_to_inr)
+        max_dim = max_dim_mm_from_package_or_size(package_code, L, W)
+        proc_qty = calculate_procure_qty(total_required_qty, price_usd, package_code, max_dim)
+        
+        chosen_proc, next_proc, _ = select_tier_for_qty(tiers_conv, proc_qty)
+        if not chosen_proc: chosen_proc = chosen
+
+        cost_current = proc_qty * chosen_proc["price"]
+        cost_next = float('inf')
+        if next_proc: cost_next = next_proc["quantity"] * next_proc["price"]
+
+        if cost_next < cost_current:
+            final_procure_qty = next_proc["quantity"]
+            final_unit_price = next_proc["price"]
+            final_qty_tier = next_proc["quantity"]
+            final_total_cost = cost_next
+        else:
+            final_procure_qty = proc_qty
+            final_unit_price = chosen_proc["price"]
+            final_qty_tier = chosen_proc["quantity"]
+            final_total_cost = cost_current
+
+        option = {
+            "distributor": off["distributor"],
+            "moq": moq,
+            "qty_tier": final_qty_tier,
+            "unit_price": final_unit_price,
+            "procure_qty": final_procure_qty,
+            "total_cost": final_total_cost,
+            "stock": off.get("stock", 0)
+        }
+
+        if best is None or option["total_cost"] < best["total_cost"]:
+            best = option
+
+    return best
+
+class RobustBOMLoader:
+    @staticmethod
+    def load_bom_file(file_path: str) -> pd.DataFrame:
+        file_ext = os.path.splitext(file_path)[1].lower()
+        try:
+            if file_ext == '.csv': return RobustBOMLoader._load_csv(file_path)
+            elif file_ext in ['.xlsx', '.xls']: return RobustBOMLoader._load_excel(file_path)
+            else: raise ValueError(f"Unsupported file format: {file_ext}")
+        except Exception as e:
+            raise Exception(f"Failed to load BOM file: {str(e)}")
+    
+    @staticmethod
+    def _load_csv(file_path: str) -> pd.DataFrame:
+        encoding = detect_file_encoding(file_path)
+        delimiter = detect_csv_delimiter(file_path, encoding)
+        encodings_to_try = [encoding, 'utf-8', 'utf-8-sig', 'iso-8859-1', 'cp1252']
+        
+        for enc in encodings_to_try:
+            try:
+                df = pd.read_csv(file_path, delimiter=delimiter, encoding=enc, engine='python', on_bad_lines='skip', dtype=str)
+                if df.empty: raise ValueError("CSV file is empty")
+                if len(df.columns) < 2: raise ValueError("CSV file must have at least 2 columns")
+                df.columns = df.columns.str.strip()
+                return df
+            except UnicodeDecodeError: continue
+            except Exception as e:
+                if enc == encodings_to_try[-1]: raise Exception(f"Failed to read CSV: {str(e)}")
+                continue
+        raise Exception("Could not read CSV file with any supported encoding")
+    
+    @staticmethod
+    def _load_excel(file_path: str) -> pd.DataFrame:
+        try:
+            excel_file = pd.ExcelFile(file_path)
+            sheet_names = excel_file.sheet_names
+            if len(sheet_names) == 0: raise ValueError("Excel file contains no worksheets")
+            selected_sheet = sheet_names[0]
+            df = pd.read_excel(file_path, sheet_name=selected_sheet, dtype=str, engine='openpyxl')
+            if df.empty: raise ValueError("Excel sheet is empty")
+            if len(df.columns) < 2: raise ValueError("Excel sheet must have at least 2 columns")
+            df.columns = df.columns.str.strip()
+            df = df.dropna(how='all')
+            return df
+        except Exception as e:
+            raise Exception(f"Failed to read Excel file: {str(e)}")
+
+class BOMDataCache:
+    def __init__(self):
+        self.offers_cache = {}
+        self.meta_cache = {}
+        self.last_update = {}
+        
+    def get_offers(self, mpn, storage):
+        if mpn not in self.offers_cache:
+            self.offers_cache[mpn] = storage.offers_by_mpn(mpn)
+            self.last_update[mpn] = time.time()
+        return self.offers_cache[mpn]
+    
+    def get_meta(self, mpn, storage):
+        if mpn not in self.meta_cache:
+            self.meta_cache[mpn] = storage.part_meta(mpn)
+            self.last_update[mpn] = time.time()
+        return self.meta_cache[mpn]
+    
+    def invalidate(self, mpn=None):
+        if mpn:
+            self.offers_cache.pop(mpn, None)
+            self.meta_cache.pop(mpn, None)
+            self.last_update.pop(mpn, None)
+        else:
+            self.offers_cache.clear()
+            self.meta_cache.clear()
+            self.last_update.clear()
+
+class App(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Sienna BOM Cal V1.1                    © 2025 Sienna ECAD Technologies. All Rights Reserved.")
+        
+        logo_path = resource_path("bomlogo.ico")
+        if os.path.exists(logo_path):
+            self.setWindowIcon(QIcon(logo_path))
+        else:
+            print(f"Icon not found at: {logo_path}")
+
+        self.resize(1250, 750)
+        self.storage = JSONStorage()
+        self.exchange = {"USD": 1.0, "INR": 87.0}
+        self._manufacturer_overrides = {}
+        self._package_overrides = {}
+        
+        self.data_cache = BOMDataCache()
+        self._calculation_in_progress = False
+        self._signal_connected = True 
+        
+        self._build_ui()
+        self._apply_white_backgrounds()
+        self.bom_df = None
+        self.loader = RobustBOMLoader()
+
+    def _build_ui(self):
+        tb = QToolBar(); self.addToolBar(tb)
+        act_open = QAction("Upload BOM", self); act_open.triggered.connect(self.on_open); tb.addAction(act_open)
+        tb.addSeparator()
+        act_fetch = QAction("Fetch Data", self); act_fetch.triggered.connect(self.on_fetch); tb.addAction(act_fetch)
+        tb.addSeparator()
+        act_export = QAction("Export to Excel", self); act_export.triggered.connect(self.on_export_smart); tb.addAction(act_export)
+
+        top = QHBoxLayout()
+
+        mpn_layout = QHBoxLayout()
+        mpn_layout.addWidget(QLabel("MPN Column:"))
+        self.cmb_mpn = QComboBox()
+        self.cmb_mpn.setMinimumWidth(200)
+        mpn_layout.addWidget(self.cmb_mpn)
+        mpn_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(mpn_layout)
+        
+        qty_layout = QHBoxLayout()
+        qty_layout.addWidget(QLabel("QTY Column:"))
+        self.cmb_qty = QComboBox()
+        self.cmb_qty.setMinimumWidth(200)
+        qty_layout.addWidget(self.cmb_qty)
+        qty_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(qty_layout)
+
+        pcb_layout = QHBoxLayout()
+        pcb_layout.addWidget(QLabel("PCB Qty:"))
+        self.sp_pcb = QSpinBox()
+        self.sp_pcb.setRange(1, 1000000)
+        self.sp_pcb.setEnabled(True)
+        self.sp_pcb.setValue(1)
+        self.sp_pcb.setMinimumWidth(150)
+        pcb_layout.addWidget(self.sp_pcb)
+        pcb_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(pcb_layout)
+
+        cur_layout = QHBoxLayout()
+        cur_layout.addWidget(QLabel("Currency:"))
+        self.cmb_cur = QComboBox()
+        self.cmb_cur.addItems(["USD", "INR"])
+        self.cmb_cur.setMinimumWidth(120)
+        cur_layout.addWidget(self.cmb_cur)
+        cur_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(cur_layout)
+
+        rate_layout = QHBoxLayout()
+        rate_layout.addWidget(QLabel("USD→INR:"))
+        self.sp_rate = QDoubleSpinBox()
+        self.sp_rate.setRange(0.01, 1000.0)
+        self.sp_rate.setDecimals(2)
+        self.sp_rate.setValue(87.0)
+        self.sp_rate.setMinimumWidth(120)
+        rate_layout.addWidget(self.sp_rate)
+        rate_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        top.addLayout(rate_layout)
+
+        img1_layout = QHBoxLayout()
+        img_label = QLabel()
+        logo_path = os.path.join(os.path.dirname(__file__), "SiennaLogo.png")
+        if os.path.exists(logo_path):
+            pixmap = QPixmap(logo_path)
+            if not pixmap.isNull():
+                img_label.setPixmap(pixmap.scaledToHeight(40, Qt.TransformationMode.SmoothTransformation))
+        img_label.setMinimumWidth(80) 
+        img1_layout.addWidget(img_label)
+        img1_layout.setAlignment(Qt.AlignmentFlag.AlignRight)
+        top.addLayout(img1_layout)
+
+        topw = QWidget()
+        topw.setLayout(top)
+
+        self.tabs = QTabWidget()
+        self.tbl_results = QTableWidget()
+        self.tbl_details = QTableWidget()
+        self.tabs.addTab(self.tbl_results, "BOM Results")
+        self.tabs.addTab(self.tbl_details, "Component Details")
+
+        self.log = QTextEdit(); self.log.setReadOnly(True); self.log.setMaximumHeight(160)
+        progress_layout = QHBoxLayout()
+        self.progress = QProgressBar()
+        self.progress.setVisible(False)
+        
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setVisible(False)
+        self.cancel_btn.clicked.connect(self.on_cancel_scraping)
+        
+        progress_layout.addWidget(self.progress)
+        progress_layout.addWidget(self.cancel_btn)
+        progress_widget = QWidget()
+        progress_widget.setLayout(progress_layout)
+
+        spl = QSplitter(Qt.Orientation.Vertical)
+        spl.addWidget(self.tabs); spl.addWidget(self.log); spl.setStretchFactor(0, 3); spl.setStretchFactor(1, 1)
+
+        root = QVBoxLayout(); root.addWidget(topw); root.addWidget(progress_widget); root.addWidget(spl)
+        cw = QWidget(); cw.setLayout(root); self.setCentralWidget(cw)
+
+        self._setup_debounced_recalc()
+        self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
+
+    def on_cancel_scraping(self, _):
+        if hasattr(self, 'worker') and self.worker.isRunning():
+            self.worker.cancel()
+            self.cancel_btn.setEnabled(False)
+            self.cancel_btn.setText("Cancelling...")
+
+    def on_fetch(self, _):
+        if self.bom_df is None:
+            QMessageBox.warning(self, "Warning", "Upload BOM first")
+            return
+
+        mpn_col = self.cmb_mpn.currentText()
+        if not mpn_col:
+            QMessageBox.warning(self, "Warning", "Select MPN column")
+            return
+
+        mpns = []
+        for val in self.bom_df[mpn_col].dropna().astype(str).str.strip().unique():
+            if val and val.lower() != 'nan':
+                mpns.append(val)
+
+        if not mpns:
+            QMessageBox.warning(self, "Warning", "No valid MPNs found")
+            return
+
+        fresh_mpns = [mpn for mpn in mpns if self.storage.is_data_fresh(mpn, hours=6)]
+        stale_mpns = [mpn for mpn in mpns if not self.storage.is_data_fresh(mpn, hours=6)]
+        
+        self.log_msg(f"Starting fetch for {len(mpns)} unique MPNs")
+        self.log_msg(f"Fresh data (< 6 hours): {len(fresh_mpns)} MPNs")
+        self.log_msg(f"Will fetch: {len(stale_mpns)} MPNs")
+
+        self.progress.setVisible(True)
+        self.progress.setValue(0)
+        self.cancel_btn.setVisible(True)
+        self.cancel_btn.setEnabled(True)
+        self.cancel_btn.setText("Cancel")
+
+        # Pass the current conversion rate to the worker
+        rate = float(self.sp_rate.value())
+        self.worker = ScrapeThread(mpns, self.storage, rate)
+        self.worker.progress.connect(self.progress.setValue)
+        self.worker.log.connect(self.log_msg)
+        self.worker.done.connect(self.on_scrape_done)
+        self.worker.start()
+
+        self._details_needs_refresh = True
+
+    def on_scrape_done(self):
+        self.progress.setVisible(False)
+        self.cancel_btn.setVisible(False)
+        self._details_needs_refresh = True
+        self.data_cache.invalidate()
+        self.log_msg("Processing completed")
+        self.recalc_all()
+
+    def _apply_white_backgrounds(self):
+        white_style = """
+            background-color: white;
+            color: black;
+            border: 2px solid rgb(0, 150, 50);
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        """
+        table_style = """
+            QTableWidget { background-color: white; color: black; border: 2px solid rgb(0, 150, 50); selection-background-color: rgb(0, 150, 50); selection-color: white; }
+            QTableWidget::item { padding: 3px; }
+            QTableWidget::item:selected { background-color: rgb(0, 150, 50); color: white; }
+            QHeaderView::section:horizontal { background-color: rgb(0, 150, 50); color: white; padding: 5px; border: 1px solid rgb(200, 200, 200); font-weight: bold; font-size: 11pt; }
+            QHeaderView::section:vertical { background-color: white; color: black; padding: 3px; border: 1px solid rgb(200, 200, 200); font-weight: bold; }
+            QTableCornerButton::section { background-color: rgb(0, 150, 50); border: 1px solid rgb(200, 200, 200); }
+        """
+        self.log.setStyleSheet(white_style)
+        self.tbl_results.setStyleSheet(table_style)
+        self.tbl_details.setStyleSheet(table_style)
+
+    def log_msg(self, m):
+        self.log.append(f"[{datetime.now().strftime('%H:%M:%S')}] {m}")
+
+    def on_open(self, _):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open BOM", "", "Excel (*.xlsx *.xls);;CSV (*.csv);;All Files (*.*)"
+        )
+        if not path: return
+        
+        try:
+            self.log_msg(f"Loading file: {os.path.basename(path)}")
+            self.bom_df = self.loader.load_bom_file(path)
+            self.cmb_mpn.clear()
+            self.cmb_qty.clear()
+            cols = list(self.bom_df.columns)
+            self.cmb_mpn.addItems(cols)
+            self.cmb_qty.addItems(cols)
+            self._auto_detect_columns(cols)
+            self.show_bom(self.bom_df)
+            self.populate_details_initial()
+            self.log_msg(f"Successfully loaded BOM with {len(self.bom_df)} rows and {len(self.bom_df.columns)} columns")
+        except Exception as e:
+            QMessageBox.critical(self, "Error Loading BOM", str(e))
+            self.log_msg(f"Error loading BOM: {str(e)}")
+
+    def _setup_debounced_recalc(self):
+        self.debounce_timer = QTimer(self)
+        self.debounce_timer.setSingleShot(True)
+        self.debounce_timer.setInterval(300)
+        self.debounce_timer.timeout.connect(self.recalc_all)
+        self.cmb_cur.currentTextChanged.connect(self._trigger_debounced_recalc)
+        self.sp_rate.valueChanged.connect(self._trigger_debounced_recalc)
+        self.sp_pcb.valueChanged.connect(self._trigger_debounced_recalc)
+
+    def _trigger_debounced_recalc(self, _):
+        self.debounce_timer.start()
+
+    def _auto_detect_columns(self, columns):
+        mpn_patterns = ['mpn', 'part', 'partno', 'part_no', 'part number']
+        qty_patterns = ['qty', 'quantity']
+        for i, col in enumerate(columns):
+            col_lower = col.lower().strip()
+            if any(pattern in col_lower for pattern in mpn_patterns):
+                self.cmb_mpn.setCurrentIndex(i)
+                break
+        for i, col in enumerate(columns):
+            col_lower = col.lower().strip()
+            if any(pattern in col_lower for pattern in qty_patterns):
+                self.cmb_qty.setCurrentIndex(i)
+                break
+
+    def show_bom(self, df):
+        self.tbl_results.setRowCount(len(df))
+        self.tbl_results.setColumnCount(len(df.columns))
+        self.tbl_results.setHorizontalHeaderLabels(list(df.columns))
+        for r in range(len(df)):
+            for c in range(len(df.columns)):
+                val = df.iloc[r, c]
+                display_val = str(val) if pd.notna(val) else ""
+                self.tbl_results.setItem(r, c, QTableWidgetItem(display_val))
+
+    def populate_details_initial(self):
+        if self.bom_df is None: return
+        self.tbl_details.setRowCount(len(self.bom_df))
+        self.tbl_details.setColumnCount(len(self.bom_df.columns))
+        self.tbl_details.setHorizontalHeaderLabels(list(self.bom_df.columns))
+        for r in range(len(self.bom_df)):
+            for c in range(len(self.bom_df.columns)):
+                val = self.bom_df.iloc[r, c]
+                display_val = str(val) if pd.notna(val) else ""
+                self.tbl_details.setItem(r, c, QTableWidgetItem(display_val))
+
+    def recalc_all(self):
+        if self.bom_df is None: return
+        try:
+            self.calc_bom_results()
+            self.refresh_details_view()
+        except Exception as e:
+            self.log_msg(f"Recalc error: {e}")
+
+    def refresh_details_view(self):
+        if self.bom_df is None: return
+        if not hasattr(self, '_details_needs_refresh'): self._details_needs_refresh = True
+        if not self._details_needs_refresh: return
+
+        mpn_col = self.cmb_mpn.currentText() or self.bom_df.columns[0]
+        df = self.bom_df.copy()
+
+        # Added new columns here
+        add_cols = ["Product Description", "Detailed Description", "Datasheet", "Pin Count", 
+                    "Manufacturer", "Reach Status", "RoHS Status", "Part Type", "Life Cycle", "Package", "Size (L*W mm)", "Default Currency", "Lead Time"]
+        for col in add_cols: df[col] = ""
+
+        fixed_dists = ['Digikey', 'Mouser', 'Arrow', 'Avnet', 'Newark', 'RS Components', 'Element14']
+        max_tiers = 5
+
+        for d in fixed_dists:
+            df[f"{d} Stock"] = ""
+            for t in range(1, max_tiers + 1):
+                df[f"{d} T{t} Qty"] = ""
+                df[f"{d} T{t} Price"] = ""
+
+        for idx, row in df.iterrows():
+            mpn_val = row[mpn_col]
+            if pd.isna(mpn_val): continue
+            mpn = str(mpn_val).strip()
+            if not mpn or mpn.lower() == 'nan': continue
+
+            offers = self.storage.offers_by_mpn(mpn)
+            manuf = sorted({o["manufacturer"] for o in offers if o.get("manufacturer")})
+            meta = self.storage.part_meta(mpn)
+
+            # Map metadata to columns
+            df.at[idx, "Product Description"] = meta.get("product_desc", "")
+            df.at[idx, "Detailed Description"] = meta.get("detailed_desc", "")
+            df.at[idx, "Datasheet"] = meta.get("datasheet", "")
+            df.at[idx, "Pin Count"] = meta.get("pin_count", "")
+            df.at[idx, "Manufacturer"] = " | ".join(manuf) if manuf else ""
+            # --- NEW: Populate Status ---
+            df.at[idx, "Reach Status"] = meta.get("reach_status", "")
+            df.at[idx, "RoHS Status"] = meta.get("rohs_status", "")
+            df.at[idx, "Part Type"] = meta.get("part_type", "")
+            df.at[idx, "Life Cycle"] = meta.get("life", "")
+            df.at[idx, "Lead Time"] = meta.get("lead_time", "")
+            pkg = meta.get("package") or ""
+            L = meta.get("L")
+            W = meta.get("W")
+            df.at[idx, "Package"] = pkg or ""
+            if L is not None or W is not None:
+                df.at[idx, "Size (L*W mm)"] = f"{(L or '')}*{(W or '')}"
+            df.at[idx, "Default Currency"] = meta.get("default_currency", "USD")
+
+            for o in offers:
+                dname_raw = o["distributor"] or ""
+                matched = next((d for d in fixed_dists if d.lower() in dname_raw.lower()), None)
+                if not matched: continue
+
+                df.at[idx, f"{matched} Stock"] = str(o.get("stock", 0))
+                tiers = sorted(o.get("price_tiers") or [], key=lambda x: x["quantity"])
+                for ti, t in enumerate(tiers[:max_tiers], start=1):
+                    df.at[idx, f"{matched} T{ti} Qty"] = str(t["quantity"])
+                    df.at[idx, f"{matched} T{ti} Price"] = f"{t['price']:.6f}"
+
+        self.tbl_details.setRowCount(len(df))
+        self.tbl_details.setColumnCount(len(df.columns))
+        self.tbl_details.setHorizontalHeaderLabels(list(df.columns))
+        for r in range(len(df)):
+            for c in range(len(df.columns)):
+                val = df.iloc[r, c]
+                display_val = str(val) if pd.notna(val) else ""
+                self.tbl_details.setItem(r, c, QTableWidgetItem(display_val))
+
+        self._details_needs_refresh = False
+
+    def calc_bom_results(self):
+        if self._calculation_in_progress: return
+        mpn_col = self.cmb_mpn.currentText()
+        qty_col = self.cmb_qty.currentText()
+        if not mpn_col or not qty_col: return
+
+        self._calculation_in_progress = True
+        try:
+            df = self.bom_df.copy()
+            # Added new columns here as well
+            result_cols = [
+                "Part Type", "MPN", "Product Description", "Detailed Description", "Datasheet", "Pin Count",
+                "Manufacturer", "Reach Status", "RoHS Status", "Part Life Cycle Code", "Package",
+                "Size (L*W mm)", "Lead Time", "In Stock", "MOQ", "Total Required Qty",
+                "Procure Qty", "Distributor", "Qty Tier", "Unit Price", "PCB Per Unit Price", "Total Project Price"
+            ]
+            for col in result_cols: df[col] = ""
+
+            pcb_qty = int(self.sp_pcb.value())
+            currency = self.cmb_cur.currentText()
+            usd_to_inr = float(self.sp_rate.value())
+
+            rows_data = []
+            for idx, row in df.iterrows():
+                mpn_val = row[mpn_col]
+                if pd.isna(mpn_val): continue
+                mpn = str(mpn_val).strip()
+                if not mpn or mpn.lower() == 'nan': continue
+
+                qty_val = row[qty_col]
+                if pd.isna(qty_val): bom_qty = 0.0
+                else:
+                    try: bom_qty = float(qty_val)
+                    except (ValueError, TypeError): bom_qty = 0.0
+                
+                total_required = int(bom_qty * pcb_qty)
+                offers = self.data_cache.get_offers(mpn, self.storage)
+                meta = self.data_cache.get_meta(mpn, self.storage)
+
+                selected_manufacturer = self._manufacturer_overrides.get(mpn)
+                if selected_manufacturer:
+                    offers = [o for o in offers if o.get("manufacturer") == selected_manufacturer]
+                    if offers:
+                        life = next((o["life_cycle_code"] for o in offers if o.get("life_cycle_code")), "")
+                        pkg = next((o["package_code"] for o in offers if o.get("package_code")), "")
+                        L = next((o["length_mm"] for o in offers if o.get("length_mm") is not None), None)
+                        W = next((o["width_mm"] for o in offers if o.get("width_mm") is not None), None)
+                        defcur = next((o["default_currency"] for o in offers if o.get("default_currency")), "USD")
+                        ptype = next((o["part_type"] for o in offers if o.get("part_type")), "")
+                        lead = next((o["lead_time"] for o in offers if o.get("lead_time")), "")
+                        
+                        # New fields
+                        p_desc = next((o["product_desc"] for o in offers if o.get("product_desc")), "")
+                        d_desc = next((o["detailed_desc"] for o in offers if o.get("detailed_desc")), "")
+                        sheet = next((o["datasheet"] for o in offers if o.get("datasheet")), "")
+                        pins = next((o["pin_count"] for o in offers if o.get("pin_count")), "")
+                        reach = next((o["reach_status"] for o in offers if o.get("reach_status")), "")
+                        rohs = next((o["rohs_status"] for o in offers if o.get("rohs_status")), "")
+
+                        meta = {
+                            "life": life, "package": pkg, "L": L, "W": W, 
+                            "default_currency": defcur, "part_type": ptype, "lead_time": lead,
+                            "product_desc": p_desc, "detailed_desc": d_desc, "datasheet": sheet, "pin_count": pins,
+                            "reach_status": reach, "rohs_status": rohs
+                        }
+
+                pkg_code = meta.get("package") or ""
+                L = meta.get("L")
+                W = meta.get("W")
+
+                offers_conv = []
+                for o in offers:
+                    tiers = []
+                    for t in o.get("price_tiers") or []:
+                        price_conv = convert_price(t["price"], o.get("currency", "USD"), currency, usd_to_inr)
+                        tiers.append({"quantity": int(t["quantity"]), "price": float(price_conv)})
+                    offers_conv.append({
+                        "distributor": o["distributor"], 
+                        "price_tiers": sorted(tiers, key=lambda x: x["quantity"]),
+                        "stock": o.get("stock", 0), 
+                        "currency": currency
+                    })
+
+                best = choose_best_option(offers_conv, total_required, currency, usd_to_inr, norm_eia_code(pkg_code), L, W)
+                rows_data.append({
+                    'idx': idx, 'mpn': mpn, 'bom_qty': bom_qty, 'total_required': total_required,
+                    'best': best, 'meta': meta, 'offers': self.data_cache.get_offers(mpn, self.storage)
+                })
+
+            for row_data in rows_data:
+                idx = row_data['idx']
+                best = row_data['best']
+                meta = row_data['meta']
+                
+                if best:
+                    df.at[idx, "In Stock"] = str(best.get("stock", 0))
+                    df.at[idx, "MOQ"] = str(best.get("moq", ""))
+                    df.at[idx, "Total Required Qty"] = str(row_data['total_required'])
+                    df.at[idx, "Procure Qty"] = str(best.get("procure_qty", row_data['total_required']))
+                    df.at[idx, "Distributor"] = best.get("distributor", "")
+                    df.at[idx, "Qty Tier"] = str(best.get("qty_tier", ""))
+                    df.at[idx, "Unit Price"] = f"{best.get('unit_price', 0):.6f}"
+                    df.at[idx, "PCB Per Unit Price"] = f"{float(best.get('unit_price', 0)) * row_data['bom_qty']:.6f}"
+                    df.at[idx, "Total Project Price"] = f"{float(best.get('total_cost', 0)):.4f}"
+
+                df.at[idx, "Part Type"] = meta.get("part_type", "")
+                df.at[idx, "MPN"] = row_data['mpn']
+                
+                # New fields mapping
+                df.at[idx, "Product Description"] = meta.get("product_desc", "")
+                df.at[idx, "Detailed Description"] = meta.get("detailed_desc", "")
+                df.at[idx, "Datasheet"] = meta.get("datasheet", "")
+                df.at[idx, "Pin Count"] = meta.get("pin_count", "")
+                # --- NEW: Populate Status ---
+                df.at[idx, "Reach Status"] = meta.get("reach_status", "")
+                df.at[idx, "RoHS Status"] = meta.get("rohs_status", "")                
+                df.at[idx, "Part Life Cycle Code"] = meta.get("life", "")
+                df.at[idx, "Package"] = meta.get("package", "")
+                df.at[idx, "Lead Time"] = meta.get("lead_time", "")
+                if meta.get("L") is not None or meta.get("W") is not None:
+                    df.at[idx, "Size (L*W mm)"] = f"{(meta.get('L') or '')}*{(meta.get('W') or '')}"
+
+                all_offers = row_data['offers']
+                manufacturers = sorted({o["manufacturer"] for o in all_offers if o.get("manufacturer")})
+                if manufacturers:
+                    selected_manufacturer = self._manufacturer_overrides.get(row_data['mpn'])
+                    df.at[idx, "Manufacturer"] = selected_manufacturer or manufacturers[0]
+
+            sums_cols = ["PCB Per Unit Price", "Total Project Price"]
+            totals = {}
+            for c in sums_cols:
+                vals = pd.to_numeric(df[c].replace("", 0), errors="coerce").fillna(0) if c in df.columns else pd.Series()
+                totals[c] = vals.sum()
+
+            self.tbl_results.setUpdatesEnabled(False)
+            if self._signal_connected:
+                try:
+                    self.tbl_results.itemChanged.disconnect(self._on_package_edit_changed)
+                    self._signal_connected = False
+                except TypeError: pass
+            
+            try:
+                self.tbl_results.setRowCount(len(df) + 1)
+                self.tbl_results.setColumnCount(len(df.columns))
+                self.tbl_results.setHorizontalHeaderLabels(list(df.columns))
+
+                for r in range(len(df)):
+                    for c in range(len(df.columns)):
+                        col_name = df.columns[c]
+                        val = df.iloc[r, c]
+                        display_val = str(val) if pd.notna(val) else ""
+                        it = QTableWidgetItem(display_val)
+                        
+                        if col_name == "In Stock":
+                            try: s = int(display_val) if display_val else 0
+                            except: s = 0
+                            if s == 0: it.setBackground(QColor(255, 200, 200))
+                            elif s < 100: it.setBackground(QColor(255, 255, 200))
+                            elif s < 1000: it.setBackground(QColor(255, 255, 150))
+                            else: it.setBackground(QColor(200, 255, 200))
+                            f = QFont(); f.setBold(True); it.setFont(f)
+                        elif col_name == "Package":
+                            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+                            it.setBackground(QColor(240, 255, 240))
+                        elif col_name == "Size (L*W mm)":
+                            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable)
+                            it.setBackground(QColor(240, 240, 255))
+                        self.tbl_results.setItem(r, c, it)
+
+                self._add_manufacturer_dropdowns_optimized(df, rows_data)
+
+                tr = len(df)
+                for c in range(len(df.columns)):
+                    name = df.columns[c]
+                    if c == 0: tit = QTableWidgetItem("TOTAL")
+                    elif name in totals: tit = QTableWidgetItem(f"{totals[name]:.4f}")
+                    else: tit = QTableWidgetItem("")
+                    f = QFont(); f.setBold(True); tit.setFont(f); tit.setBackground(QColor(220, 220, 220))
+                    self.tbl_results.setItem(tr, c, tit)
+            finally:
+                if not self._signal_connected:
+                    try:
+                        self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
+                        self._signal_connected = True
+                    except TypeError: pass
+                self.tbl_results.setUpdatesEnabled(True)
+        finally:
+            self._calculation_in_progress = False
+
+    def _on_package_edit_changed(self, item):
+        if not item or self._calculation_in_progress: return
+        if item.row() >= self.tbl_results.rowCount() - 1: return
+
+        col = item.column()
+        header = self.tbl_results.horizontalHeaderItem(col)
+        if not header: return
+        col_name = header.text()
+        if col_name not in ["Package", "Size (L*W mm)"]: return
+
+        row = item.row()
+        mpn_col_idx = None
+        for c in range(self.tbl_results.columnCount()):
+            h = self.tbl_results.horizontalHeaderItem(c)
+            if h and h.text() == "MPN":
+                mpn_col_idx = c
+                break
+
+        if mpn_col_idx is None: return
+        mpn_item = self.tbl_results.item(row, mpn_col_idx)
+        if not mpn_item: return
+
+        mpn = mpn_item.text().strip()
+        new_value = item.text().strip()
+        if not mpn: return
+
+        orig_meta = self.storage.part_meta(mpn)
+        if self._signal_connected:
+            try:
+                self.tbl_results.itemChanged.disconnect(self._on_package_edit_changed)
+                self._signal_connected = False
+            except TypeError: pass
+        
+        try:
+            if col_name == "Package":
+                original_package = orig_meta.get("package", "")
+                if new_value != original_package:
+                    self._package_overrides[mpn] = new_value
+                    rows_affected = self.storage.update_package_for_mpn(mpn, new_value)
+                    self.log_msg(f"Package updated for {mpn}: '{new_value}' - {rows_affected} records")
+                    self.data_cache.invalidate(mpn)
+                    self.recalc_all()
+                elif mpn in self._package_overrides and new_value == original_package:
+                    del self._package_overrides[mpn]
+                    self.log_msg(f"Package override removed for {mpn}")
+                    self.recalc_all()
+            
+            elif col_name == "Size (L*W mm)":
+                original_l = orig_meta.get("L")
+                original_w = orig_meta.get("W")
+                original_size = f"{(original_l or '')}*{(original_w or '')}" if (original_l is not None or original_w is not None) else ""
+                
+                if new_value != original_size:
+                    length_mm, width_mm = self._parse_size_input(new_value)
+                    if length_mm is None and width_mm is None and new_value:
+                        self.log_msg(f"Error: Invalid size format '{new_value}'")
+                        item.setText(original_size)
+                        return
+                    rows_affected = self.storage.update_size_for_mpn(mpn, length_mm, width_mm)
+                    new_size_display = f"{(length_mm or '')}*{(width_mm or '')}" if (length_mm is not None or width_mm is not None) else ""
+                    self.log_msg(f"Size updated for {mpn}: '{new_size_display}' - {rows_affected} records")
+                    item.setText(new_size_display)
+                    self.data_cache.invalidate(mpn)
+                    self.recalc_all()
+        except Exception as e:
+            self.log_msg(f"Error updating {col_name}: {e}")
+            if col_name == "Package": item.setText(orig_meta.get("package", ""))
+            elif col_name == "Size (L*W mm)":
+                original_l = orig_meta.get("L")
+                original_w = orig_meta.get("W")
+                original_size = f"{(original_l or '')}*{(original_w or '')}" if (original_l is not None or original_w is not None) else ""
+                item.setText(original_size)
+        finally:
+            if not self._signal_connected:
+                try:
+                    self.tbl_results.itemChanged.connect(self._on_package_edit_changed)
+                    self._signal_connected = True
+                except TypeError: pass
+
+    def _parse_size_input(self, size_text):
+        if not size_text or size_text.strip() == "*" or size_text.strip() == "x": return None, None
+        pattern = r'([0-9]*\.?[0-9]+)\s*[*x]\s*([0-9]*\.?[0-9]+)'
+        match = re.search(pattern, size_text.strip())
+        if match:
+            try: return float(match.group(1)), float(match.group(2))
+            except ValueError: pass
+        try: return float(size_text.strip()), None
+        except ValueError: pass
+        return None, None
+
+    def _add_manufacturer_dropdowns_optimized(self, df, rows_data):
+        if "Manufacturer" not in df.columns: return
+        manf_col_idx = list(df.columns).index("Manufacturer")
+        mpn_to_row = {rd['mpn']: rd for rd in rows_data}
+        
+        for r in range(len(df)):
+            mpn = df.iloc[r, list(df.columns).index("MPN")]
+            if pd.isna(mpn) or not mpn: continue
+            mpn = str(mpn).strip()
+            if not mpn or mpn.lower() == 'nan': continue
+            row_data = mpn_to_row.get(mpn)
+            if not row_data: continue
+                
+            manufacturers = sorted({o["manufacturer"] for o in row_data['offers'] if o.get("manufacturer")})
+            if len(manufacturers) <= 1: continue
+            
+            combo = QComboBox()
+            combo.addItems(manufacturers)
+            current_manf = self._manufacturer_overrides.get(mpn, manufacturers[0])
+            combo.setCurrentText(current_manf)
+            combo.currentTextChanged.connect(
+                lambda selected_manf, mpn=mpn: self._on_manufacturer_changed(mpn, selected_manf)
+            )
+            self.tbl_results.setCellWidget(r, manf_col_idx, combo)
+
+    def _on_manufacturer_changed(self, mpn, selected_manufacturer):
+        self._manufacturer_overrides[mpn] = selected_manufacturer
+        self.log_msg(f"Manufacturer changed for {mpn}: {selected_manufacturer}")
+        self.recalc_all()
+
+    def on_export_smart(self, _):
+        current_tab_index = self.tabs.currentIndex()
+        current_tab_text = self.tabs.tabText(current_tab_index)
+        if "Results" in current_tab_text: self.on_export_results()
+        elif "Details" in current_tab_text: self.on_export_details()
+        else: self.on_export_results()
+
+    def on_export_results(self):
+        if self.tbl_results.rowCount() == 0:
+            QMessageBox.warning(self, "Warning", "No data to export")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save Results Excel", "", "Excel (*.xlsx)")
+        if not path: return
+
+        try:
+            headers = [self.tbl_results.horizontalHeaderItem(i).text() for i in range(self.tbl_results.columnCount())]
+            data = []
+            for r in range(self.tbl_results.rowCount()):
+                row = []
+                for c in range(self.tbl_results.columnCount()):
+                    it = self.tbl_results.item(r, c)
+                    row.append(it.text() if it else "")
+                data.append(row)
+
+            df = pd.DataFrame(data, columns=headers)
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "BOM Results"
+            self._add_summary_table(ws, df)
+            
+            current_row = ws.max_row + 3
+            for r_idx, row in enumerate(dataframe_to_rows(df, index=False, header=True), start=current_row):
+                for c_idx, value in enumerate(row, start=1):
+                    ws.cell(row=r_idx, column=c_idx, value=value)
+            
+            self._style_table_headers(ws, current_row, len(headers))
+            self._auto_adjust_columns(ws)
+            wb.save(path)
+            self.log_msg(f"Results exported: {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+            self.log_msg(f"Results export failed: {e}")
+
+    def _add_summary_table(self, ws, df):
+        total_rows = len(df) - 1
+        if total_rows < 0: total_rows = 0
+        total_project_cost = 0
+        total_pcb_cost = 0
+        
+        try:
+            total_row = df.iloc[-1]
+            if 'Total Project Price' in df.columns:
+                total_project_str = str(total_row['Total Project Price']).replace(',', '')
+                if total_project_str and total_project_str != 'TOTAL':
+                    total_project_cost = float(total_project_str)
+            if 'PCB Per Unit Price' in df.columns:
+                total_pcb_str = str(total_row['PCB Per Unit Price']).replace(',', '')
+                if total_pcb_str and total_pcb_str != 'TOTAL':
+                    total_pcb_cost = float(total_pcb_str)
+        except: pass
+        
+        currency = self.cmb_cur.currentText()
+        pcb_qty = self.sp_pcb.value()
+        
+        title_font = Font(size=16, bold=True, color="00962F")
+        header_font = Font(size=12, bold=True, color="FFFFFF")
+        green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
+        light_green_fill = PatternFill(start_color="E8F5E8", end_color="E8F5E8", fill_type="solid")
+        center_align = Alignment(horizontal="center", vertical="center")
+        
+        ws['A1'] = 'Sienna ECAD Technologies'
+        ws['A1'].font = title_font
+        ws['A1'].alignment = center_align
+        ws.merge_cells('A1:F1')
+        
+        summary_start_row = 3
+        summary_headers = [('Metric', 'A'), ('Value', 'B'), ('', 'C'), ('Metric', 'D'), ('Value', 'E'), ('Unit', 'F')]
+        
+        for header, col in summary_headers:
+            cell = ws[f'{col}{summary_start_row}']
+            cell.value = header
+            cell.font = header_font
+            cell.fill = green_fill
+            cell.alignment = center_align
+        
+        summary_data = [
+            ('Total Components', total_rows, '', 'PCB Quantity', pcb_qty, 'pcs'),
+            ('Currency', currency, '', 'PCB Unit Cost', f'{total_pcb_cost:.2f}', currency),
+            ('Project Total', f'{total_project_cost:.2f}', currency, 'Cost per PCB', f'{total_project_cost/pcb_qty if pcb_qty > 0 else 0:.2f}', f'{currency}/pcb'),
+            ('Generated On', datetime.now().strftime('%Y-%m-%d %H:%M'), '', 'Exchange Rate', f'${1:.2f} = ₹{self.sp_rate.value():.2f}' if currency == 'INR' else 'N/A', ''),
+        ]
+        
+        for row_idx, (metric1, value1, unit1, metric2, value2, unit2) in enumerate(summary_data, start=summary_start_row + 1):
+            ws[f'A{row_idx}'].value = metric1
+            ws[f'B{row_idx}'].value = value1
+            ws[f'C{row_idx}'].value = unit1
+            ws[f'D{row_idx}'].value = metric2
+            ws[f'E{row_idx}'].value = value2
+            ws[f'F{row_idx}'].value = unit2
+            
+            fill = light_green_fill if row_idx % 2 == 0 else PatternFill()
+            for col in ['A', 'B', 'C', 'D', 'E', 'F']:
+                cell = ws[f'{col}{row_idx}']
+                cell.fill = fill
+                cell.alignment = center_align if col in ['B', 'E', 'F'] else Alignment(horizontal="left", vertical="center")
+
+    def _style_table_headers(self, ws, header_row, num_cols):
+        green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
+        white_font = Font(color="FFFFFF", bold=True, size=11)
+        center_alignment = Alignment(horizontal="center", vertical="center")
+        
+        for col in range(1, num_cols + 1):
+            cell = ws.cell(row=header_row, column=col)
+            cell.fill = green_fill
+            cell.font = white_font
+            cell.alignment = center_alignment
+
+    def _auto_adjust_columns(self, ws):
+        column_widths = {}
+        for row in ws.iter_rows():
+            for cell in row:
+                if isinstance(cell, MergedCell): continue
+                column_letter = cell.column_letter
+                try:
+                    content_length = len(str(cell.value)) if cell.value is not None else 0
+                    if column_letter not in column_widths: column_widths[column_letter] = content_length
+                    else: column_widths[column_letter] = max(column_widths[column_letter], content_length)
+                except: continue
+        for column_letter, max_length in column_widths.items():
+            ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+    def on_export_details(self):
+        if self.tbl_details.rowCount() == 0:
+            QMessageBox.warning(self, "Warning", "No details data to export")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Save Details Excel", "", "Excel (*.xlsx)")
+        if not path: return
+
+        try:
+            headers = [self.tbl_details.horizontalHeaderItem(i).text() for i in range(self.tbl_details.columnCount())]
+            data = []
+            for r in range(self.tbl_details.rowCount()):
+                row = []
+                for c in range(self.tbl_details.columnCount()):
+                    it = self.tbl_details.item(r, c)
+                    row.append(it.text() if it else "")
+                data.append(row)
+
+            df = pd.DataFrame(data, columns=headers)
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "Component Details"
+            
+            for r in dataframe_to_rows(df, index=False, header=True): ws.append(r)
+            
+            green_fill = PatternFill(start_color="00962F", end_color="00962F", fill_type="solid")
+            white_font = Font(color="FFFFFF", bold=True, size=11)
+            center_alignment = Alignment(horizontal="center", vertical="center")
+            
+            for col in range(1, len(headers) + 1):
+                cell = ws.cell(row=1, column=col)
+                cell.fill = green_fill
+                cell.font = white_font
+                cell.alignment = center_alignment
+            
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                    except: pass
+                ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+            
+            wb.save(path)
+            self.log_msg(f"Details exported: {path}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Export Error", str(e))
+            self.log_msg(f"Details export failed: {e}")
+
+def run_app():
+    app = QApplication(sys.argv)
+    apply_dark_green_theme(app)
+    w = App()
+    w.show()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    run_app()
