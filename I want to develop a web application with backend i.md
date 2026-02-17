@@ -55,6 +55,7 @@ class ProjectStage(db.Model):
     start_date = db.Column(db.Date)
     end_date = db.Column(db.Date)
     manager_id = db.Column(db.Integer, db.ForeignKey('user.id'))  # ADD THIS LINE
+    parallel_group_id = db.Column(db.String(50))  # For grouping parallel stages
 
 class ProjectMember(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -137,26 +138,517 @@ class HoldDate(db.Model):
 
 
 # ============================================================================
+# Excel Generation Helper Function
+# ============================================================================
+
+def generate_excel_file(project_id, save_to_backend=True):
+    """
+    Generate Excel file for a project and optionally save to backend.
+    
+    Args:
+        project_id: The project ID to generate Excel for
+        save_to_backend: If True, saves the file to static/excel_exports/
+    
+    Returns:
+        BytesIO object containing the Excel file, or None on error
+    """
+    try:
+        project = Project.query.get(project_id)
+        if not project:
+            print(f"⚠️ Project {project_id} not found")
+            return None
+            
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Parse Working Saturdays
+        try:
+            working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        except:
+            working_saturdays = set()
+
+        # ==========================================
+        # 1. PREPARE RESCHEDULE MAP (STAGE-WISE)
+        # ==========================================
+        stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        for stage in stages:
+            parts = stage.name.split('-')
+            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id, 
+                stage_id=stage.id
+            ).all()
+            
+            unique_nums = sorted(list(set(r.reschedule_number for r in task_reschedules if r.reschedule_number)))
+            
+            for idx, r_num in enumerate(unique_nums):
+                target_row = idx + 1
+                if target_row > 4: continue
+                
+                event_tasks = [t for t in task_reschedules if t.reschedule_number == r_num]
+                for t in event_tasks:
+                    date_str = t.new_date.strftime('%Y-%m-%d')
+                    if date_str not in stage_reschedule_map[target_row]:
+                        stage_reschedule_map[target_row][date_str] = []
+                    if stage_abbr not in stage_reschedule_map[target_row][date_str]:
+                        stage_reschedule_map[target_row][date_str].append(stage_abbr)
+
+        # ==========================================
+        # 2. SETUP EXCEL & HEADERS
+        # ==========================================
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Schedule_Tracker"
+        
+        # Styles
+        gray_header = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        light_blue_header = PatternFill(start_color="B4C7E7", end_color="B4C7E7", fill_type="solid")
+        orange_header = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+        orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        cyan_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
+        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
+        light_gray = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+        
+        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        medium_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
+
+        # Timeline
+        project_start = project.start_date
+        project_end = project.end_date
+        
+        if not project_start or not project_end:
+            print(f"⚠️ Project {project_id} missing start/end dates")
+            return None
+            
+        all_dates = []
+        current_date = project_start
+        while current_date <= project_end:
+            all_dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        if not all_dates:
+            print(f"⚠️ No dates in project range")
+            return None
+
+        current_row = 1
+
+        # Set Widths
+        ws.column_dimensions['A'].width = 28
+        ws.column_dimensions['B'].width = 28
+        ws.column_dimensions['C'].width = 28
+        ws.column_dimensions['D'].width = 28
+        ws.column_dimensions['E'].width = 28
+        for i in range(6, len(all_dates) + 10):
+            ws.column_dimensions[get_column_letter(i)].width = 15
+
+        # ==========================================
+        # STAGE DETAILS TABLE (TOP SECTION)
+        # ==========================================
+        stage_list = []
+        for stage in stages:
+            parts = stage.name.split('-')
+            if len(parts) >= 2:
+                category = '-'.join(parts[:-1]).strip()
+                abbr = parts[-1].strip()
+                stage_list.append(f"{category} -{abbr}")
+            else:
+                stage_list.append(stage.name)
+        
+        max_cols = 5
+        table_row = current_row
+        col_idx = 0
+        
+        for stage_text in stage_list:
+            col = col_idx + 1
+            
+            cell = ws.cell(table_row, col, value=stage_text)
+            cell.fill = white_fill
+            cell.border = thin_border
+            cell.font = Font(size=10, bold=True)
+            cell.alignment = Alignment(horizontal='left', vertical='center')
+            
+            col_idx += 1
+            if col_idx >= max_cols:
+                col_idx = 0
+                table_row += 1
+        
+        if col_idx > 0:
+            table_row += 1
+        
+        current_row = table_row + 2
+
+        # ==========================================
+        # HEADER ROW 1: Month-Year header
+        # ==========================================
+        ws.cell(current_row, 1, value="")
+        ws.cell(current_row, 1).border = thin_border
+        
+        ws.cell(current_row, 2, value="")
+        ws.cell(current_row, 2).fill = gray_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        start_col = 3
+        end_col = len(all_dates) + 2
+        ws.merge_cells(start_row=current_row, start_column=start_col, end_row=current_row, end_column=end_col)
+        
+        month_year_text = all_dates[0].strftime('%b-%y')
+        cell = ws.cell(current_row, start_col, value=month_year_text)
+        cell.fill = orange_header
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.font = Font(bold=True, size=11)
+        
+        header_row_1 = current_row
+        current_row += 1
+
+        # ==========================================
+        # HEADER ROW 2: Day numbers
+        # ==========================================
+        ws.cell(current_row, 1, value="")
+        ws.cell(current_row, 1).border = thin_border
+        
+        ws.cell(current_row, 2, value="")
+        ws.cell(current_row, 2).fill = gray_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3, value=d.day)
+            cell.fill = light_blue_header
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.font = Font(bold=True, size=11)
+        
+        header_row_2 = current_row
+        current_row += 1
+
+        # Merge A and B for Project Name and "Date"
+        ws.merge_cells(start_row=header_row_1, start_column=1, end_row=header_row_2, end_column=1)
+        ws.cell(header_row_1, 1, value=project.name)
+        ws.cell(header_row_1, 1).fill = light_blue_header
+        ws.cell(header_row_1, 1).border = thin_border
+        ws.cell(header_row_1, 1).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(header_row_1, 1).font = Font(bold=True, size=12)
+
+        ws.merge_cells(start_row=header_row_1, start_column=2, end_row=header_row_2, end_column=2)
+        ws.cell(header_row_1, 2, value="Date")
+        ws.cell(header_row_1, 2).fill = light_blue_header
+        ws.cell(header_row_1, 2).border = thin_border
+        ws.cell(header_row_1, 2).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(header_row_1, 2).font = Font(bold=True, size=11)
+
+        # --- PLANNED ROW ---
+        ws.cell(current_row, 1, value="").border = thin_border
+        ws.cell(current_row, 2, value="Planned").border = thin_border
+        ws.cell(current_row, 2).font = Font(bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+        
+        planned_map = {}
+        for stage in stages:
+            if stage.start_date and stage.end_date:
+                parts = stage.name.split('-')
+                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                d = stage.start_date
+                while d <= stage.end_date:
+                    if is_working_day(d, False, working_saturdays):
+                        ds = d.strftime('%Y-%m-%d')
+                        if ds not in planned_map: 
+                            planned_map[ds] = []
+                        planned_map[ds].append(abbr)
+                    d += timedelta(days=1)
+        
+        # ✅ ADD RESCHEDULE DATES TO PLANNED ROW
+        # When a task is rescheduled to a new date, that date should appear in the Planned row
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id, 
+                stage_id=stage.id
+            ).all()
+            
+            for reschedule in task_reschedules:
+                # Add the NEW date to planned_map (where the task is now scheduled)
+                new_ds = reschedule.new_date.strftime('%Y-%m-%d')
+                if new_ds not in planned_map:
+                    planned_map[new_ds] = []
+                if abbr not in planned_map[new_ds]:
+                    planned_map[new_ds].append(abbr)
+                    
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            ds = d.strftime('%Y-%m-%d')
+            
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if ds in planned_map:
+                cell.value = ' , '.join(sorted(set(planned_map[ds])))
+                cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+                cell.font = Font(size=9, bold=True)
+            
+            if is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            
+            cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 40
+        current_row += 1
+
+        # --- RESCHEDULE ROWS (1-4) ---
+        for r_num in range(1, 5):
+            ws.cell(current_row, 1, value="").border = thin_border
+            ws.cell(current_row, 2, value=f"Reschedule -{r_num}").border = thin_border
+            ws.cell(current_row, 2).font = Font(bold=True)
+            ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+            
+            r_data = stage_reschedule_map.get(r_num, {})
+            
+            for i, d in enumerate(all_dates):
+                cell = ws.cell(current_row, i+3)
+                ds = d.strftime('%Y-%m-%d')
+                
+                is_sunday = d.weekday() == 6
+                is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+                
+                if ds in r_data:
+                    cell.value = ' , '.join(sorted(set(r_data[ds])))
+                    cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+                    cell.font = Font(size=9, bold=True)
+                
+                if is_sunday or is_non_working_saturday:
+                    cell.fill = yellow_fill
+                
+                cell.border = thin_border
+            
+            ws.row_dimensions[current_row].height = 30
+            current_row += 1
+
+        # --- ACTUAL ROW ---
+        ws.cell(current_row, 1, value="").border = thin_border
+        ws.cell(current_row, 2, value="Actual").border = thin_border
+        ws.cell(current_row, 2).fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        ws.cell(current_row, 2).font = Font(bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+
+        actual_map = {}
+        hold_dates_map = {}
+
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
+            
+            for t in tasks:
+                ds = t.scheduled_date.strftime('%Y-%m-%d')
+                
+                if t.status == 'hold':
+                    if ds not in hold_dates_map:
+                        hold_dates_map[ds] = []
+                    if abbr not in hold_dates_map[ds]:
+                        hold_dates_map[ds].append(abbr)
+                else:
+                    if ds not in actual_map: 
+                        actual_map[ds] = []
+                    actual_map[ds].append((abbr, t.status))
+                
+                if t.original_date and t.original_date != t.scheduled_date:
+                    hds = t.original_date.strftime('%Y-%m-%d')
+                    if hds not in hold_dates_map: 
+                        hold_dates_map[hds] = []
+                    if abbr not in hold_dates_map[hds]:
+                        hold_dates_map[hds].append(abbr)
+                        
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            ds = d.strftime('%Y-%m-%d')
+            
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            
+            real_holds = hold_abbrs - active_abbrs
+            
+            parts = []
+            if real_holds: 
+                parts.append(f"{' , '.join(sorted(real_holds))}=HOLD")
+            if active_abbrs: 
+                parts.append(' , '.join(sorted(active_abbrs)))
+            
+            if parts:
+                cell.value = ' , '.join(parts)
+            
+            cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+            cell.font = Font(size=9, bold=True)
+            cell.border = thin_border
+            
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            elif real_holds: 
+                cell.fill = orange_fill
+            elif active_abbrs:
+                stats = set(x[1] for x in active)
+                if 'completed' in stats: 
+                    cell.fill = green_fill
+                elif 'rescheduled' in stats: 
+                    cell.fill = cyan_fill
+
+        ws.row_dimensions[current_row].height = 40
+        current_row += 1
+
+        # ==========================================
+        # REMARKS ROW
+        # ==========================================
+        ws.cell(current_row, 1, value="").border = thin_border
+
+        ws.cell(current_row, 2, value="Remarks").border = thin_border
+        ws.cell(current_row, 2).font = Font(size=10, italic=True, bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
+
+        for i, d in enumerate(all_dates):
+            ds = d.strftime('%Y-%m-%d')
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            real_holds = hold_abbrs - active_abbrs
+            
+            cell = ws.cell(current_row, i+3)
+            
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if real_holds:
+                reason = "Waiting for issue tracker"
+                for stage in stages:
+                    parts = stage.name.split('-')
+                    abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                    if abbr in real_holds:
+                        task = StageDailyTask.query.filter_by(stage_id=stage.id, scheduled_date=d, status='hold').first()
+                        if not task:
+                            task = StageDailyTask.query.filter_by(stage_id=stage.id, original_date=d).first()
+                        
+                        if task and task.rescheduled_reason:
+                            reason = task.rescheduled_reason
+                            break
+                
+                cell.value = reason
+                cell.alignment = Alignment(text_rotation=0, horizontal='left', vertical='top', wrap_text=True)
+                cell.font = Font(size=9)
+            elif is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            
+            cell.border = thin_border
+
+        ws.row_dimensions[current_row].height = 60
+        current_row += 1
+        current_row += 2
+        
+        # ==========================================
+        # LEGEND TABLE
+        # ==========================================
+        cell_a1 = ws.cell(current_row, 1, value="")
+        cell_a1.fill = orange_fill
+        cell_a1.border = thin_border
+        
+        cell_b1 = ws.cell(current_row, 2, value="Hold")
+        cell_b1.border = thin_border
+        cell_b1.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b1.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
+        cell_c1 = ws.cell(current_row, 3, value="If project goes on hold from Customer")
+        cell_c1.border = thin_border
+        cell_c1.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        cell_c1.font = Font(size=10)
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        current_row += 1
+        
+        cell_a2 = ws.cell(current_row, 1, value="")
+        cell_a2.border = thin_border
+        
+        cell_b2 = ws.cell(current_row, 2, value="Changes")
+        cell_b2.border = thin_border
+        cell_b2.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b2.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
+        cell_c2 = ws.cell(current_row, 3, value="")
+        cell_c2.border = thin_border
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        current_row += 1
+        
+        cell_a3 = ws.cell(current_row, 1, value="")
+        cell_a3.fill = yellow_fill
+        cell_a3.border = thin_border
+        
+        cell_b3 = ws.cell(current_row, 2, value="Holidays")
+        cell_b3.border = thin_border
+        cell_b3.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b3.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
+        cell_c3 = ws.cell(current_row, 3, value="")
+        cell_c3.border = thin_border
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
+        
+        # Save to BytesIO
+        excel_file = BytesIO()
+        wb.save(excel_file)
+        excel_file.seek(0)
+        
+        # Save to backend if requested
+        if save_to_backend:
+            import os
+            backend_dir = os.path.join(os.path.dirname(__file__), 'static', 'excel_exports')
+            os.makedirs(backend_dir, exist_ok=True)
+            
+            backend_filepath = os.path.join(backend_dir, f"{project.name}_Tracker_{project_id}.xlsx")
+            with open(backend_filepath, 'wb') as f:
+                f.write(excel_file.getvalue())
+            
+            print(f"✅ Excel saved to backend: {backend_filepath}")
+            excel_file.seek(0)  # Reset pointer after writing
+        
+        return excel_file
+        
+    except Exception as e:
+        print(f"❌ Error generating Excel: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+# ============================================================================
 # Default Stages Configuration
 # ============================================================================
 
 DEFAULT_STAGES = [
     {'name': 'Foot prints - library - FP-LIB', 'order': 1, 'duration_days': 3},
-    {'name': 'Scrubbing - SCRB', 'order': 2, 'duration_days': 2},
-    {'name': 'Schematic - SCH', 'order': 3, 'duration_days': 7},
-    {'name': 'Length Matching - LM', 'order': 4, 'duration_days': 4},
-    {'name': 'Deliverables - DLBS', 'order': 5, 'duration_days': 3},
-    {'name': 'Placement - PLC', 'order': 6, 'duration_days': 5},  # Added comma
-    {'name': 'Placement - review - PLC-R', 'order': 7, 'duration_days': 3},  # Changed order to 7
-    {'name': 'Routing - RTNG', 'order': 8, 'duration_days': 2},  # Fixed syntax and order
-    {'name': 'Routing - Review - RTNG-R', 'order': 9, 'duration_days': 7},  # Changed order to 9
-    {'name': 'Post Screen - P-SI', 'order': 10, 'duration_days': 4},  # Changed order to 10
-    {'name': 'Fan out - FNT', 'order': 11, 'duration_days': 3},  # Changed order to 11
-    {'name': 'Silk Screen - SLK', 'order': 12, 'duration_days': 5},  # Added comma, changed order to 12
-    {'name': 'Approval - APRVL', 'order': 13, 'duration_days': 3},  # Changed order to 13
-    {'name': 'Fab setup - FB-STP', 'order': 14, 'duration_days': 5}  # Changed order to 14
+    {'name': 'Schematic - SCH', 'order': 2, 'duration_days': 7},
+    {'name': 'Placement - PLC', 'order': 4, 'duration_days': 5},
+    {'name': 'Placement - review - PLC-R', 'order': 5, 'duration_days': 3},
+    {'name': 'Fan out - FNT', 'order': 6, 'duration_days': 3},
+    {'name': 'Routing - RTNG', 'order': 7, 'duration_days': 2},
+    {'name': 'Routing - Review - RTNG-R', 'order': 8, 'duration_days': 7},
+    {'name': 'Length Matching - LM', 'order': 9, 'duration_days': 4},
+    {'name': 'Post Screen - P-SI', 'order': 10, 'duration_days': 4},
+    {'name': 'Silk Screen - SLK', 'order': 11, 'duration_days': 5},
+    {'name': 'Deliverables - DLBS', 'order': 12, 'duration_days': 3},
+    {'name': 'Approval - APRVL', 'order': 13, 'duration_days': 3},
+    {'name': 'Fab setup - FB-STP', 'order': 14, 'duration_days': 5}
 ]
-
 # ============================================================================
 # Helper Functions
 # ============================================================================
@@ -260,12 +752,15 @@ def calculate_stage_dates(project_start_date, stages_data, include_saturday=Fals
             'order': stage_info['order'],
             'duration_days': duration,
             'start_date': stage_start_date,
-            'end_date': stage_end_date
+            'end_date': stage_end_date,
+            'manager_id': stage_info.get('manager_id'),
+            'id': stage_info.get('id'),  # Preserve the ID for updates
+            'parallel_group_id': stage_info.get('parallel_group_id')  # Preserve parallel_group_id
         })
         
-        # If no custom start date, update current_date for next stage
-        if not stage_start:
-            current_date = add_working_days(stage_end_date, 1, False, working_saturdays)
+        # Always advance current_date so sequential stages chain correctly
+        # even if this stage used a custom start_date.
+        current_date = add_working_days(stage_end_date, 1, False, working_saturdays)
     
     return calculated_stages
 
@@ -281,9 +776,6 @@ def generate_daily_tasks_for_project(project_id, working_saturdays=None):
     stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
     
     for stage in stages:
-        # Delete existing daily tasks for this stage (in case of regeneration)
-        StageDailyTask.query.filter_by(stage_id=stage.id).delete()
-        
         if not stage.start_date or not stage.end_date:
             continue
         
@@ -308,6 +800,136 @@ def generate_daily_tasks_for_project(project_id, working_saturdays=None):
     
     # Don't commit here - let the caller handle the commit
     db.session.flush()
+
+# ============================================================================
+# Auto Gap-Filling Function
+# ============================================================================
+
+def auto_shift_tasks_to_fill_gaps(project_id):
+    """
+    Find gaps in the schedule and shift tasks AFTER the gap to fill it.
+    Does NOT reorganize from start - only fills detected gaps.
+    Preserves parallel stage structure.
+    """
+    project = Project.query.get(project_id)
+    if not project:
+        return {"success": False, "error": "Project not found"}
+    
+    # Get working Saturdays
+    working_saturdays = json.loads(project.working_saturdays or '[]')
+    working_saturdays = [datetime.strptime(d, '%Y-%m-%d').date() for d in working_saturdays]
+    
+    def is_working_day_check(date):
+        """Check if a date is a working day (Mon-Fri or working Saturday)"""
+        if date.weekday() < 5:  # Monday-Friday
+            return True
+        if date.weekday() == 5 and date in working_saturdays:  # Saturday
+            return True
+        return False
+    
+    # Get all hold dates for this project
+    hold_dates = set(hd.hold_date for hd in HoldDate.query.filter_by(project_id=project_id).all())
+    
+    # Get all stages ordered by their actual dates (not by order field)
+    stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.start_date).all()
+    
+    if not stages:
+        return {"success": True, "message": "No stages to process", "shifts_made": 0}
+    
+    shifts_made = []
+    
+    # Process each stage independently to preserve parallel stages
+    for stage in stages:
+        # Get all tasks for this stage
+        stage_tasks = StageDailyTask.query.filter_by(
+            stage_id=stage.id
+        ).filter(
+            StageDailyTask.status.in_(['pending', 'rescheduled'])
+        ).order_by(StageDailyTask.day_number).all()
+        
+        if not stage_tasks:
+            continue
+        
+        # Find the expected start date for this stage
+        expected_date = stage.start_date
+        
+        # Skip to first working day
+        while not is_working_day_check(expected_date) or expected_date in hold_dates:
+            expected_date += timedelta(days=1)
+        
+        # Check each task in this stage
+        for task in stage_tasks:
+            original_date = task.scheduled_date
+            
+            # Skip to next available working day
+            while not is_working_day_check(expected_date) or expected_date in hold_dates:
+                expected_date += timedelta(days=1)
+            
+            # If there's a gap (task is scheduled later than expected), shift it
+            if task.scheduled_date > expected_date:
+                days_shifted = (expected_date - task.scheduled_date).days
+                
+                # Update task
+                task.original_date = task.original_date or task.scheduled_date
+                task.scheduled_date = expected_date
+                task.status = 'rescheduled'
+                task.reschedule_count = (task.reschedule_count or 0) + 1
+                task.rescheduled_reason = f"Auto-shifted to fill gap (moved {days_shifted} days)"
+                
+                # Log the shift
+                history = DailyTaskRescheduleHistory(
+                    project_id=project_id,
+                    stage_id=task.stage_id,
+                    task_id=task.id,
+                    day_number=task.day_number,
+                    reschedule_number=task.reschedule_count,
+                    original_date=original_date,
+                    new_date=expected_date,
+                    days_shifted=abs(days_shifted),
+                    reason=f"Auto-shifted to fill gap in schedule",
+                    rescheduled_by=session.get('user_id'),
+                    rescheduled_at=datetime.utcnow()
+                )
+                db.session.add(history)
+                
+                shifts_made.append({
+                    'task_id': task.id,
+                    'day_number': task.day_number,
+                    'stage_id': task.stage_id,
+                    'old_date': original_date.strftime('%Y-%m-%d'),
+                    'new_date': expected_date.strftime('%Y-%m-%d'),
+                    'days_shifted': days_shifted
+                })
+            
+            # Move expected date to next working day for next task
+            expected_date += timedelta(days=1)
+        
+        # Update stage end date based on last task
+        if stage_tasks:
+            stage.end_date = max(t.scheduled_date for t in stage_tasks)
+    
+    # Update project end date based on latest stage
+    if stages:
+        latest_end = max(s.end_date for s in stages if s.end_date)
+        if latest_end and project.end_date != latest_end:
+            project.end_date = latest_end
+    
+    # Commit all changes
+    db.session.commit()
+    
+    # Regenerate Excel file
+    try:
+        generate_excel_file(project_id, save_to_backend=True)
+    except Exception as e:
+        print(f"Warning: Could not regenerate Excel file: {e}")
+    
+    return {
+        "success": True,
+        "shifts_made": len(shifts_made),
+        "tasks_shifted": shifts_made,
+        "new_project_end_date": project.end_date.strftime('%Y-%m-%d') if project.end_date else None,
+        "project_end_date_changed": len(shifts_made) > 0
+    }
 
 # ============================================================================
 # Routes
@@ -420,7 +1042,8 @@ def projects():
                     duration_days=stage_data.get('duration_days', 0),
                     start_date=stage_data['start_date'],
                     end_date=stage_data['end_date'],
-                    manager_id=stage_data.get('manager_id')  # ADD THIS LINE
+                    manager_id=stage_data.get('manager_id'),
+                    parallel_group_id=stage_data.get('parallel_group_id')
                 )
                 db.session.add(stage)
                             
@@ -466,10 +1089,16 @@ def projects():
 
 
 
+from flask import make_response
+
 @app.route('/api/projects/<int:project_id>/details', methods=['GET'])
 @login_required
 def project_details(project_id):
     project = Project.query.get_or_404(project_id)
+    
+    # ✅ Force fresh data from database (prevents ORM caching)
+    db.session.refresh(project)
+    
     stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
     tasks = Task.query.filter_by(project_id=project_id).all()
     schedule_history = ScheduleHistory.query.filter_by(project_id=project_id).order_by(ScheduleHistory.rescheduled_at.desc()).all()
@@ -494,7 +1123,8 @@ def project_details(project_id):
     # Calculate stage completion
     completed_stages = sum(1 for s in stages if s.status == 'completed')
     
-    return jsonify({
+    # ✅ Build response data
+    data = {
         'id': project.id,
         'name': project.name,
         'description': project.description,
@@ -511,7 +1141,9 @@ def project_details(project_id):
             'status': s.status,
             'progress': s.progress,
             'start_date': s.start_date.isoformat() if s.start_date else None,
-            'end_date': s.end_date.isoformat() if s.end_date else None
+            'end_date': s.end_date.isoformat() if s.end_date else None,
+            'manager_id': s.manager_id,
+            'parallel_group_id': s.parallel_group_id if hasattr(s, 'parallel_group_id') else None  # ✅ ADD THIS
         } for s in stages],
         'members': [{
             'id': User.query.get(m.user_id).id,
@@ -530,7 +1162,86 @@ def project_details(project_id):
             'rescheduled_by': User.query.get(h.rescheduled_by).username if h.rescheduled_by else 'Unknown',
             'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M')
         } for h in schedule_history]
-    })
+    }
+    
+    # ✅ Create response with anti-cache headers
+    response = make_response(jsonify(data))
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    
+    return response
+
+
+@app.route('/api/projects/<int:project_id>/stage-status', methods=['GET'])
+@login_required
+def get_project_stage_status(project_id):
+    """Get detailed status for each stage including reschedule info"""
+    try:
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        today = datetime.now().date()
+        stage_statuses = []
+        
+        for stage in stages:
+            # Check if stage has been rescheduled at stage level
+            stage_reschedules = ScheduleHistory.query.filter_by(
+                project_id=project_id,
+                stage_id=stage.id
+            ).order_by(ScheduleHistory.rescheduled_at.desc()).all()
+            
+            # Check if any daily tasks in this stage were rescheduled
+            daily_task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id,
+                stage_id=stage.id
+            ).all()
+            
+            # Consider stage rescheduled if EITHER stage-level or daily-task-level reschedules exist
+            was_rescheduled = len(stage_reschedules) > 0 or len(daily_task_reschedules) > 0
+            total_reschedules = len(stage_reschedules) + len(daily_task_reschedules)
+            
+            # Determine status
+            if stage.progress == 100 or stage.status == 'completed':
+                if was_rescheduled:
+                    status = 'completed-rescheduled'
+                    color = '#90EE90'  # Light green
+                else:
+                    status = 'completed'
+                    color = '#006400'  # Dark green
+            elif stage.start_date and stage.end_date:
+                if today >= stage.start_date and today <= stage.end_date:
+                    status = 'in-progress'
+                    color = '#FFD700'  # Yellow
+                elif today > stage.end_date and stage.status != 'completed':
+                    status = 'overdue'
+                    color = '#FF6B6B'  # Red
+                else:
+                    status = 'not-started'
+                    color = '#dee2e6'  # Gray
+            else:
+                status = 'not-started'
+                color = '#dee2e6'
+            
+            stage_statuses.append({
+                'id': stage.id,
+                'name': stage.name,
+                'status': status,
+                'color': color,
+                'progress': stage.progress,
+                'was_rescheduled': was_rescheduled,
+                'reschedule_count': total_reschedules,
+                'start_date': stage.start_date.isoformat() if stage.start_date else None,
+                'end_date': stage.end_date.isoformat() if stage.end_date else None
+            })
+        
+        return jsonify({
+            'success': True,
+            'stages': stage_statuses
+        })
+    
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 @app.route('/api/tasks', methods=['GET', 'POST'])
 @login_required
@@ -635,28 +1346,113 @@ def activity_logs():
 @app.route('/api/projects/<int:project_id>/stages/<int:stage_id>', methods=['PUT'])
 @login_required
 def update_stage_status(project_id, stage_id):
-    stage = ProjectStage.query.get_or_404(stage_id)
-    data = request.get_json()
-    
-    old_status = stage.status
-    stage.status = data['status']
-    
-    # Update progress percentage
-    if stage.status == 'in-progress':
-        stage.progress = 50
-    elif stage.status == 'completed':
-        stage.progress = 100
-    else:
-        stage.progress = 0
-    
-    db.session.commit()
-    
-    # Update project progress
-    update_project_progress(project_id)
-    
-    log_activity(f"Updated stage '{stage.name}' status from {old_status} to {stage.status}")
-    
-    return jsonify({'success': True})
+    """Update stage details and recalculate project schedule"""
+    try:
+        data = request.get_json()
+        stage = ProjectStage.query.filter_by(
+            id=stage_id,
+            project_id=project_id
+        ).first_or_404()
+        
+        project = Project.query.get_or_404(project_id)
+        
+        old_status = stage.status
+        
+        # Update stage fields
+        if 'name' in data:
+            stage.name = data['name']
+        if 'duration_days' in data:
+            stage.duration_days = data['duration_days']
+        if 'status' in data:
+            stage.status = data['status']
+            # Update progress percentage based on status
+            if stage.status == 'in-progress':
+                stage.progress = 50
+            elif stage.status == 'completed':
+                stage.progress = 100
+            else:
+                stage.progress = 0
+        if 'start_date' in data:
+            stage.start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+        if 'end_date' in data:
+            stage.end_date = datetime.strptime(data['end_date'], '%Y-%m-%d').date()
+        
+        db.session.commit()
+        
+        # ✅ FIX: Only recalculate if duration or dates changed, not just status
+        needs_recalculation = 'duration_days' in data or 'start_date' in data or 'end_date' in data
+        
+        # Skip recalculation if only status changed
+        if not needs_recalculation and len(data) == 1 and 'status' in data:
+            # Update project progress and return early
+            update_project_progress(project_id)
+            
+            if old_status != stage.status:
+                log_activity(f"Updated stage '{stage.name}' status from {old_status} to {stage.status}")
+            
+            return jsonify({'success': True, 'message': 'Stage updated successfully'})
+        
+        # Recalculate all stage dates and regenerate daily tasks
+        working_saturdays_data = json.loads(project.working_saturdays) if project.working_saturdays else []
+        working_saturdays = set(working_saturdays_data)
+        
+        # Get all stages for this project in order
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Recalculate dates starting from project start date
+        current_date = get_next_working_day(project.start_date, False, working_saturdays)
+        
+        for s in stages:
+            s.start_date = current_date
+            s.end_date = add_working_days(current_date, s.duration_days - 1, False, working_saturdays)
+            current_date = s.end_date + timedelta(days=1)
+            current_date = get_next_working_day(current_date, False, working_saturdays)
+        
+        # Update project end date
+        if stages:
+            project.end_date = stages[-1].end_date
+        
+        db.session.commit()
+        
+        # Delete old daily tasks for this project
+        StageDailyTask.query.filter_by(project_id=project_id).delete()
+        
+        # Regenerate daily tasks for all stages
+        for s in stages:
+            if s.duration_days > 0:
+                task_date = s.start_date
+                for day_num in range(1, s.duration_days + 1):
+                    while not is_working_day(task_date, False, working_saturdays):
+                        task_date += timedelta(days=1)
+                    
+                    daily_task = StageDailyTask(
+                        stage_id=s.id,
+                        project_id=project_id,
+                        day_number=day_num,
+                        scheduled_date=task_date,
+                        original_date=task_date,
+                        status='pending'
+                    )
+                    db.session.add(daily_task)
+                    task_date += timedelta(days=1)
+        
+        db.session.commit()
+        
+        # Update project progress
+        update_project_progress(project_id)
+        
+        if old_status != stage.status:
+            log_activity(f"Updated stage '{stage.name}' status from {old_status} to {stage.status}")
+        
+        return jsonify({'success': True, 'message': 'Stage updated successfully'})
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"Error updating stage: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 
 def update_project_progress(project_id):
     """Calculate and update project progress based on stages"""
@@ -677,6 +1473,10 @@ def update_project_progress(project_id):
         project.status = 'completed'
     elif any(s.status == 'in-progress' for s in stages):
         project.status = 'active'
+        
+        
+        
+
     
     db.session.commit()
 
@@ -796,11 +1596,23 @@ def reschedule_stage(project_id):
             project.end_date = latest_end
             project.working_saturdays = json.dumps(list(working_saturdays))
         
+        # Delete old daily tasks before regenerating (critical for HOLD display)
+        old_tasks_count = StageDailyTask.query.filter_by(project_id=project_id).count()
+        StageDailyTask.query.filter_by(project_id=project_id).delete()
+        print(f'   🗑️ Deleted {old_tasks_count} old daily tasks for project {project_id}')
+        
         # Regenerate daily tasks
         generate_daily_tasks_for_project(project_id, working_saturdays)
         
         # ✅ COMMIT EVERYTHING
         db.session.commit()
+        
+        # 🔥 AUTO-REGENERATE EXCEL IN BACKEND
+        try:
+            generate_excel_file(project_id, save_to_backend=True)
+            print(f"✅ Excel regenerated in backend for project {project_id}")
+        except Exception as excel_error:
+            print(f"⚠️ Excel regeneration failed: {excel_error}")
         
         # ✅ VERIFY the record was created
         verification = ScheduleHistory.query.filter_by(
@@ -839,6 +1651,12 @@ def delete_project(project_id):
         project_name = project.name
         
         # Delete associated records first (foreign key constraints)
+        # ✅ CRITICAL FIX: Delete daily tasks (calendar events) first
+        StageDailyTask.query.filter_by(project_id=project_id).delete()
+        DailyTaskRescheduleHistory.query.filter_by(project_id=project_id).delete()
+        HoldDate.query.filter_by(project_id=project_id).delete()
+        
+        # Delete other associated records
         ProjectStage.query.filter_by(project_id=project_id).delete()
         ProjectMember.query.filter_by(project_id=project_id).delete()
         Task.query.filter_by(project_id=project_id).delete()
@@ -937,12 +1755,54 @@ def get_stage_daily_tasks(project_id, stage_id):
 def complete_daily_task(project_id, stage_id, task_id):
     """Mark a daily task as completed"""
     task = StageDailyTask.query.get_or_404(task_id)
+    
+    # ✅ VALIDATION: Don't allow completing future tasks
+    today = datetime.now().date()
+    task_date = task.scheduled_date
+    
+    if task_date > today:
+        return jsonify({
+            'success': False, 
+            'error': f'Cannot complete future task scheduled for {task_date.strftime("%B %d, %Y")}. Today is {today.strftime("%B %d, %Y")}.'
+        }), 400
+    
     task.status = 'completed'
     task.completed_at = datetime.utcnow()
     db.session.commit()
     
+    # 🔥 AUTO-REGENERATE EXCEL IN BACKEND
+    try:
+        generate_excel_file(project_id, save_to_backend=True)
+        print(f"✅ Excel regenerated in backend for project {project_id}")
+    except Exception as excel_error:
+        print(f"⚠️ Excel regeneration failed: {excel_error}")
+    
+    # ✅ AUTO-COMPLETE STAGE: Check if all tasks in this stage are completed
+    all_tasks = StageDailyTask.query.filter_by(
+        stage_id=stage_id,
+        project_id=project_id
+    ).all()
+    
+    completed_tasks = [t for t in all_tasks if t.status == 'completed']
+    all_completed = len(completed_tasks) == len(all_tasks) and len(all_tasks) > 0
+    
+    # If all tasks are completed, mark stage as completed
+    if all_completed:
+        stage = ProjectStage.query.get(stage_id)
+        if stage and stage.status != 'completed':
+            stage.status = 'completed'
+            stage.progress = 100
+            db.session.commit()
+            log_activity(f"Stage '{stage.name}' automatically completed - all daily tasks done")
+    
     log_activity(f"Completed day {task.day_number} of stage")
-    return jsonify({'success': True})
+    
+    return jsonify({
+        'success': True,
+        'stage_completed': all_completed,
+        'completed_tasks': len(completed_tasks),
+        'total_tasks': len(all_tasks)
+    })
 
 
 @app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/reschedule', methods=['POST'])
@@ -969,9 +1829,11 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         # ✅ INCREMENT TASK-LEVEL RESCHEDULE COUNT (for tracking)
         task.reschedule_count = (task.reschedule_count or 0) + 1
         
-        # Store EXACT original date BEFORE any changes
-        original_date = task.original_date if task.original_date else task.scheduled_date
+        # ✅ FIX: Store CURRENT scheduled_date as original_date for THIS reschedule
+        # This is the date the task is being moved FROM (not the very first original date)
+        current_location = task.scheduled_date  # This is where the task is NOW
         
+        # Keep track of the very first original date (for reference only)
         if not task.original_date:
             task.original_date = task.scheduled_date
         
@@ -985,17 +1847,17 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         print(f"\n📋 DAILY TASK RESCHEDULE:")
         print(f"   Stage: {stage.name}, Day {task.day_number}")
         print(f"   Global Reschedule Number: {global_reschedule_num}")
-        print(f"   Original: {original_date} → New: {new_date}")
+        print(f"   Current Location: {current_location} → New: {new_date}")
         print(f"   Task Reschedule count: {task.reschedule_count}")
         
-        # ✅ CREATE DAILY TASK HISTORY WITH GLOBAL NUMBER
+        # ✅ CREATE DAILY TASK HISTORY WITH CURRENT LOCATION (not original_date)
         task_history = DailyTaskRescheduleHistory(
             project_id=project_id,
             stage_id=stage_id,
             task_id=task.id,
             day_number=task.day_number,
-            reschedule_number=global_reschedule_num,  # ✅ Use global counter
-            original_date=original_date,
+            reschedule_number=global_reschedule_num,
+            original_date=current_location,  # ✅ USE CURRENT LOCATION, not task.original_date
             new_date=new_date,
             days_shifted=abs(days_to_shift),
             reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days_to_shift)} day(s)",
@@ -1003,20 +1865,10 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         )
         db.session.add(task_history)
         
-        # ✅ ALSO CREATE STAGE-LEVEL HISTORY (for Excel export)
-        stage_history = ScheduleHistory(
-            project_id=project_id,
-            stage_id=stage_id,
-            reschedule_number=global_reschedule_num,  # ✅ Use same global number
-            original_date=stage.start_date,
-            new_date=new_date,
-            reason=f"Daily task reschedule: Day {task.day_number}",
-            rescheduled_by=get_current_user().id
-        )
-        db.session.add(stage_history)
+        # ✅ REMOVED STAGE-LEVEL HISTORY - IT WAS CREATING DUPLICATE GHOST EVENTS!
+        # Only daily task history should be created for daily task reschedules
         
-        print(f"   ✅ Created histories with global reschedule #{global_reschedule_num}")
-        
+        print(f"   ✅ Created daily task history with global reschedule #{global_reschedule_num}")        
         # UPDATE SUBSEQUENT NON-COMPLETED TASKS
         all_stage_tasks = StageDailyTask.query.filter_by(
             stage_id=stage_id
@@ -1028,7 +1880,8 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         for subsequent_task in all_stage_tasks:
             subsequent_task.reschedule_count = (subsequent_task.reschedule_count or 0) + 1
             
-            subsequent_original = subsequent_task.original_date if subsequent_task.original_date else subsequent_task.scheduled_date
+            # ✅ FIX: Use CURRENT scheduled_date as the "from" location
+            subsequent_current_location = subsequent_task.scheduled_date
             
             if not subsequent_task.original_date:
                 subsequent_task.original_date = subsequent_task.scheduled_date
@@ -1050,8 +1903,8 @@ def reschedule_daily_task(project_id, stage_id, task_id):
                 stage_id=stage_id,
                 task_id=subsequent_task.id,
                 day_number=subsequent_task.day_number,
-                reschedule_number=global_reschedule_num,  # ✅ Same global number
-                original_date=subsequent_original,
+                reschedule_number=global_reschedule_num,
+                original_date=subsequent_current_location,  # ✅ USE CURRENT LOCATION
                 new_date=subsequent_new_date,
                 days_shifted=abs(days_to_shift),
                 reason=f"Auto-reschedule due to Day {task.day_number}",
@@ -1067,10 +1920,16 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         if all_tasks_in_stage:
             stage.start_date = min(t.scheduled_date for t in all_tasks_in_stage)
             stage.end_date = max(t.scheduled_date for t in all_tasks_in_stage)
-            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
-        
+            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")        
         # ✅ COMMIT
         db.session.commit()
+        
+        # 🔥 AUTO-REGENERATE EXCEL IN BACKEND
+        try:
+            generate_excel_file(project_id, save_to_backend=True)
+            print(f"✅ Excel regenerated in backend for project {project_id}")
+        except Exception as excel_error:
+            print(f"⚠️ Excel regeneration failed: {excel_error}")
         
         # ✅ VERIFY
         verification = DailyTaskRescheduleHistory.query.filter_by(
@@ -1100,6 +1959,74 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         traceback.print_exc()
         return jsonify({'error': str(e)}), 400
     
+@app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/hold', methods=['POST'])
+@login_required
+def hold_daily_task(project_id, stage_id, task_id):
+    """Mark a daily task as HOLD without affecting subsequent days"""
+    data = request.get_json()
+    reason = data.get('reason', 'Put on hold')
+    working_saturdays = set(data.get('working_saturdays', []))
+    
+    try:
+        task = StageDailyTask.query.get_or_404(task_id)
+        stage = ProjectStage.query.get_or_404(stage_id)
+        project = Project.query.get_or_404(project_id)
+        
+        # PREVENT HOLDING COMPLETED TASKS
+        if task.status == 'completed':
+            return jsonify({'error': 'Cannot hold a completed task'}), 400
+        
+        # Store original date if not already stored
+        if not task.original_date:
+            task.original_date = task.scheduled_date
+        
+        original_date = task.scheduled_date
+        
+        # Mark task as HOLD
+        task.status = 'hold'
+        task.rescheduled_reason = reason
+        
+        # Create HoldDate record
+        hold_record = HoldDate(
+            project_id=project_id,
+            stage_id=stage_id,
+            hold_date=original_date,
+            reason=reason,
+            created_by=get_current_user().id
+        )
+        db.session.add(hold_record)
+        
+        print(f"\n🔒 DAILY TASK HOLD:")
+        print(f"   Stage: {stage.name}, Day {task.day_number}")
+        print(f"   Date: {original_date}")
+        print(f"   Reason: {reason}")
+        
+        # Commit changes
+        db.session.commit()
+        
+        # 🔥 AUTO-REGENERATE EXCEL IN BACKEND
+        try:
+            generate_excel_file(project_id, save_to_backend=True)
+            print(f"✅ Excel regenerated in backend for project {project_id}")
+        except Exception as excel_error:
+            print(f"⚠️ Excel regeneration failed: {excel_error}")
+        
+        log_activity(f"Put day {task.day_number} of stage '{stage.name}' on HOLD")
+        
+        return jsonify({
+            'success': True,
+            'hold_date': original_date.isoformat(),
+            'message': f'Day {task.day_number} marked as HOLD'
+        })
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"❌ Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500   
+
+
 @app.route('/api/projects/<int:project_id>/generate-daily-tasks', methods=['POST'])
 @login_required
 def generate_daily_tasks(project_id):
@@ -1144,6 +2071,32 @@ def generate_daily_tasks(project_id):
         db.session.rollback()
         return jsonify({'error': str(e)}), 400
 
+
+@app.route('/api/projects/<int:project_id>/daily-tasks', methods=['GET'])
+@login_required
+def get_all_project_daily_tasks(project_id):
+    """Get all daily tasks for a project (across all stages)"""
+    try:
+        daily_tasks = StageDailyTask.query.filter_by(
+            project_id=project_id
+        ).order_by(
+            StageDailyTask.stage_id,
+            StageDailyTask.day_number
+        ).all()
+        
+        return jsonify([{
+            'id': task.id,
+            'stage_id': task.stage_id,
+            'day_number': task.day_number,
+            'scheduled_date': task.scheduled_date.isoformat() if task.scheduled_date else None,
+            'original_date': task.original_date.isoformat() if task.original_date else None,
+            'status': task.status,
+            'completed_at': task.completed_at.isoformat() if task.completed_at else None,
+            'reschedule_count': task.reschedule_count or 0
+        } for task in daily_tasks]), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/projects/<int:project_id>/reschedule-history', methods=['GET'])
 @login_required
@@ -1216,6 +2169,7 @@ def get_complete_reschedule_history(project_id):
             'stage_id': h.stage_id,
             'stage_name': stage.name if stage else 'Unknown',
             'day_number': h.day_number,
+            'reschedule_number': h.reschedule_number if hasattr(h, 'reschedule_number') else 1,
             'original_date': h.original_date.isoformat() if h.original_date else None,
             'new_date': h.new_date.isoformat() if h.new_date else None,
             'days_shifted': abs(h.days_shifted),
@@ -1225,7 +2179,7 @@ def get_complete_reschedule_history(project_id):
             'rescheduled_at': h.rescheduled_at.strftime('%Y-%m-%d %H:%M') if h.rescheduled_at else None
         }
         combined.append(record)
-        print(f"  ✔️ Daily Task: {record['stage_name']} Day {record['day_number']}, {record['original_date']} → {record['new_date']}")
+        print(f"  ✔️ Daily Task: {record['stage_name']} Day {record['day_number']}, Reschedule #{record['reschedule_number']}, {record['original_date']} → {record['new_date']}")
     
     # Sort by reschedule time (most recent first)
     combined.sort(key=lambda x: x['rescheduled_at'] if x['rescheduled_at'] else '', reverse=True)
@@ -1238,443 +2192,18 @@ def get_complete_reschedule_history(project_id):
 @app.route('/api/projects/<int:project_id>/export-excel', methods=['GET'])
 @login_required
 def export_project_to_excel(project_id):
-    """Generate Excel with stage-specific reschedule rows, clean weekly timeline, and correct Hold coloring"""
+    """
+    Generate Excel with stage-specific reschedule rows, clean weekly timeline, and correct Hold coloring.
+    
+    This uses the generate_excel_file() helper which saves to backend automatically.
+    """
     try:
+        excel_file = generate_excel_file(project_id, save_to_backend=True)
+        
+        if not excel_file:
+            return jsonify({'error': 'Failed to generate Excel file'}), 500
+        
         project = Project.query.get_or_404(project_id)
-        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
-        
-        # Parse Working Saturdays
-        try:
-            working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
-        except:
-            working_saturdays = set()
-
-        # ==========================================
-        # 1. PREPARE RESCHEDULE MAP (STAGE-WISE)
-        # ==========================================
-        stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
-        
-        for stage in stages:
-            parts = stage.name.split('-')
-            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            
-            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
-                project_id=project_id, 
-                stage_id=stage.id
-            ).all()
-            
-            unique_nums = sorted(list(set(r.reschedule_number for r in task_reschedules if r.reschedule_number)))
-            
-            for idx, r_num in enumerate(unique_nums):
-                target_row = idx + 1
-                if target_row > 4: continue
-                
-                event_tasks = [t for t in task_reschedules if t.reschedule_number == r_num]
-                for t in event_tasks:
-                    date_str = t.new_date.strftime('%Y-%m-%d')
-                    if date_str not in stage_reschedule_map[target_row]:
-                        stage_reschedule_map[target_row][date_str] = []
-                    if stage_abbr not in stage_reschedule_map[target_row][date_str]:
-                        stage_reschedule_map[target_row][date_str].append(stage_abbr)
-
-        # ==========================================
-        # 2. SETUP EXCEL & HEADERS
-        # ==========================================
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "Schedule_Tracker"
-        
-        # Styles
-        gray_header = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
-        light_blue_header = PatternFill(start_color="B4C7E7", end_color="B4C7E7", fill_type="solid")
-        orange_header = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
-        green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
-        orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
-        cyan_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
-        yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-        light_gray = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
-        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-        
-        thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
-        medium_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
-
-        # Timeline
-        project_start = project.start_date
-        project_end = project.end_date
-        all_dates = []
-        current_date = project_start
-        while current_date <= project_end:
-            all_dates.append(current_date)
-            current_date += timedelta(days=1)
-
-        if not all_dates:
-            return jsonify({'error': 'No dates in project range'}), 400
-
-        current_row = 1
-
-        # Set Widths
-        ws.column_dimensions['A'].width = 28
-        ws.column_dimensions['B'].width = 28
-        ws.column_dimensions['C'].width = 28
-        ws.column_dimensions['D'].width = 28
-        ws.column_dimensions['E'].width = 28
-        for i in range(6, len(all_dates) + 10):
-            ws.column_dimensions[get_column_letter(i)].width = 15
-
-        # ==========================================
-        # STAGE DETAILS TABLE (TOP SECTION)
-        # ==========================================
-        # Organize stages into rows - each stage takes up a full cell
-        stage_list = []
-        for stage in stages:
-            parts = stage.name.split('-')
-            if len(parts) >= 2:
-                # Get everything before the last hyphen as category
-                category = '-'.join(parts[:-1]).strip()
-                abbr = parts[-1].strip()
-                stage_list.append(f"{category} -{abbr}")
-            else:
-                stage_list.append(stage.name)
-        
-        # Create table with stages distributed across columns
-        max_cols = 5  # A, B, C, D, E
-        table_row = current_row
-        col_idx = 0
-        
-        for stage_text in stage_list:
-            col = col_idx + 1  # Column A=1, B=2, etc.
-            
-            cell = ws.cell(table_row, col, value=stage_text)
-            cell.fill = white_fill
-            cell.border = thin_border
-            cell.font = Font(size=10, bold=True)
-            cell.alignment = Alignment(horizontal='left', vertical='center')
-            
-            col_idx += 1
-            if col_idx >= max_cols:
-                col_idx = 0
-                table_row += 1
-        
-        # Move to next row after table
-        if col_idx > 0:
-            table_row += 1
-        
-        current_row = table_row + 2  # Add spacing after stage table
-
-        # ==========================================
-        # HEADER ROW 1: Month-Year header (merged across all date columns)
-        # ==========================================
-        ws.cell(current_row, 1, value="")
-        ws.cell(current_row, 1).border = thin_border
-        
-        ws.cell(current_row, 2, value="")
-        ws.cell(current_row, 2).fill = gray_header
-        ws.cell(current_row, 2).border = thin_border
-        
-        # Merge cells for month-year header
-        start_col = 3
-        end_col = len(all_dates) + 2
-        ws.merge_cells(start_row=current_row, start_column=start_col, end_row=current_row, end_column=end_col)
-        
-        # Set month-year text (e.g., "Jan-31")
-        month_year_text = all_dates[0].strftime('%b-%y')
-        cell = ws.cell(current_row, start_col, value=month_year_text)
-        cell.fill = orange_header
-        cell.border = thin_border
-        cell.alignment = Alignment(horizontal='center', vertical='center')
-        cell.font = Font(bold=True, size=11)
-        
-        header_row_1 = current_row
-        current_row += 1
-
-        # ==========================================
-        # HEADER ROW 2: Day numbers with light blue background
-        # ==========================================
-        ws.cell(current_row, 1, value="")
-        ws.cell(current_row, 1).border = thin_border
-        
-        ws.cell(current_row, 2, value="")
-        ws.cell(current_row, 2).fill = gray_header
-        ws.cell(current_row, 2).border = thin_border
-        
-        for i, d in enumerate(all_dates):
-            cell = ws.cell(current_row, i+3, value=d.day)
-            cell.fill = light_blue_header
-            cell.border = thin_border
-            cell.alignment = Alignment(horizontal='center', vertical='center')
-            cell.font = Font(bold=True, size=11)
-        
-        header_row_2 = current_row
-        current_row += 1
-
-        # ==========================================
-        # Merge A and B for Project Name and "Date"
-        # ==========================================
-        # Merge for Project Name
-        ws.merge_cells(start_row=header_row_1, start_column=1, end_row=header_row_2, end_column=1)
-        ws.cell(header_row_1, 1, value=project.name)
-        ws.cell(header_row_1, 1).fill = light_blue_header
-        ws.cell(header_row_1, 1).border = thin_border
-        ws.cell(header_row_1, 1).alignment = Alignment(horizontal='center', vertical='center')
-        ws.cell(header_row_1, 1).font = Font(bold=True, size=12)
-        
-        # Merge for "Date"
-        ws.merge_cells(start_row=header_row_1, start_column=2, end_row=header_row_2, end_column=2)
-        ws.cell(header_row_1, 2, value="Date")
-        ws.cell(header_row_1, 2).fill = light_blue_header
-        ws.cell(header_row_1, 2).border = thin_border
-        ws.cell(header_row_1, 2).alignment = Alignment(horizontal='center', vertical='center')
-        ws.cell(header_row_1, 2).font = Font(bold=True, size=11)
-
-        # --- PLANNED ROW ---
-        ws.cell(current_row, 1, value="").border = thin_border
-        ws.cell(current_row, 2, value="Planned").border = thin_border
-        ws.cell(current_row, 2).font = Font(bold=True)
-        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
-        
-        planned_map = {}
-        for stage in stages:
-            if stage.start_date and stage.end_date:
-                parts = stage.name.split('-')
-                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-                d = stage.start_date
-                while d <= stage.end_date:
-                    if is_working_day(d, False, working_saturdays):
-                        ds = d.strftime('%Y-%m-%d')
-                        if ds not in planned_map: 
-                            planned_map[ds] = []
-                        planned_map[ds].append(abbr)
-                    d += timedelta(days=1)
-                    
-        for i, d in enumerate(all_dates):
-            cell = ws.cell(current_row, i+3)
-            ds = d.strftime('%Y-%m-%d')
-            
-            # Check if weekend
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-            
-            if ds in planned_map:
-                cell.value = ','.join(sorted(set(planned_map[ds])))
-                cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
-                cell.font = Font(size=9, bold=True)
-            
-            # Apply yellow fill for weekends
-            if is_sunday or is_non_working_saturday:
-                cell.fill = yellow_fill
-            
-            cell.border = thin_border
-        
-        ws.row_dimensions[current_row].height = 40
-        current_row += 1
-
-        # --- RESCHEDULE ROWS (1-4) ---
-        for r_num in range(1, 5):
-            ws.cell(current_row, 1, value="").border = thin_border
-            ws.cell(current_row, 2, value=f"Reschedule -{r_num}").border = thin_border
-            ws.cell(current_row, 2).font = Font(bold=True)
-            ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
-            
-            r_data = stage_reschedule_map.get(r_num, {})
-            
-            for i, d in enumerate(all_dates):
-                cell = ws.cell(current_row, i+3)
-                ds = d.strftime('%Y-%m-%d')
-                
-                # Check if weekend
-                is_sunday = d.weekday() == 6
-                is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-                
-                if ds in r_data:
-                    cell.value = ','.join(sorted(set(r_data[ds])))
-                    cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
-                    cell.font = Font(size=9, bold=True)
-                
-                # Apply yellow fill for weekends
-                if is_sunday or is_non_working_saturday:
-                    cell.fill = yellow_fill
-                
-                cell.border = thin_border
-            
-            ws.row_dimensions[current_row].height = 30
-            current_row += 1
-
-        # --- ACTUAL ROW ---
-        ws.cell(current_row, 1, value="").border = thin_border
-        ws.cell(current_row, 2, value="Actual").border = thin_border
-        ws.cell(current_row, 2).fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
-        ws.cell(current_row, 2).font = Font(bold=True)
-        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
-        
-        actual_map = {}
-        hold_dates_map = {}
-        
-        for stage in stages:
-            parts = stage.name.split('-')
-            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
-            for t in tasks:
-                ds = t.scheduled_date.strftime('%Y-%m-%d')
-                if ds not in actual_map: 
-                    actual_map[ds] = []
-                actual_map[ds].append((abbr, t.status))
-                
-                if t.original_date and t.original_date != t.scheduled_date:
-                    hds = t.original_date.strftime('%Y-%m-%d')
-                    if hds not in hold_dates_map: 
-                        hold_dates_map[hds] = []
-                    hold_dates_map[hds].append(abbr)
-                    
-        for i, d in enumerate(all_dates):
-            cell = ws.cell(current_row, i+3)
-            ds = d.strftime('%Y-%m-%d')
-            
-            active = actual_map.get(ds, [])
-            active_abbrs = set(x[0] for x in active)
-            hold_abbrs = set(hold_dates_map.get(ds, []))
-            real_holds = hold_abbrs - active_abbrs
-            
-            parts = []
-            if real_holds: 
-                parts.append(f"{','.join(sorted(real_holds))}=HOLD")
-            if active_abbrs: 
-                parts.append(','.join(sorted(active_abbrs)))
-            
-            if parts:
-                cell.value = ','.join(parts)
-            
-            cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
-            cell.font = Font(size=9, bold=True)
-            cell.border = thin_border
-            
-            # Coloring logic - Check weekends first
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-            
-            if is_sunday or is_non_working_saturday:
-                cell.fill = yellow_fill  # Yellow for weekends
-            elif real_holds: 
-                cell.fill = orange_fill
-            elif active_abbrs:
-                stats = set(x[1] for x in active)
-                if 'completed' in stats: 
-                    cell.fill = green_fill
-                elif 'rescheduled' in stats: 
-                    cell.fill = cyan_fill
-        
-        ws.row_dimensions[current_row].height = 40
-        current_row += 1
-
-        # ==========================================
-        # REMARKS ROW
-        # ==========================================
-        ws.cell(current_row, 1, value="").border = thin_border
-        
-        ws.cell(current_row, 2, value="Remarks").border = thin_border
-        ws.cell(current_row, 2).font = Font(size=10, italic=True, bold=True)
-        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
-        
-        for i, d in enumerate(all_dates):
-            ds = d.strftime('%Y-%m-%d')
-            active = actual_map.get(ds, [])
-            active_abbrs = set(x[0] for x in active)
-            hold_abbrs = set(hold_dates_map.get(ds, []))
-            real_holds = hold_abbrs - active_abbrs
-            
-            cell = ws.cell(current_row, i+3)
-            
-            # Check if weekend
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-            
-            if real_holds:
-                reason = "Waiting for issue tracker"
-                for stage in stages:
-                    parts = stage.name.split('-')
-                    abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-                    if abbr in real_holds:
-                        task = StageDailyTask.query.filter_by(stage_id=stage.id, original_date=d).first()
-                        if task and task.rescheduled_reason:
-                            reason = task.rescheduled_reason
-                            break
-                
-                cell.value = reason
-                cell.alignment = Alignment(text_rotation=0, horizontal='left', vertical='top', wrap_text=True)
-                cell.font = Font(size=9)
-            elif is_sunday or is_non_working_saturday:
-                cell.fill = yellow_fill
-            
-            cell.border = thin_border
-
-        ws.row_dimensions[current_row].height = 60
-        current_row += 1
-
-        current_row += 2
-        
-        # ==========================================
-        # LEGEND TABLE
-        # ==========================================
-        # Row 1: Hold
-        cell_a1 = ws.cell(current_row, 1, value="")
-        cell_a1.fill = orange_fill
-        cell_a1.border = thin_border
-        
-        cell_b1 = ws.cell(current_row, 2, value="Hold")
-        cell_b1.border = thin_border
-        cell_b1.alignment = Alignment(horizontal='left', vertical='center')
-        cell_b1.font = Font(size=10)
-        
-        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
-        cell_c1 = ws.cell(current_row, 3, value="If project goes on hold from Customer")
-        cell_c1.border = thin_border
-        cell_c1.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
-        cell_c1.font = Font(size=10)
-        # Add border to the last cell in merged range
-        ws.cell(current_row, 4).border = thin_border
-        
-        ws.row_dimensions[current_row].height = 25
-        current_row += 1
-        
-        # Row 2: Changes
-        cell_a2 = ws.cell(current_row, 1, value="")
-        cell_a2.border = thin_border
-        
-        cell_b2 = ws.cell(current_row, 2, value="Changes")
-        cell_b2.border = thin_border
-        cell_b2.alignment = Alignment(horizontal='left', vertical='center')
-        cell_b2.font = Font(size=10)
-        
-        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
-        cell_c2 = ws.cell(current_row, 3, value="")
-        cell_c2.border = thin_border
-        # Add border to the last cell in merged range
-        ws.cell(current_row, 4).border = thin_border
-        
-        ws.row_dimensions[current_row].height = 25
-        current_row += 1
-        
-        # Row 3: Holidays
-        cell_a3 = ws.cell(current_row, 1, value="")
-        cell_a3.fill = yellow_fill
-        cell_a3.border = thin_border
-        
-        cell_b3 = ws.cell(current_row, 2, value="Holidays")
-        cell_b3.border = thin_border
-        cell_b3.alignment = Alignment(horizontal='left', vertical='center')
-        cell_b3.font = Font(size=10)
-        
-        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
-        cell_c3 = ws.cell(current_row, 3, value="")
-        cell_c3.border = thin_border
-        # Add border to the last cell in merged range
-        ws.cell(current_row, 4).border = thin_border
-        
-        ws.row_dimensions[current_row].height = 25
-        
-        # Output
-        excel_file = BytesIO()
-        wb.save(excel_file)
-        excel_file.seek(0)
         
         return send_file(
             excel_file,
@@ -1705,7 +2234,330 @@ def get_hold_dates(project_id):
         'reason': h.reason,
         'created_by': User.query.get(h.created_by).username if h.created_by else 'Unknown',
         'created_at': h.created_at.strftime('%Y-%m-%d %H:%M')
-    } for h in hold_dates])   
+    } for h in hold_dates]) 
+
+
+@app.route('/api/projects/<int:project_id>', methods=['PUT'])
+@login_required
+def update_project(project_id):
+    try:
+        # ✅ GET THE EXISTING PROJECT FROM DATABASE
+        project = Project.query.get_or_404(project_id)
+        data = request.get_json()
+        
+        # ✅ COMPLETELY REPLACE THE OLD DATA WITH NEW DATA
+        # This is the correct approach - overwrite the original
+        project.name = data.get('name', project.name)
+        project.description = data.get('description', project.description)
+        
+        # Update working Saturdays - REPLACES old data
+        working_saturdays = set(data.get('working_saturdays', []))
+        project.working_saturdays = json.dumps(list(working_saturdays))
+        
+        # Update start date - REPLACES old data
+        if data.get('start_date'):
+            new_start_date = datetime.strptime(data['start_date'], '%Y-%m-%d').date()
+            project.start_date = new_start_date
+        
+        # Handle stage updates - REPLACES old stages
+        calculated_stages = []  # ✅ Initialize outside if block
+        if 'stages' in data:
+            stages_data = data['stages']
+            
+            # Calculate new dates
+            calculated_stages = calculate_stage_dates(
+                project.start_date, 
+                stages_data, 
+                data.get('include_saturday', False),
+                working_saturdays
+            )
+            
+            
+            # ✅ CRITICAL FIX: Delete stages that were unchecked (not in the update)
+            # Get IDs of stages that are being kept/updated
+            kept_stage_ids = set()
+            for stage_data in calculated_stages:
+                if 'id' in stage_data and stage_data['id']:
+                    kept_stage_ids.add(stage_data['id'])
+            
+            # Delete stages that aren't in the update (i.e., were unchecked)
+            existing_stages = ProjectStage.query.filter_by(project_id=project.id).all()
+            for existing_stage in existing_stages:
+                if existing_stage.id not in kept_stage_ids:
+                    # This stage was unchecked - delete it and its related data
+                    print(f"🗑️ Deleting unchecked stage: {existing_stage.name} (ID: {existing_stage.id})")
+                    
+                    # Delete related daily tasks
+                    StageDailyTask.query.filter_by(stage_id=existing_stage.id).delete()
+                    
+                    # Delete related schedule history
+                    ScheduleHistory.query.filter_by(stage_id=existing_stage.id).delete()
+                    
+                    # Delete related reschedule history
+                    DailyTaskRescheduleHistory.query.filter_by(stage_id=existing_stage.id).delete()
+                    
+                    # Delete related hold dates
+                    HoldDate.query.filter_by(stage_id=existing_stage.id).delete()
+                    
+                    # Delete the stage itself
+                    db.session.delete(existing_stage)
+            # Update or create stages - THIS REPLACES THE OLD STAGE DATA
+            for stage_data in calculated_stages:
+                if 'id' in stage_data and stage_data['id']:
+                    # ✅ UPDATE EXISTING STAGE - REPLACES ALL FIELDS
+                    stage = ProjectStage.query.get(stage_data['id'])
+                    if stage:
+                        stage.name = stage_data['name']  # NEW name replaces old
+                        stage.order = stage_data['order']  # NEW order replaces old
+                        stage.duration_days = stage_data['duration_days']  # NEW duration replaces old
+                        stage.start_date = stage_data['start_date']  # NEW start_date replaces old
+                        stage.end_date = stage_data['end_date']  # NEW end_date replaces old
+                        stage.manager_id = stage_data.get('manager_id')  # NEW manager replaces old
+                        stage.parallel_group_id = stage_data.get('parallel_group_id')  # NEW parallel group
+                else:
+                    # ✅ CREATE NEW STAGE
+                    stage = ProjectStage(
+                        project_id=project.id,
+                        name=stage_data['name'],
+                        order=stage_data['order'],
+                        duration_days=stage_data['duration_days'],
+                        start_date=stage_data['start_date'],
+                        end_date=stage_data['end_date'],
+                        manager_id=stage_data.get('manager_id'),
+                        parallel_group_id=stage_data.get('parallel_group_id')
+                    )
+                    db.session.add(stage)
+        
+        # ✅ UPDATE PROJECT END DATE based on last stage
+        if calculated_stages:
+            project.end_date = calculated_stages[-1]['end_date']
+        
+        # ✅ DELETE old daily tasks and regenerate them with new dates
+        deleted_count = StageDailyTask.query.filter_by(project_id=project.id).delete()
+        db.session.flush()  # Ensure delete completes before regeneration
+        print(f"🗑️ Deleted {deleted_count} old daily tasks for project {project.id}")
+        
+        generate_daily_tasks_for_project(project.id, working_saturdays)
+        print(f"✨ Generated new daily tasks for project {project.id}")
+        
+        # ✅ SAVE ALL CHANGES TO DATABASE
+        # This commits all the replaced/updated data
+        db.session.commit()
+        
+        # ✅ AUTOMATICALLY SHIFT TASKS TO FILL GAPS AFTER UPDATE
+        print(f"[AUTO-SHIFT] Triggering gap fill for project {project_id}...")
+        shift_result = auto_shift_tasks_to_fill_gaps(project_id)
+        print(f"[AUTO-SHIFT] Result: {shift_result}")
+        
+        # Regenerate Excel
+        try:
+            generate_excel_file(project_id, save_to_backend=True)
+        except Exception as e:
+            print(f"Warning: Excel generation failed: {e}")
+        
+        # The edited data is now the NEW ORIGINAL data
+        return jsonify({
+            'success': True,
+            'id': project.id,
+            'auto_shift_result': shift_result  # Include shift info in response
+        }), 200
+        
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/api/projects/<int:project_id>/excel-preview-html', methods=['GET'])
+@login_required
+def get_excel_preview_html(project_id):
+    """Generate HTML preview that exactly matches the Excel export"""
+    try:
+        project = Project.query.get_or_404(project_id)
+        stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Parse Working Saturdays
+        try:
+            working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
+        except:
+            working_saturdays = set()
+
+        # Generate all dates (same as Excel)
+        project_start = project.start_date
+        project_end = project.end_date
+        all_dates = []
+        current_date = project_start
+        while current_date <= project_end:
+            all_dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        if not all_dates:
+            return jsonify({'error': 'No dates in project range'}), 400
+
+        # Get stage abbreviations
+        stage_abbrs = {}
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            stage_abbrs[stage.id] = abbr
+
+        # Build PLANNED row data (exact same logic as Excel)
+        planned_map = {}
+        for stage in stages:
+            if stage.start_date and stage.end_date:
+                parts = stage.name.split('-')
+                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                d = stage.start_date
+                while d <= stage.end_date:
+                    ds = d.strftime('%Y-%m-%d')
+                    if ds not in planned_map:
+                        planned_map[ds] = []
+                    if is_working_day(d, False, working_saturdays):
+                        planned_map[ds].append(abbr)
+                    d += timedelta(days=1)
+
+        # Build RESCHEDULE row data (exact same logic as Excel)
+        stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        for stage in stages:
+            parts = stage.name.split('-')
+            stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id, 
+                stage_id=stage.id
+            ).all()
+            
+            unique_nums = sorted(list(set(r.reschedule_number for r in task_reschedules if r.reschedule_number)))
+            
+            for idx, r_num in enumerate(unique_nums):
+                target_row = idx + 1
+                if target_row > 4: 
+                    continue
+                
+                event_tasks = [t for t in task_reschedules if t.reschedule_number == r_num]
+                for t in event_tasks:
+                    date_str = t.new_date.strftime('%Y-%m-%d')
+                    if date_str not in stage_reschedule_map[target_row]:
+                        stage_reschedule_map[target_row][date_str] = []
+                    if stage_abbr not in stage_reschedule_map[target_row][date_str]:
+                        stage_reschedule_map[target_row][date_str].append(stage_abbr)
+
+        # Build ACTUAL row data (exact same logic as Excel)
+        actual_map = {}
+        hold_dates_map = {}
+        
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            
+            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
+            task_map = {t.scheduled_date.strftime('%Y-%m-%d'): t for t in tasks}
+            
+            if stage.start_date and stage.end_date:
+                d = stage.start_date
+                while d <= stage.end_date:
+                    if is_working_day(d, False, working_saturdays):
+                        ds = d.strftime('%Y-%m-%d')
+                        
+                        if ds in task_map:
+                            task = task_map[ds]
+                            
+                            if task.status == 'hold':
+                                if ds not in hold_dates_map:
+                                    hold_dates_map[ds] = []
+                                if abbr not in hold_dates_map[ds]:
+                                    hold_dates_map[ds].append(abbr)
+                            elif task.status in ['pending', 'completed']:
+                                if ds not in actual_map:
+                                    actual_map[ds] = []
+                                actual_map[ds].append((abbr, task.status))
+                        else:
+                            if ds not in actual_map:
+                                actual_map[ds] = []
+                            actual_map[ds].append((abbr, 'pending'))
+                    
+                    d += timedelta(days=1)
+
+        # Organize into weeks for display
+        weeks = []
+        current_week = []
+        
+        for date in all_dates:
+            if date.weekday() == 0 and current_week:  # Monday
+                weeks.append(current_week)
+                current_week = [date]
+            else:
+                current_week.append(date)
+        
+        if current_week:
+            weeks.append(current_week)
+
+        # Convert data to week-based format for frontend
+        planned_by_week = {}
+        actual_by_week = {}
+        reschedule_by_week = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        for w_idx, week in enumerate(weeks):
+            week_planned = set()
+            week_actual = set()
+            week_reschedules = {1: set(), 2: set(), 3: set(), 4: set()}
+            
+            for date in week:
+                ds = date.strftime('%Y-%m-%d')
+                
+                # Planned
+                if ds in planned_map:
+                    week_planned.update(planned_map[ds])
+                
+                # Actual
+                if ds in actual_map:
+                    week_actual.update([x[0] for x in actual_map[ds]])
+                
+                # Reschedules
+                for r_num in range(1, 5):
+                    if ds in stage_reschedule_map[r_num]:
+                        week_reschedules[r_num].update(stage_reschedule_map[r_num][ds])
+            
+            if week_planned:
+                planned_by_week[w_idx] = ' , '.join(sorted(week_planned))
+            if week_actual:
+                actual_by_week[w_idx] = ' , '.join(sorted(week_actual))
+            for r_num in range(1, 5):
+                if week_reschedules[r_num]:
+                    reschedule_by_week[r_num][w_idx] = ' , '.join(sorted(week_reschedules[r_num]))
+
+        return jsonify({
+            'success': True,
+            'project_name': project.name,
+            'stages': [{'name': s.name} for s in stages],
+            'weeks': [[d.strftime('%Y-%m-%d') for d in week] for week in weeks],
+            'planned_data': {str(k): v for k, v in planned_by_week.items()},
+            'reschedule_data': {
+                str(r_num): {str(k): v for k, v in r_data.items()}
+                for r_num, r_data in reschedule_by_week.items()
+            },
+            'actual_data': {str(k): v for k, v in actual_by_week.items()}
+        })
+        
+    except Exception as e:
+        print(f"Error generating preview: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    
+@app.route('/api/project/<int:project_id>/auto-shift-tasks', methods=['POST'])
+@login_required
+def auto_shift_project_tasks(project_id):
+    """API endpoint to trigger automatic task shifting"""
+    try:
+        result = auto_shift_tasks_to_fill_gaps(project_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }), 500
+
 # ============================================================================
 # Initialize Database & Create Default User
 # ============================================================================
@@ -1840,6 +2692,16 @@ def init_db():
                 print("✅ Added manager_id column to project_stage")
             
             # ==========================================
+            # 5.5 PROJECT_STAGE TABLE (parallel_group_id)
+            # ==========================================
+            stage_columns = [col['name'] for col in inspector.get_columns('project_stage')]
+            if 'parallel_group_id' not in stage_columns:
+                with db.engine.connect() as conn:
+                    conn.execute(text("ALTER TABLE project_stage ADD COLUMN parallel_group_id VARCHAR(50)"))
+                    conn.commit()
+                print("✅ Added parallel_group_id column to project_stage")
+            
+            # ==========================================
             # 6. HOLD_DATE TABLE
             # ==========================================
             if not inspector.has_table('hold_date'):
@@ -1871,6 +2733,8 @@ def init_db():
 if __name__ == '__main__':
     init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
+
+
 
 
 
@@ -1954,6 +2818,35 @@ body {
     color: white;
 }
 
+/* Delete Button Styling - Modern & Attractive */
+.btn-delete-project {
+    background: white;
+    border: 2px solid #dc3545;
+    color: #dc3545;
+    border-radius: 8px;
+    font-weight: 600;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.btn-delete-project:hover {
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    border-color: #dc3545;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.3);
+}
+
+.btn-delete-project:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 6px rgba(220, 53, 69, 0.2);
+}
+
 .top-bar-custom {
     background: white;
     padding: 15px 30px;
@@ -1993,34 +2886,63 @@ body {
     background: white;
 }
 
-/* ===== PROJECT PROGRESS STEPS ===== */
+/* Main container with top padding to accommodate parallel badge */
 .progress-steps {
     position: relative;
     display: flex;
     flex-direction: row;
     margin: 30px 0;
     align-items: flex-start;
-    overflow-x: auto; /* âœ… Allow horizontal scrolling */
-    padding-bottom: 10px; /* Space for scrollbar */
+    overflow-x: auto;
+    padding-bottom: 10px;
+    padding-top: 40px; /* Push all content down to make room for parallel badge */
 }
+
+/* Progress line positioned at exact circle center - ENHANCED */
 .progress-line {
     position: absolute;
-    top: 25px;
+    top: 65px; /* Align with circle centers after adjustment */
     left: 20px;
     right: 20px;
-    height: 4px;
-    background: #dee2e6;
+    height: 3px;
+    background: linear-gradient(to right, #e9ecef 0%, #dee2e6 100%);
     z-index: 1;
-    min-width: calc(100% - 40px); /* âœ… Ensure it spans full width */
+    min-width: calc(100% - 40px);
+    border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
 .progress-line-fill {
     position: absolute;
     height: 100%;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    transition: width 0.5s ease;
+    transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+    border-radius: 10px;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    position: relative;
 }
 
+/* Add animated shimmer effect */
+.progress-line-fill::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, 
+        transparent 0%, 
+        rgba(255, 255, 255, 0.3) 50%, 
+        transparent 100%);
+    animation: shimmer 2s infinite;
+    border-radius: 10px;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+/* All progress steps have consistent structure */
 .progress-step {
     position: relative;
     z-index: 2;
@@ -2037,30 +2959,35 @@ body {
 }
 
 .progress-step.tight-spacing {
-    flex: 0 0 70px;
-    margin: 0 -5px;
+    flex: 0 0 140px;
+    margin: 0 5px;
 }
 
 .progress-step.medium-spacing {
-    flex: 0 0 80px;
-    margin: 0 0px;
+    flex: 0 0 140px;
+    margin: 0 5px;
 }
 
+/* Parallel container using grid for perfect alignment */
 .stage-group-container {
-    display: flex;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 180px;
+    gap: 30px;
     background: linear-gradient(135deg, rgba(102, 126, 234, 0.12) 0%, rgba(118, 75, 162, 0.12) 100%);
     border: 2px solid #667eea;
     border-radius: 15px;
-    padding: 15px 10px;
-    margin: 10px 10px 0 10px;
+    padding: 30px 30px 40px 30px;  /* Changed top padding from 10px to 30px */
+    margin: -10px 10px 0 10px;
     position: relative;
     box-shadow: 0 2px 8px rgba(102, 126, 234, 0.15);
+    align-items: start;
 }
-
+/* Parallel badge above container */
 .stage-group-container::before {
-    content: 'âš¡ Parallel';
+    content: '⚡ Parallel';
     position: absolute;
-    top: -14px;
+    top: -25px;
     left: 50%;
     transform: translateX(-50%);
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -2072,7 +2999,12 @@ body {
     box-shadow: 0 2px 6px rgba(102, 126, 234, 0.4);
     z-index: 10;
     white-space: nowrap;
+    margin-top: 0;
+    padding-top: 0px;
+
 }
+
+/* Enhanced circle styling with status colors */
 .step-circle {
     width: 50px;
     height: 50px;
@@ -2082,17 +3014,55 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: 700;
+    font-weight: bold;
+    font-size: 1rem;
+    color: #495057;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    z-index: 3;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+    margin: 0; /* ✅ Ensure no margins by default */
+}
+
+/* Status-based circle colors */
+.step-circle.not-started {
+    background: white;
+    border-color: #dee2e6;
     color: #6c757d;
-    transition: all 0.3s;
+}
+
+.step-circle.in-progress {
+    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+    border-color: #FFD700;
+    color: white;
+    animation: pulse 2s infinite;
+    box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
 }
 
 .step-circle.completed {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-color: #667eea;
+    background: linear-gradient(135deg, #006400 0%, #228B22 100%);
+    border-color: #006400;
     color: white;
+    box-shadow: 0 4px 12px rgba(0, 100, 0, 0.3);
 }
 
+.step-circle.completed-rescheduled {
+    background: linear-gradient(135deg, #90EE90 0%, #98FB98 100%);
+    border-color: #90EE90;
+    color: #006400;
+    box-shadow: 0 4px 12px rgba(144, 238, 144, 0.3);
+}
+
+.step-circle.overdue {
+    background: linear-gradient(135deg, #FF6B6B 0%, #EE5A6F 100%);
+    border-color: #FF6B6B;
+    color: white;
+    animation: shake 0.5s infinite;
+    box-shadow: 0 0 20px rgba(255, 107, 107, 0.5);
+}
+
+/* Legacy active class for backward compatibility */
 .step-circle.active {
     background: #17a2b8;
     border-color: #17a2b8;
@@ -2100,16 +3070,80 @@ body {
     box-shadow: 0 0 0 4px rgba(23,162,184,0.2);
 }
 
+/* Hover effect for circles - shows they're interactive */
+.step-circle[style*="cursor: pointer"]:hover {
+    transform: scale(1.1);
+    transition: transform 0.2s ease;
+    filter: brightness(1.1);
+}
+
+/* Pulse animation for in-progress */
+@keyframes pulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 20px rgba(255, 215, 0, 0.5);
+    }
+    50% {
+        transform: scale(1.05);
+        box-shadow: 0 0 30px rgba(255, 215, 0, 0.8);
+    }
+}
+
+/* Shake animation for overdue */
+@keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-2px); }
+    75% { transform: translateX(2px); }
+}
+
+/* Status badge on circle */
+.step-circle::after {
+    content: '';
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid white;
+    display: none;
+}
+
+.step-circle.completed::after,
+.step-circle.completed-rescheduled::after {
+    content: '✓';
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #28a745;
+    color: white;
+    font-size: 10px;
+    font-weight: bold;
+}
+
+.step-circle.completed-rescheduled::after {
+    content: '↻';
+    background: #90EE90;
+    color: #006400;
+}
+
+
+/* Label styling with consistent spacing */
 .step-label {
     margin-top: 10px;
-    padding: 5px 10px;
+    padding: 8px 12px;
     background: white;
     border-radius: 8px;
     font-size: 0.75rem;
     font-weight: 600;
     text-align: center;
-    max-width: 150px;
+    max-width: 140px;
+    min-width: 100px;
     word-wrap: break-word;
+    line-height: 1.3;
+    display: flex;
+    flex-direction: column; /* Stack name and badge vertically */
+    gap: 4px;
 }
 
 .step-label.completed {
@@ -2123,61 +3157,75 @@ body {
 }
 
 .duration-badge {
-    background: #667eea;
-    color: white;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-size: 0.65rem;
-    margin-left: 5px;
-}
-
-.project-progress-container {
-    margin-bottom: 40px;
-    padding: 25px;
-    background: #f8f9fa;
-    border-radius: 15px;
-}
-
-.project-status-badge {
-    padding: 5px 15px;
-    border-radius: 20px;
-    font-size: 0.85rem;
-    font-weight: 600;
-}
-
-.status-active {
-    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-    color: white;
-}
-
-.status-completed {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
-}
-
-.project-actions {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.btn-delete-project {
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white;
-    border: none;
+    padding: 2px 6px;
     border-radius: 8px;
-    padding: 6px 12px;
-    font-size: 0.85rem;
+    font-size: 0.6rem;
     font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s;
+    align-self: center; /* Center the badge */
+    margin: 0; /* Remove margin */
 }
 
-.btn-delete-project:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+/* Date text styling */
+.progress-step small {
+    display: block;
+    margin-top: 8px;
+    font-size: 0.65rem;
+    line-height: 1.4;
+    text-align: center;
+    white-space: normal;
+    max-width: 120px;
+    color: #6c757d;
+    background: rgba(255, 255, 255, 0.9);
+    padding: 3px 6px;
+    border-radius: 4px;
 }
 
+/* Parallel stage specific styling */
+.stage-group-container .progress-step {
+    display: grid !important; /* ✅ Ensure grid overrides any flex */
+    grid-template-rows: 58px auto auto !important; /* ✅ Fixed height for circle row (50px circle + 8px buffer) */
+    justify-items: center;
+    align-items: start !important; /* ✅ Force top alignment */
+    align-content: start !important; /* ✅ NEW: Force grid content to start at top */
+    gap: 10px;
+}
+
+/* ✅ Control ALL direct children positioning */
+.stage-group-container .progress-step > * {
+    margin: 0 !important; /* Remove all margins from children */
+}
+
+.stage-group-container .step-circle {
+    grid-row: 1 !important; /* Force circle to first row */
+    margin: 0 !important; /* ✅ Remove ALL margins */
+    margin-top: -10px !important; /* ✅ Compensate for container's 10px top padding */
+    padding: 0 !important; /* ✅ Remove padding that might affect position */
+    align-self: start !important; /* ✅ Ensure circles align at the top */
+    justify-self: center !important; /* ✅ Center horizontally */
+}
+
+.stage-group-container .step-label {
+    grid-row: 2 !important; /* Force label to second row */
+    margin: 0 !important; /* ✅ Remove ALL margins including inherited margin-top */
+    margin-top: 0 !important; /* ✅ Explicitly override label's default margin-top */
+}
+
+/* ✅ Control the dates wrapper div */
+.stage-group-container .step-label + div,
+.stage-group-container > div > div:nth-child(3) {
+    grid-row: 3 !important; /* Force dates wrapper to third row */
+    margin-top: 0 !important; /* Override inline style margin-top: 5px */
+}
+
+.stage-group-container small {
+    grid-row: 3; /* Force dates to third row */
+    font-size: 0.65rem;
+    padding: 3px 6px;
+    background: rgba(255, 255, 255, 0.9);
+    border-radius: 4px;
+}
     /* ===== CALENDAR MODAL ===== */
     .calendar-modal .modal-dialog {
         max-width: 1200px;
@@ -2241,19 +3289,62 @@ body {
         transform: translateX(2px);
     }
 
-/* ===== CALENDAR TOOLBAR BUTTONS ===== */
-.fc-toolbar-chunk {
-    display: flex;
-    gap: 5px;
+/* ================================================
+   CLEAN PROFESSIONAL CALENDAR DESIGN
+   Optimized for Clarity and Readability
+   
+   ✅ IMPROVEMENTS APPLIED (v2.1 - Final Optimization):
+   - Day cell height: 110px (optimal for 7-8 stages)
+   - Event height: 24px for clearer text
+   - Font size: 0.74rem with better line-height
+   - Hover tooltip: Full stage names visible on hover
+   - Better spacing: Optimized margins between stages
+   - Duration badges: Larger and better positioned
+   - Event limit: Shows up to 8 events before "+more" link
+   - Text overflow: Smart ellipsis with full text on hover
+   - Enhanced shadows and borders for better depth
+   - Improved mobile responsiveness (80px cells)
+   ================================================ */
+
+/* ===== CALENDAR CONTAINER ===== */
+#calendar {
+    background: white;
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    max-width: 100%;
 }
 
-.fc-button {
-    padding: 6px 12px !important;  /* Changed from 8px 16px */
-    font-size: 0.75rem !important;
+/* ===== CALENDAR HEADER ===== */
+.fc-header-toolbar {
+    padding-bottom: 12px !important;
+    margin-bottom: 12px !important;
+    border-bottom: 2px solid #f0f0f0 !important;
 }
+
+.fc-toolbar-title {
+    font-size: 1.2rem !important;
+    font-weight: 700 !important;
+    color: #2c3e50 !important;
+    letter-spacing: -0.5px !important;
+}
+
+/* ===== CALENDAR BUTTONS ===== */
+.fc-button {
+    padding: 8px 16px !important;
+    font-size: 0.85rem !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
+    border: none !important;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    transition: all 0.3s ease !important;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3) !important;
+}
+
 .fc-button:hover {
     transform: translateY(-2px) !important;
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5) !important;
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.5) !important;
 }
 
 .fc-button:active,
@@ -2280,237 +3371,384 @@ body {
 .fc-today-button:hover {
     background: linear-gradient(135deg, #218838 0%, #1ba881 100%) !important;
 }
-/* Weekend styling */
+
+/* ===== DAY HEADERS ===== */
+.fc-col-header-cell {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%) !important;
+    border-color: #dee2e6 !important;
+    padding: 8px 4px !important;
+}
+
+.fc-col-header-cell-cushion {
+    color: #495057 !important;
+    font-weight: 700 !important;
+    font-size: 0.75rem !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.5px !important;
+}
+
+/* ===== CALENDAR GRID ===== */
+.fc-daygrid-day {
+    border-color: #e9ecef !important;
+    transition: background 0.2s ease !important;
+}
+
+.fc-daygrid-day:hover {
+    background: rgba(102, 126, 234, 0.02) !important;
+}
+
+.fc-daygrid-day-number {
+    color: #495057 !important;
+    font-weight: 600 !important;
+    font-size: 0.8rem !important;
+    padding: 4px !important;
+}
+
+.fc-day-today {
+    background: rgba(102, 126, 234, 0.05) !important;
+}
+
+.fc-day-today .fc-daygrid-day-number {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border-radius: 50% !important;
+    width: 26px !important;
+    height: 26px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-weight: 700 !important;
+}
+
+/* ===== WEEKEND STYLING ===== */
 .fc-day-sun {
-    background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%) !important;
-    opacity: 0.8 !important;
+    background: linear-gradient(135deg, #fff5f5 0%, #ffe9e9 100%) !important;
 }
 
 .fc-day-sat {
-    background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%) !important;
-    opacity: 0.8 !important;
+    background: linear-gradient(135deg, #fffbf0 0%, #fff3d9 100%) !important;
 }
 
-/* ===== CLEAN EVENT STYLING ===== */
+/* ===== DAY CELLS - OPTIMIZED VERTICAL SPACE ===== */
+.fc-daygrid-day-frame {
+    min-height: 180px !important; /* Increased from 110px to accommodate more parallel events */
+    padding: 2px !important;
+}
+
+/* Force events to render within their start date's cell */
+.fc-daygrid-event {
+    position: relative !important;
+}
+
+/* Prevent FullCalendar from pushing events to wrong week rows */
+.fc-daygrid-body {
+    position: relative !important;
+}
+
+.fc-daygrid-body .fc-row {
+    position: relative !important;
+    overflow: visible !important;
+    min-height: 180px !important;
+}
+
+/* Ensure event stacking happens within the correct day cell */
+.fc-daygrid-day-events {
+    margin-top: 2px !important;
+    position: relative !important;
+    min-height: 150px !important; /* Room for all parallel events */
+}
+
+.fc-daygrid-event-harness {
+    margin-bottom: 1px !important;
+}
+
+/* ================================================
+   EVENT STYLING - CLEAN & COMPACT
+   ================================================ */
+
 .fc-event {
-    padding: 2px 4px;     /* Changed from 3px 6px */
-    margin: 1px 1px;      /* Changed from 2px 1px */
-    font-size: 0.7rem;    /* Changed from 0.8rem */
-    border-left: 3px solid rgba(0,0,0,0.2) !important;  /* Changed from 4px */
+    padding: 3px 8px !important;
+    margin: 1px 0px !important;
+    font-size: 0.74rem !important;
+    font-weight: 600 !important;
+    border-radius: 5px !important;
+    border: none !important;
+    border-left: 3px solid rgba(0,0,0,0.3) !important;
+    line-height: 1.5 !important;
+    min-height: 24px !important;
+    max-height: 24px !important;
+    overflow: hidden !important;
+    cursor: pointer !important;
+    transition: all 0.2s ease !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12) !important;
+    background: linear-gradient(135deg, var(--event-color) 0%, var(--event-color) 100%) !important;
+    position: relative !important;
 }
 
 .fc-event:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.2) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.15) !important;
+    z-index: 100 !important;
+    max-height: auto !important;
+    min-height: 24px !important;
+    overflow: visible !important;
 }
 
-/* ===== COMPLETED TASKS - Small green corner badge ===== */
+/* Better text handling - NO CUTOFF */
+.fc-event-main {
+    overflow: hidden !important;
+    padding-right: 22px !important;
+}
+
+.fc-event-title {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+    display: block !important;
+    font-weight: 700 !important;
+    color: white !important;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3) !important;
+    font-size: 0.74rem !important;
+    padding-right: 2px !important;
+}
+
+/* Show full text on hover */
+.fc-event:hover .fc-event-title {
+    white-space: normal !important;
+    overflow: visible !important;
+}
+
+.fc-event-title-container {
+    overflow: hidden !important;
+}
+
+/* ===== TOOLTIP EFFECT FOR FULL TEXT ===== */
+.fc-event:hover {
+    z-index: 1000 !important;
+    white-space: normal !important;
+}
+
+.fc-event:hover .fc-event-main {
+    overflow: visible !important;
+    background: inherit !important;
+    padding-right: 22px !important;
+}
+
+.fc-event:hover .fc-event-title-container {
+    overflow: visible !important;
+    background: inherit !important;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2) !important;
+    border-radius: 5px !important;
+    padding: 2px !important;
+}
+
+/* ===== DURATION BADGE - COMPACT ===== */
+.parallel-stage-indicator {
+    position: absolute !important;
+    top: 3px !important;
+    right: 4px !important;
+    background: rgba(255, 255, 255, 0.95) !important;
+    color: #333 !important;
+    border-radius: 10px !important;
+    padding: 1px 5px !important;
+    font-size: 0.64rem !important;
+    font-weight: 700 !important;
+    z-index: 10 !important;
+    border: 1px solid rgba(0,0,0,0.15) !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.12) !important;
+    line-height: 1.4 !important;
+    letter-spacing: 0.2px !important;
+}
+
+.fc-event.event-completed .parallel-stage-indicator {
+    right: auto !important;
+    left: 3px !important;
+}
+
+/* ===== COMPLETION INDICATOR - COMPACT ===== */
 .fc-event.event-completed::after {
-    width: 14px;          /* Changed from 18px */
-    height: 14px;
-    font-size: 8px;       /* Changed from 10px */
+    content: '✓';
+    position: absolute !important;
+    top: 2px !important;
+    right: 3px !important;
+    width: 15px !important;
+    height: 15px !important;
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%) !important;
+    color: white !important;
+    border-radius: 50% !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 9px !important;
+    font-weight: 700 !important;
+    z-index: 15 !important;
+    box-shadow: 0 1px 4px rgba(40, 167, 69, 0.4) !important;
+    border: 1.5px solid white !important;
 }
 
 .fc-event.event-completed {
-    opacity: 0.85 !important;
+    opacity: 0.92 !important;
     border-left-color: #28a745 !important;
-    text-decoration: none !important;
 }
 
+/* ===== RESCHEDULE INDICATOR - COMPACT ===== */
 .fc-event.event-rescheduled::before {
-    content: 'â‡¢';
+    content: '↻';
     position: absolute;
     top: 2px;
-    left: 2px;
-    width: 20px;
-    height: 20px;
-    background: #ff9800;
+    left: 3px;
+    width: 15px;
+    height: 15px;
+    background: linear-gradient(135deg, #ff9800 0%, #ff6f00 100%);
     border-radius: 50%;
-    z-index: 10;
-    box-shadow: 0 2px 6px rgba(255, 152, 0, 0.4);
+    z-index: 15;
+    box-shadow: 0 1px 4px rgba(255, 152, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
     color: white;
-    font-size: 14px;
-    font-weight: bold;
-    animation: pulse-dot 2s infinite;
+    font-size: 10px;
+    font-weight: 700;
+    border: 1.5px solid white;
+    animation: gentle-pulse 2.5s infinite;
 }
 
-@keyframes pulse-dot {
+@keyframes gentle-pulse {
     0%, 100% {
-        box-shadow: 0 2px 6px rgba(255, 152, 0, 0.4);
         transform: scale(1);
+        box-shadow: 0 1px 4px rgba(255, 152, 0, 0.4);
     }
     50% {
-        box-shadow: 0 2px 12px rgba(255, 152, 0, 0.7);
-        transform: scale(1.1);
+        transform: scale(1.06);
+        box-shadow: 0 2px 6px rgba(255, 152, 0, 0.5);
     }
 }
+
 .fc-event.event-rescheduled {
     border-left-color: #ff9800 !important;
+    padding-left: 24px !important;
 }
 
-/* ===== STAGE RESCHEDULED - Subtle blue accent ===== */
+/* ===== STAGE RESCHEDULED - SUBTLE ===== */
 .fc-event.stage-rescheduled {
-    border-left-width: 5px !important;
+    border-left-width: 3px !important;
     border-left-color: #17a2b8 !important;
 }
+
 .fc-event.stage-rescheduled::after {
-    content: 'ðŸ”„';
+    content: '⟲';
     position: absolute;
     bottom: 2px;
-    left: 2px;
+    right: 3px;
     font-size: 10px;
-    opacity: 0.7;
+    color: rgba(255,255,255,0.9);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.3);
     z-index: 5;
 }
 
-/* Adjust for both completed and rescheduled */
 .fc-event.event-completed.stage-rescheduled::after {
-    content: 'âœ“';
-    top: 2px;
-    right: 2px;
+    content: '✓';
     bottom: auto;
-    left: auto;
+    top: 2px;
+    right: 3px;
 }
 
-/* ===== DURATION BADGE - Cleaner design ===== */
-.parallel-stage-indicator {
-    position: absolute !important;
-    top: 2px !important;
-    right: 2px !important;
-    background: rgba(255, 255, 255, 0.95) !important;
-    color: #495057 !important;
-    border-radius: 4px !important;
-    padding: 2px 6px !important;
-    font-size: 10px !important;
-    font-weight: 700 !important;
-    z-index: 10 !important;
-    border: 1px solid rgba(0,0,0,0.1) !important;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.15) !important;
-}
-
-/* If completed, move duration badge to left */
-.fc-event.event-completed .parallel-stage-indicator {
-    right: auto !important;
-    left: 2px !important;
-}
-
-/* ===== PARALLEL JOBS BADGE ===== */
-/* Replace your existing .parallel-jobs-badge CSS with this: */
+/* ===== PARALLEL JOBS COUNTER - COMPACT ===== */
 .parallel-jobs-badge {
     position: absolute !important;
-    top: 3px !important;
-    right: 5px !important;  /* Changed from 35px to 5px */
-    background: #dc3545 !important;
+    top: 2px !important;
+    right: 3px !important;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%) !important;
     color: white !important;
-    border-radius: 10px !important;
-    padding: 2px 8px !important;
-    font-size: 9px !important;
+    border-radius: 8px !important;
+    padding: 0px 5px !important;
+    font-size: 0.62rem !important;
     font-weight: 700 !important;
-    z-index: 999 !important;  /* Increased from 200 */
-    border: 1px solid white !important;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.3) !important;
+    z-index: 999 !important;
+    border: 1.5px solid white !important;
+    box-shadow: 0 1px 4px rgba(220, 53, 69, 0.4) !important;
     pointer-events: none !important;
     display: block !important;
-    line-height: 1.2 !important;
+    line-height: 1.3 !important;
+    letter-spacing: 0.2px !important;
 }
+
 /* ===== ACTIVE STAGE ===== */
 .fc-event.stage-event-active {
-    box-shadow: 0 0 0 3px #ffc107 !important;
-    animation: pulse-glow 2s infinite !important;
+    box-shadow: 0 0 0 2px #ffc107, 0 2px 8px rgba(255, 193, 7, 0.3) !important;
+    animation: active-glow 2s infinite !important;
 }
 
-@keyframes pulse-glow {
+@keyframes active-glow {
     0%, 100% {
-        box-shadow: 0 0 0 3px #ffc107;
+        box-shadow: 0 0 0 2px #ffc107, 0 2px 8px rgba(255, 193, 7, 0.3);
     }
     50% {
-        box-shadow: 0 0 0 6px #ffc107, 0 0 20px rgba(255, 193, 7, 0.6);
+        box-shadow: 0 0 0 3px #ffc107, 0 3px 12px rgba(255, 193, 7, 0.5);
     }
 }
 
-/* ===== CLEAN TOOLTIPS ===== */
+/* ===== GHOST EVENTS ===== */
+.fc-event.ghost-event {
+    opacity: 0.5 !important;
+    background: repeating-linear-gradient(
+        45deg,
+        var(--event-color),
+        var(--event-color) 8px,
+        rgba(255,255,255,0.2) 8px,
+        rgba(255,255,255,0.2) 16px
+    ) !important;
+    border-style: dashed !important;
+    border-width: 2px !important;
+    cursor: help !important;
+}
+
+.fc-event.ghost-event:hover {
+    opacity: 0.7 !important;
+}
+
+/* ================================================
+   TOOLTIPS - PROFESSIONAL
+   ================================================ */
+
 .fc-event {
     position: relative !important;
-    --tooltip-x: 0;
-    --tooltip-y: 0;
 }
 
 .fc-event[data-tooltip]:hover::after {
     content: attr(data-tooltip);
-    position: fixed !important;  /* Changed from absolute to fixed */
-    left: var(--tooltip-x, 50%);
-    top: var(--tooltip-y, auto);
-    transform: translate(-50%, -100%);
-    background: rgba(44, 62, 80, 0.98);
+    position: fixed !important;
+    background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
     color: white;
     padding: 12px 16px;
     border-radius: 8px;
     white-space: pre-line;
-    font-size: 11.5px;
+    font-size: 0.75rem;
     line-height: 1.6;
-    z-index: 999999 !important;  /* Maximum z-index */
-    box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    z-index: 999999 !important;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
     min-width: 180px;
     max-width: 300px;
     pointer-events: none;
     display: block !important;
-    animation: tooltipFadeIn 0.2s ease-out;
-    border: 1px solid rgba(255,255,255,0.1);
+    animation: tooltipSlideIn 0.2s ease-out;
+    border: 2px solid rgba(255,255,255,0.1);
+    font-weight: 500;
 }
 
-@keyframes tooltipFadeIn {
+@keyframes tooltipSlideIn {
     from {
         opacity: 0;
-        transform: translate(-50%, -90%);
+        transform: translate(-50%, -90%) scale(0.96);
     }
     to {
         opacity: 1;
-        transform: translate(-50%, -100%);
+        transform: translate(-50%, -100%) scale(1);
     }
 }
 
-.fc-event[data-tooltip]:hover::before {
-    content: '';
-    position: fixed !important;
-    left: var(--tooltip-x, 50%);
-    top: var(--tooltip-y, auto);
-    transform: translate(-50%, 0);
-    border: 8px solid transparent;
-    border-top-color: rgba(44, 62, 80, 0.98);
-    z-index: 999999 !important;
-    display: block !important;
-    margin-top: -1px;
-}
-
-/* Tooltip below element (when near top of screen) */
-.fc-event.tooltip-below[data-tooltip]:hover::after {
-    transform: translate(-50%, 0) !important;
-    margin-top: 8px;
-}
-
-.fc-event.tooltip-below[data-tooltip]:hover::before {
-    transform: translate(-50%, -100%) !important;
-    border-top-color: transparent !important;
-    border-bottom-color: rgba(44, 62, 80, 0.98) !important;
-    margin-top: 0;
-    margin-bottom: -16px;
-}
-
-/* Ghost event tooltips */
 .fc-event.ghost-event[data-tooltip]:hover::after {
-    background: rgba(255, 152, 0, 0.98) !important;
-    border-color: rgba(255,255,255,0.15);
-}
-
-.fc-event.ghost-event[data-tooltip]:hover::before {
-    border-top-color: rgba(255, 152, 0, 0.98) !important;
-}
-
-.fc-event.ghost-event.tooltip-below[data-tooltip]:hover::before {
-    border-bottom-color: rgba(255, 152, 0, 0.98) !important;
+    background: linear-gradient(135deg, #ff9800 0%, #ff6f00 100%) !important;
 }
 
 /* Ensure calendar containers don't clip tooltips */
@@ -2524,25 +3762,142 @@ body {
     overflow: visible !important;
 }
 
-/* ===== LEGEND ===== */
+/* ===== MORE EVENTS LINK STYLING ===== */
+.fc-daygrid-more-link {
+    color: #667eea !important;
+    font-weight: 600 !important;
+    font-size: 0.7rem !important;
+    padding: 2px 6px !important;
+    background: rgba(102, 126, 234, 0.1) !important;
+    border-radius: 4px !important;
+    margin-top: 2px !important;
+    display: inline-block !important;
+}
+
+.fc-daygrid-more-link:hover {
+    background: rgba(102, 126, 234, 0.2) !important;
+    text-decoration: none !important;
+}
+
+/* Ensure popover shows all events properly */
+.fc-more-popover {
+    z-index: 10000 !important;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15) !important;
+    border-radius: 8px !important;
+}
+
+.fc-more-popover .fc-popover-body {
+    max-height: 400px !important;
+    overflow-y: auto !important;
+}
+
+/* ================================================
+   LEGEND - CLEAN & ORGANIZED
+   ================================================ */
+
 .calendar-legend {
-    padding: 12px;        /* Changed from 15px */
-    max-height: 400px;    /* Changed from 450px */
+    background: #f8f9fa;
+    padding: 14px;
+    border-radius: 10px;
+    max-height: 500px;
+    overflow-y: auto;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 
 .calendar-legend h6 {
-    font-size: 0.85rem;   /* Changed from 0.95rem */
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: #2c3e50;
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
 }
 
 .legend-item {
-    padding: 8px;         /* Changed from 10px */
-    font-size: 0.75rem;   /* Changed from 0.8rem */
+    padding: 8px 10px;
+    margin-bottom: 5px;
+    background: white;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-left: 3px solid;
+    transition: all 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
 }
 
 .legend-item:hover {
-    background: #e9ecef;
-    transform: translateX(5px);
+    background: #fff;
+    transform: translateX(3px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
 }
+
+/* ===== SCROLLBAR ===== */
+.calendar-legend::-webkit-scrollbar {
+    width: 6px;
+}
+
+.calendar-legend::-webkit-scrollbar-track {
+    background: #e9ecef;
+    border-radius: 10px;
+}
+
+.calendar-legend::-webkit-scrollbar-thumb {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 10px;
+}
+
+.calendar-legend::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%);
+}
+
+/* ================================================
+   RESPONSIVE DESIGN
+   ================================================ */
+
+@media (max-width: 768px) {
+    .fc-toolbar-title {
+        font-size: 1rem !important;
+    }
+    
+    .fc-button {
+        padding: 5px 10px !important;
+        font-size: 0.7rem !important;
+    }
+    
+    .fc-daygrid-day-frame {
+        min-height: 80px !important;
+    }
+    
+    .fc-event {
+        font-size: 0.68rem !important;
+        padding: 2px 6px !important;
+        min-height: 20px !important;
+        max-height: 20px !important;
+    }
+    
+    .fc-event-title {
+        font-size: 0.68rem !important;
+    }
+    
+    .parallel-stage-indicator {
+        font-size: 0.55rem !important;
+        padding: 0px 3px !important;
+    }
+    
+    .fc-daygrid-day-number {
+        font-size: 0.7rem !important;
+        padding: 3px !important;
+    }
+    
+    #calendar {
+        padding: 8px;
+    }
+}
+
+/* ================================================
+   END OF CLEAN PROFESSIONAL CALENDAR DESIGN
+   ================================================ */
+
 
 /* ===== DAY RESCHEDULE BUTTON ===== */
 .day-reschedule-btn {
@@ -3018,18 +4373,25 @@ body {
     transition: opacity 0.3s ease;
 }
 
-/* ===== DURATION BADGE IN STAGE CARDS ===== */
+/* Small, subtle duration badges */
 .duration-badge {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: #667eea;
     color: white;
-    padding: 3px 8px;
-    border-radius: 8px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    margin-left: 8px;
+    padding: 1px 5px; /* Smaller padding */
+    border-radius: 6px; /* Smaller radius */
+    font-size: 0.55rem; /* Smaller font */
+    margin-left: 4px;
+    font-weight: 600;
+    vertical-align: middle;
+    display: inline-block;
 }
 
-/* ===== WORKING DAYS BADGE ===== */
+/* For parallel stages - even smaller */
+.stage-group-container .duration-badge {
+    font-size: 0.5rem;
+    padding: 1px 4px;
+    
+}/* ===== WORKING DAYS BADGE ===== */
 span[style*="background: rgb(102, 126, 234)"] {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
     border-radius: 8px !important;
@@ -3233,7 +4595,26 @@ span[style*="background: rgb(102, 126, 234)"] {
     padding: 20px;
     overflow: visible !important;
 }
+/* HOLD Event Styling */
+.fc-event.event-hold {
+    background: linear-gradient(135deg, #ff0000 0%, #cc0000 100%) !important;
+    border-left: 4px solid #990000 !important;
+    opacity: 0.85;
+}
 
+.fc-event.event-hold::before {
+    content: '🔒';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 14px;
+    z-index: 10;
+}
+
+.fc-event.event-hold .fc-event-title {
+    font-weight: bold;
+    text-decoration: line-through;
+}
 </style>
 </head>
 <body>
@@ -3339,6 +4720,7 @@ span[style*="background: rgb(102, 126, 234)"] {
                     </div>
                 </div>                   
                  <div class="card-body">
+                        <!-- Helpful Hint Banner -->
                         <div id="allProjectsSection"></div>
                     </div>
                 </div>
@@ -3559,15 +4941,15 @@ span[style*="background: rgb(102, 126, 234)"] {
                     <input type="hidden" id="rescheduleStageStartDate">
                     <input type="hidden" id="rescheduleStageEndDate">
                     
-                    <div class="d-grid gap-2">
-                        <button type="submit" class="btn btn-primary-custom">
-                            <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">
-                            Cancel
-                        </button>
-                    </div>
-                </form>
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary-custom" onclick="confirmDayReschedule()">
+                        <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
+                    </button>
+                    <button class="btn btn-warning" onclick="holdDayTask()">
+                        <i class="fas fa-lock me-2"></i>Put on Hold
+                    </button>
+                    <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                </div>               
             </div>
         </div>
     </div>
@@ -3657,6 +5039,10 @@ span[style*="background: rgb(102, 126, 234)"] {
     let includeSaturdayAsWorkingDay = false;
     let workingSaturdays = new Set();
     let dailyTaskModal;
+    
+    // ✅ ADD DEBOUNCE TO PREVENT DOUBLE-CLICK ISSUES
+    let lastClickTime = 0;
+    const CLICK_DEBOUNCE = 300; // milliseconds
     let rescheduleDayModal;
     let currentStageForDailyTasks = null; // Track individual working Saturdays
     let allProjectsCache = [];
@@ -3690,6 +5076,27 @@ span[style*="background: rgb(102, 126, 234)"] {
         calendarModal = new bootstrap.Modal(document.getElementById('calendarModal'));
         rescheduleModal = new bootstrap.Modal(document.getElementById('rescheduleModal'));
         
+        // Reset form when modal is hidden
+        document.getElementById('projectModal').addEventListener('hidden.bs.modal', function() {
+            console.log('Modal hidden - resetting form');
+            resetProjectForm();
+        });
+        
+        // Clean up calendar when calendar modal is closed
+        document.getElementById('calendarModal').addEventListener('hidden.bs.modal', function() {
+            console.log('Calendar modal hidden - cleaning up');
+            if (calendar) {
+                calendar.destroy();
+                calendar = null;
+                console.log('✅ Calendar destroyed on modal close');
+            }
+            // Clear current project data
+            currentProjectData = null;
+            currentProjectForCalendar = null;
+            // Stop auto-refresh
+            stopAllProgressLineAutoRefresh();
+        });
+        
         document.getElementById('projectForm').addEventListener('submit', handleProjectSubmit);
         document.getElementById('rescheduleForm').addEventListener('submit', handleReschedule);
         
@@ -3710,6 +5117,72 @@ span[style*="background: rgb(102, 126, 234)"] {
                 loadProjects();
             });
         }
+        
+        // ✅ ADD EVENT DELEGATION FOR CIRCLE CLICKS (LEFT AND RIGHT CLICK)
+            document.addEventListener('click', function(e) {
+                const circle = e.target.closest('.step-circle');
+                if (circle) {
+                    e.stopPropagation();
+                    
+                    const now = Date.now();
+                    const timeSinceLastClick = now - lastClickTime;
+                    
+                    // Detect double-click (within 400ms)
+                    if (timeSinceLastClick < 400) {
+                        console.log('🔄 Double-click detected - undoing last action');
+                        const step = circle.closest('.progress-step');
+                        if (step) {
+                            const projectId = step.dataset.projectId;
+                            const stageId = step.dataset.stageId;
+                            const currentStatus = step.dataset.stageStatus;
+                            
+                            if (projectId && stageId && currentStatus !== 'pending') {
+                                const prevStatus = currentStatus === 'completed' ? 'in-progress' : 'pending';
+                                undoStageStatus(parseInt(projectId), parseInt(stageId), prevStatus);
+                            }
+                        }
+                        lastClickTime = 0; // Reset to prevent triple-click issues
+                        return;
+                    }
+                    
+                    lastClickTime = now;
+                    
+                    const step = circle.closest('.progress-step');
+                    if (step) {
+                        const projectId = step.dataset.projectId;
+                        const stageId = step.dataset.stageId;
+                        const currentStatus = step.dataset.stageStatus;
+                        
+                        if (projectId && stageId && currentStatus) {
+                            updateStageStatus(parseInt(projectId), parseInt(stageId), currentStatus);
+                        }
+                    }
+                }
+            });        
+        // ✅ ADD EVENT DELEGATION FOR RIGHT-CLICK (UNDO)
+        document.addEventListener('contextmenu', function(e) {
+            const circle = e.target.closest('.step-circle');
+            if (circle) {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                const step = circle.closest('.progress-step');
+                if (step) {
+                    const projectId = step.dataset.projectId;
+                    const stageId = step.dataset.stageId;
+                    const currentStatus = step.dataset.stageStatus;
+                    
+                    if (projectId && stageId && currentStatus) {
+                        if (currentStatus !== 'pending') {
+                            const prevStatus = currentStatus === 'completed' ? 'in-progress' : 'pending';
+                            undoStageStatus(parseInt(projectId), parseInt(stageId), prevStatus);
+                        } else {
+                            showNotification('Already at initial status', 'info');
+                        }
+                    }
+                }
+            }
+        });
         
         init();
     });
@@ -3919,7 +5392,8 @@ span[style*="background: rgb(102, 126, 234)"] {
                                         <label class="form-label mb-1" style="font-size: 0.75rem;">Custom Start:</label>
                                         <input type="date" class="form-control form-control-sm" 
                                             id="stageStartDate-${stageCounter}" 
-                                            onchange="updateProjectEndDate()" style="font-size: 0.85rem;" ${!isChecked ? 'disabled' : ''}>
+                                            data-is-custom="false"
+                                            onchange="this.setAttribute('data-is-custom','true'); updateProjectEndDate();" style="font-size: 0.85rem;" ${!isChecked ? 'disabled' : ''}>
                                     </div>
                                 </div>
                                 <div>
@@ -4020,9 +5494,10 @@ span[style*="background: rgb(102, 126, 234)"] {
             const duration = parseInt(document.getElementById(`stageDuration-${id}`)?.value) || 1;
             const customStartDateInput = document.getElementById(`stageStartDate-${id}`);
             const customStartDate = customStartDateInput?.value;
+            const isCustom = customStartDateInput?.getAttribute('data-is-custom') === 'true';
             
             let stageStart;
-            if (customStartDate) {
+            if (customStartDate && isCustom) {
                 stageStart = getNextWorkingDay(new Date(customStartDate));
             } else {
                 stageStart = new Date(currentDate);
@@ -4036,13 +5511,12 @@ span[style*="background: rgb(102, 126, 234)"] {
                 index: idx,
                 start: stageStart, 
                 end: stageEnd,
-                hasCustomDate: !!customStartDate,
+                hasCustomDate: !!(customStartDate && isCustom),
                 duration: duration
             });
             
-            if (!customStartDate) {
-                currentDate = addWorkingDays(stageEnd, 1);
-            }
+            // Always advance so subsequent sequential stages chain correctly
+            currentDate = addWorkingDays(stageEnd, 1);
         });
         
         // Detect overlapping stages
@@ -4135,15 +5609,18 @@ span[style*="background: rgb(102, 126, 234)"] {
 
 async function loadProjects() {
     try {
-        console.log('Loading projects...');
-        const response = await fetch('/api/projects');
+        console.log('📦 Loading projects...');
+        const response = await fetch(`/api/projects?_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {'Cache-Control': 'no-cache'}
+        });
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
         projects = await response.json();
-        console.log('Projects loaded:', projects.length);
+        console.log('📦 Projects loaded:', projects.length, projects);
         
         if (projects.length === 0) {
             const container = document.getElementById('allProjectsSection');
@@ -4155,19 +5632,26 @@ async function loadProjects() {
         const projectsWithDetails = await Promise.all(
             projects.map(async (project) => {
                 try {
-                    console.log(`Fetching details for project ${project.id}...`);
-                    const detailsResponse = await fetch(`/api/projects/${project.id}/details`);
+                    console.log(`📋 Fetching details for project ${project.id}: "${project.name}"...`);
+                    const detailsResponse = await fetch(`/api/projects/${project.id}/details?_t=${Date.now()}`, {
+                        cache: 'no-store',
+                        headers: {'Cache-Control': 'no-cache'}
+                    });
                     
                     if (!detailsResponse.ok) {
-                        console.error(`Failed to fetch details for project ${project.id}`);
+                        console.error(`❌ Failed to fetch details for project ${project.id}`);
                         return null;
                     }
                     
                     const details = await detailsResponse.json();
-                    console.log(`Details loaded for project ${project.id}:`, details);
+                    console.log(`✅ Details loaded for project ${project.id}:`, {
+                        name: details.name,
+                        stages: details.stages.length,
+                        stagesData: details.stages
+                    });
                     return details;
                 } catch (error) {
-                    console.error(`Error fetching project ${project.id}:`, error);
+                    console.error(`❌ Error fetching project ${project.id}:`, error);
                     return null;
                 }
             })
@@ -4175,7 +5659,7 @@ async function loadProjects() {
         
         // Filter out null values
         const validProjects = projectsWithDetails.filter(p => p !== null);
-        console.log('Valid projects:', validProjects.length);
+        console.log('✅ Valid projects to render:', validProjects.length);
         
         if (validProjects.length === 0) {
             const container = document.getElementById('allProjectsSection');
@@ -4188,6 +5672,9 @@ async function loadProjects() {
             return;
         }
         
+        // Force clear and re-render
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = '';
         renderProjectsWithStages(validProjects);
     } catch (error) {
         console.error('Error loading projects:', error);
@@ -4220,15 +5707,28 @@ function renderProjectsWithStages(projectsData) {
             const completedStages = stages.filter(s => s.status === 'completed').length;
             const progress = totalStages > 0 ? Math.round((completedStages / totalStages) * 100) : 0;
             
+            console.log(`🎨 Rendering project "${project.name}" with ${stages.length} stages`);
+            
             const startDateGroups = new Map();
             
             stages.forEach((stage, idx) => {
-                if (!stage.start_date) return;
+                if (!stage.start_date) {
+                    console.log(`  ⚠️ Stage ${idx} "${stage.name}" has NO start_date`);
+                    return;
+                }
                 const startDateKey = stage.start_date;
                 if (!startDateGroups.has(startDateKey)) {
                     startDateGroups.set(startDateKey, []);
                 }
                 startDateGroups.get(startDateKey).push(idx);
+                console.log(`  ✅ Stage ${idx} "${stage.name}" start_date: ${stage.start_date}`);
+            });
+            
+            console.log(`  📊 Start date groups found:`, startDateGroups.size);
+            startDateGroups.forEach((indices, startDate) => {
+                if (indices.length > 1) {
+                    console.log(`    🔵 PARALLEL GROUP on ${startDate}: ${indices.length} stages`, indices);
+                }
             });
             
             const stageGroupMap = new Map();
@@ -4286,41 +5786,44 @@ function renderProjectsWithStages(projectsData) {
                 if (hasSameStart) {
                     spacingClass = currentGroup.length >= 3 ? 'tight-spacing' : 'medium-spacing';
                 }
-                
+
                 let groupBadge = '';
                 if (hasSameStart) {
                     const position = currentGroup.indexOf(index) + 1;
                     const total = currentGroup.length;
-                    groupBadge = `<span class="parallel-badge">${position}/${total}</span>`;
+                    // groupBadge = `<span class="parallel-badge">${position}/${total}</span>`;  // ← COMMENTED OUT
                 }
-                
-                let circleContent;
-                if (isCompleted) {
-                    circleContent = '<i class="fas fa-check"></i>';
-                } else {
-                    circleContent = index + 1;
-                }
-                
-                const stageElement = `
-                    <div class="progress-step ${spacingClass}" 
-                        onclick="updateStageStatus(${project.id}, ${stage.id}, '${stage.status}')">
-                        <div class="step-circle ${isCompleted ? 'completed' : ''} ${isActive ? 'active' : ''}">
-                            ${circleContent}
-                        </div>
+                                
+                    let circleContent;
+                    if (isCompleted) {
+                        circleContent = '<i class="fas fa-check"></i>';
+                    } else {
+                    circleContent = '';                    
+                    }                
+                    const stageElement = `
+                        <div class="progress-step ${spacingClass}" data-stage-id="${stage.id}" 
+                            data-project-id="${project.id}" 
+                            data-in-parallel="${hasSameStart ? 'true' : 'false'}"
+                            data-stage-status="${stage.status}">
+                            <div class="step-circle ${isCompleted ? 'completed' : ''} ${isActive ? 'in-progress' : ''}" 
+                                 style="cursor: pointer;"
+                                 title="Left-click: Advance status | Right-click: Undo status">
+                                ${circleContent}
+                            </div>
                         <div class="step-label ${isCompleted ? 'completed' : ''} ${isActive ? 'active' : ''}">
                             ${stage.name}
                             <span class="duration-badge">${stage.duration_days}d</span>
                             ${groupBadge}
                         </div>
-                        ${stage.start_date ? `
-                            <div style="margin-top: 5px; text-align: center;">
-                                <small class="text-muted" style="font-size: 0.7rem;">
-                                    ${new Date(stage.start_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'})}
-                                    ${stage.end_date ? ' - ' + new Date(stage.end_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : ''}
-                                </small>
-                            </div>
-                        ` : ''}
+                ${stage.start_date ? `
+                    <div style="margin-top: 5px; text-align: center;">
+                        <small class="text-muted" style="font-size: 0.7rem; display: block; line-height: 1.4;">
+                            ${new Date(stage.start_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'})}
+                            ${stage.end_date ? '<br>' + new Date(stage.end_date).toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : ''}
+                        </small>
                     </div>
+                ` : ''}                   
+                </div>
                 `;
                 
                 if (isInGroup) {
@@ -4357,16 +5860,20 @@ function renderProjectsWithStages(projectsData) {
                             <div class="mt-1">${membersHTML}</div>
                         </div>
                         <div class="project-actions">
-                            <button class="btn btn-outline-success" onclick="exportCurrentProject(${project.id})" 
-                                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px;">
+                            <button class="btn btn-outline-success" onclick="showExcelPreview(${project.id})"                                   
+                            style="border-radius: 8px; font-weight: 600; padding: 8px 16px;">
                                 <i class="fas fa-file-excel me-2"></i> Export to Excel
-                            </button>
+                            </button>                            
                             <button class="btn btn-outline-primary" onclick="openCalendarView(${project.id})" 
                                     style="border-radius: 8px; font-weight: 600; padding: 8px 16px;">
                                 <i class="fas fa-calendar-alt me-2"></i> View Calendar
                             </button>
+                            <button class="btn btn-outline-warning" onclick="openEditProjectModal(${project.id}, event)" 
+                                    style="border-radius: 8px; font-weight: 600; padding: 8px 16px;">
+                                <i class="fas fa-edit me-2"></i> Edit
+                            </button>
                             <button class="btn-delete-project" onclick="deleteProject(${project.id}, event)">
-                                <i class="fas fa-trash-alt me-1"></i> Delete
+                                <i class="fas fa-trash-alt me-2"></i> Delete
                             </button>
                         </div>                        
                     </div>
@@ -4392,31 +5899,58 @@ function renderProjectsWithStages(projectsData) {
             `;
         }).join('');
         
-    setTimeout(() => {
-        document.querySelectorAll('.progress-steps').forEach(progressContainer => {
-            const line = progressContainer.querySelector('.progress-line');
-            const steps = progressContainer.querySelectorAll('.progress-step');
+setTimeout(() => {
+    document.querySelectorAll('.progress-steps').forEach(progressContainer => {
+        const line = progressContainer.querySelector('.progress-line');
+        
+        // Get all top-level steps (including group containers)
+        const directChildren = Array.from(progressContainer.children).filter(
+            child => child.classList.contains('progress-step') || 
+                     child.classList.contains('stage-group-container')
+        );
+        
+        if (line && directChildren.length > 0) {
+            const firstChild = directChildren[0];
+            const lastChild = directChildren[directChildren.length - 1];
             
-            if (line && steps.length > 0) {
-                const firstStep = steps[0];
-                const lastStep = steps[steps.length - 1];
+            // For group containers, get the first circle inside
+            const firstCircle = firstChild.classList.contains('stage-group-container') 
+                ? firstChild.querySelector('.step-circle')
+                : firstChild.querySelector('.step-circle');
                 
-                const firstStepRect = firstStep.getBoundingClientRect();
-                const lastStepRect = lastStep.getBoundingClientRect();
+            const lastCircle = lastChild.classList.contains('stage-group-container')
+                ? lastChild.querySelector('.step-circle')
+                : lastChild.querySelector('.step-circle');
+            
+            if (firstCircle && lastCircle) {
+                const firstRect = firstCircle.getBoundingClientRect();
+                const lastRect = lastCircle.getBoundingClientRect();
                 const containerRect = progressContainer.getBoundingClientRect();
                 
-                const lineLeft = firstStepRect.left - containerRect.left + 25; // center of first circle
-                const lineRight = lastStepRect.left - containerRect.left + 25; // center of last circle
+                const lineLeft = firstRect.left - containerRect.left + 25;
+                const lineRight = lastRect.left - containerRect.left + 25;
                 const lineWidth = lineRight - lineLeft;
                 
                 line.style.left = `${lineLeft}px`;
                 line.style.width = `${lineWidth}px`;
-                line.style.right = 'auto'; // Override the CSS 'right: 20px'
+                line.style.right = 'auto';
             }
-        });
-    }, 100);
-}    
+        }
+    });
+}, 100);
+    
+    // Update progress line status for each project
+// Update progress line status for each project
+    projectsData.forEach(project => {
+        startProgressLineAutoRefresh(project.id);
+    });
+    
+    // ✅ Setup parallel stage click handlers - DISABLED (circles now have direct onclick)
+    // setTimeout(() => {
+    //     setupParallelStageClickHandlers();
+    // }, 100);
 
+}
     async function loadEmployees() {
         const response = await fetch('/api/employees');
         employees = await response.json();
@@ -4426,90 +5960,328 @@ function renderProjectsWithStages(projectsData) {
     }
 
     // UPDATED FUNCTION: Handle project submit with working Saturdays
-    async function handleProjectSubmit(e) {
-        e.preventDefault();
-        
-        const stages = [];
-        const stageElements = document.querySelectorAll('[id^="stage-"]');
-        
-        stageElements.forEach((element, index) => {
-            const id = element.id.split('-')[1];
-            const checkbox = document.getElementById(`stageCheck-${id}`);
-            
-            if (!checkbox || !checkbox.checked) return;
-            
-            const name = document.getElementById(`stageName-${id}`)?.value;
-            const duration = parseInt(document.getElementById(`stageDuration-${id}`)?.value) || 1;
-            const managerId = parseInt(document.getElementById(`stageManager-${id}`)?.value) || null;  // ADD THIS
-            const customStartDate = document.getElementById(`stageStartDate-${id}`)?.value;
-            
-            if (name) {
-                const stageData = { 
-                    name, 
-                    order: stages.length + 1,
-                    duration_days: duration,
-                    manager_id: managerId  // ADD THIS
-                };
-                
-                if (customStartDate) {
-                    stageData.start_date = customStartDate;
-                }
-                
-                stages.push(stageData);
-            }
-        });
-
-    if (stages.length === 0) {
-        alert('Please select at least one task!');
-        return;
-    }        
+async function handleProjectSubmit(e) {
+    e.preventDefault();
     
+    // ✅ STEP 1: Collect current form data
+    const stages = [];
+    const stageElements = document.querySelectorAll('[id^="stage-"]');
+    
+    stageElements.forEach((element, index) => {
+        const id = element.id.split('-')[1];
+        const checkbox = document.getElementById(`stageCheck-${id}`);
+        
+        if (!checkbox || !checkbox.checked) return;
+        
+        const name = document.getElementById(`stageName-${id}`)?.value;
+        const duration = parseInt(document.getElementById(`stageDuration-${id}`)?.value) || 1;
+        const managerId = parseInt(document.getElementById(`stageManager-${id}`)?.value) || null;
+        const startDateInput = document.getElementById(`stageStartDate-${id}`);
+        const customStartDate = startDateInput?.value || null;
+        const isCustomDate = startDateInput?.getAttribute('data-is-custom') === 'true';
+        
+        if (name) {
+            const stageData = { 
+                name,  // This will REPLACE the old name
+                order: stages.length + 1,
+                duration_days: duration,  // This will REPLACE the old duration
+                manager_id: managerId  // This will REPLACE the old manager
+            };
+            
+            // ✅ Include custom start date if user set one
+            if (isCustomDate && customStartDate) {
+                stageData.start_date = customStartDate;
+            }
+            
+            // ✅ Include the database ID so backend knows to UPDATE (not create new)
+            const dbId = element.getAttribute('data-db-id');
+            if (dbId) {
+                stageData.id = parseInt(dbId);  // This tells backend "update this record"
+            }
+            
+            stages.push(stageData);
+        }
+    });
+    
+    // ✅ STEP 2: Determine if editing or creating
+    const wasEditMode = isEditMode;
+    const projectIdBeingEdited = editingProjectId;
+    
+    // ✅ STEP 3: Prepare data to send
     const data = {
         name: document.getElementById('projectName').value,
-        // description removed - no longer needed in UI
         start_date: document.getElementById('projectStartDate').value,
-        stages,
+        stages,  // This REPLACES all the old stages
         members: selectedMembers,
         include_saturday: includeSaturdayAsWorkingDay,
-        working_saturdays: Array.from(workingSaturdays)
-    };        
-        const response = await fetch('/api/projects', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(data)
-        });
+        working_saturdays: Array.from(workingSaturdays),
+        is_direct_edit: wasEditMode
+    };
+    
+    // ✅ STEP 4: Send to backend - PUT for update, POST for create
+    const url = wasEditMode ? `/api/projects/${projectIdBeingEdited}` : '/api/projects';
+    const method = wasEditMode ? 'PUT' : 'POST';  // PUT = update existing
+    
+    console.log('🚀 Sending request:', { url, method, data });
+    
+    const response = await fetch(url, {
+        method: method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)  // Send the new data
+    });
+    
+    console.log('📡 Response status:', response.status);
+    
+    if (response.ok) {
+        const result = await response.json();
+        console.log('✅ Server response:', result);
         
-        if (response.ok) {
-            showNotification('Job created successfully!', 'success');
-            projectModal.hide();
-            document.getElementById('projectForm').reset();
-            document.getElementById('stagesContainer').innerHTML = '';
-            document.getElementById('selectedMembers').innerHTML = '';
-            stageCounter = 0;
-            selectedMembers = [];
-            workingSaturdays.clear();
-            await loadProjects();
-            await loadStats();
-        } else {
-            const error = await response.json();
-            alert('Error: ' + (error.error || 'Failed to create job'));
+        // ✅ CLOSE THE MODAL
+        projectModal.hide();
+        
+        // ✅ RESET THE FORM
+        resetProjectForm();
+        
+        showNotification(wasEditMode ? '✅ Job updated successfully!' : '✅ Job created successfully!', 'success');
+        
+        // Check if calendar modal is open BEFORE clearing data
+        const calendarModalEl = document.getElementById('calendarModal');
+        const wasCalendarOpen = calendarModalEl && calendarModalEl.classList.contains('show');
+        const projectIdForRefresh = wasCalendarOpen ? currentProjectForCalendar : null;
+        
+        // Wait for modal to close
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Reload to show updated data
+        await loadProjects();
+        await loadStats();
+        
+        // ✅ REFRESH CALENDAR VIEW IF IT WAS OPEN - IMPROVED VERSION
+        if (wasCalendarOpen && projectIdForRefresh) {
+            console.log('🔄 Calendar was open - forcing complete refresh for project:', projectIdForRefresh);
+            
+            // Wait a bit more to ensure database is updated
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            // Force complete calendar rebuild
+            currentProjectForCalendar = projectIdForRefresh;
+            
+            // Destroy existing calendar if it exists
+            if (calendar) {
+                try {
+                    calendar.destroy();
+                    calendar = null;
+                    console.log('🗑️ Destroyed old calendar');
+                } catch (e) {
+                    console.warn('Could not destroy calendar:', e);
+                }
+            }
+            
+            // Clear the calendar container COMPLETELY
+            const calendarEl = document.getElementById('calendar');
+            if (calendarEl) {
+                // Remove all content and classes
+                calendarEl.innerHTML = '';
+                calendarEl.className = '';
+                // Force browser to recalculate layout
+                calendarEl.offsetHeight; // Trigger reflow
+                console.log('🧹 Cleared calendar DOM');
+            }
+            
+            // Extra wait to ensure DOM is clean
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            // Reopen calendar view with fresh data
+            await openCalendarView(projectIdForRefresh);
+            
+            console.log('✅ Calendar refreshed with updated data');
         }
+        
+        // Clear cached data AFTER calendar refresh
+        window.originalProjectData = null;
+        currentProjectData = null;
+    } else {
+        // ✅ SHOW ACTUAL ERROR
+        const errorData = await response.json();
+        console.error('❌ Server error:', errorData);
+        showNotification('❌ Error: ' + (errorData.error || 'Failed to save changes'), 'error');
     }
+}
 
-    async function updateStageStatus(projectId, stageId, currentStatus) {
+async function updateStageStatus(projectId, stageId, currentStatus) {
+    try {
+        // Determine next status
         const newStatus = currentStatus === 'pending' ? 'in-progress' : 
                          currentStatus === 'in-progress' ? 'completed' : 'pending';
         
-        await fetch(`/api/projects/${projectId}/stages/${stageId}`, {
+        // Update the status on the server
+        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ status: newStatus })
         });
         
+        if (!response.ok) {
+            throw new Error('Failed to update stage status');
+        }
+        
+        // ✅ FIX: Find and update the specific stage (works for both regular and parallel)
+        const stageElement = document.querySelector(`[data-stage-id="${stageId}"]`);
+        
+        if (stageElement) {
+            const circle = stageElement.querySelector('.step-circle');
+            const label = stageElement.querySelector('.step-label');
+            
+            // ✅ UPDATE THE DATA ATTRIBUTE SO RIGHT-CLICK WORKS
+            stageElement.setAttribute('data-stage-status', newStatus);
+            
+            // ✅ SAVE original content BEFORE any changes
+            if (!circle.dataset.originalNumber) {
+                const circleText = circle.textContent.trim();
+                if (circleText && !isNaN(circleText)) {
+                    circle.dataset.originalNumber = circleText;
+                }
+            }
+            
+            // Remove all status classes
+            circle.classList.remove('completed', 'active', 'not-started', 'in-progress', 'overdue', 'completed-rescheduled');
+            label.classList.remove('completed', 'active');
+            
+            // Apply new status
+            if (newStatus === 'completed') {
+                circle.classList.add('completed');
+                label.classList.add('completed');
+                circle.innerHTML = '<i class="fas fa-check"></i>';
+            } else if (newStatus === 'in-progress') {
+                circle.classList.add('in-progress');
+                label.classList.add('active');
+                // ✅ Restore from saved original number
+                circle.textContent = circle.dataset.originalNumber || '';
+            } else {
+                // Reset to pending
+                circle.classList.add('not-started');
+                // ✅ Restore from saved original number
+                circle.textContent = circle.dataset.originalNumber || '';
+            }
+        }
+        
+        // Update progress line and percentage
+        updateProgressLineFill(projectId);
+        
+        // Refresh progress line status with new colors
+        await updateProgressLineStatus(projectId);
+        
+        // Only update stats (lightweight)
+        await loadStats();
+        
+    } catch (error) {
+        console.error('Error updating stage status:', error);
+        // Only reload if there's an error
         await loadProjects();
         await loadStats();
     }
-
+}
+// ✅ NEW FUNCTION: Undo stage status (right-click support)
+async function undoStageStatus(projectId, stageId, previousStatus) {
+    try {
+        console.log(`Undoing stage ${stageId} to status: ${previousStatus}`);
+        
+        // Update the status on the server to previous state
+        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: previousStatus })
+        });
+        
+        if (!response.ok) {
+            throw new Error('Failed to undo stage status');
+        }
+        
+        // Find and update the specific stage
+        const stageElement = document.querySelector(`[data-stage-id="${stageId}"]`);
+        
+        if (stageElement) {
+            const circle = stageElement.querySelector('.step-circle');
+            const label = stageElement.querySelector('.step-label');
+            
+            // ✅ UPDATE THE DATA ATTRIBUTE SO RIGHT-CLICK CONTINUES TO WORK
+            stageElement.setAttribute('data-stage-status', previousStatus);
+            
+            // ✅ SAVE original content BEFORE any changes
+            if (!circle.dataset.originalNumber) {
+                const circleText = circle.textContent.trim();
+                if (circleText && !isNaN(circleText)) {
+                    circle.dataset.originalNumber = circleText;
+                }
+            }
+            
+            // Remove all status classes
+            circle.classList.remove('completed', 'active', 'not-started', 'in-progress', 'overdue', 'completed-rescheduled');
+            label.classList.remove('completed', 'active');
+            
+            // Apply previous status
+            if (previousStatus === 'completed') {
+                circle.classList.add('completed');
+                label.classList.add('completed');
+                circle.innerHTML = '<i class="fas fa-check"></i>';
+            } else if (previousStatus === 'in-progress') {
+                circle.classList.add('in-progress');
+                label.classList.add('active');
+                // ✅ Restore from saved original number
+                circle.textContent = circle.dataset.originalNumber || '';
+            } else {
+                // Reset to pending
+                circle.classList.add('not-started');
+                // ✅ Restore from saved original number
+                circle.textContent = circle.dataset.originalNumber || '';
+            }
+        }
+        
+        // Update progress line and percentage
+        updateProgressLineFill(projectId);
+        
+        // Refresh progress line status with new colors
+        await updateProgressLineStatus(projectId);
+        
+        // Update stats
+        await loadStats();
+        
+        showNotification('Status reverted successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error undoing stage status:', error);
+        showNotification('Error undoing status: ' + error.message, 'error');
+        // Reload on error
+        await loadProjects();
+        await loadStats();
+    }
+}
+// ✅ ADD THIS NEW HELPER FUNCTION (add it right after updateStageStatus)
+function updateProgressLineFill(projectId) {
+    const projectContainers = document.querySelectorAll('.project-progress-container');
+    
+    projectContainers.forEach(container => {
+        const editBtn = container.querySelector(`[onclick*="openEditProjectModal(${projectId}"]`);
+        if (editBtn) {
+            const steps = container.querySelectorAll('.progress-step');
+            const completedSteps = container.querySelectorAll('.step-circle.completed').length;
+            const totalSteps = steps.length;
+            const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+            
+            // Update progress line fill
+            const progressFill = container.querySelector('.progress-line-fill');
+            if (progressFill) {
+                progressFill.style.width = `${progress}%`;
+            }
+            
+            // Update progress percentage text
+            const progressText = container.querySelector('strong[style*="color: #667eea"]');
+            if (progressText) {
+                progressText.textContent = `${Math.round(progress)}% Complete (${completedSteps}/${totalSteps})`;
+            }
+        }
+    });
+}
 function openProjectModal() {
     document.getElementById('projectForm').reset();
     document.getElementById('projectStartDate').valueAsDate = new Date();
@@ -4535,15 +6307,16 @@ async function deleteProject(projectId, event) {
         });
         
         if (response.ok) {
-            alert('Job deleted successfully!');
+            showNotification('✅ Job deleted successfully!', 'success');
             await loadProjects();
             await loadStats();
         } else {
             const error = await response.json();
-            alert('Error: ' + (error.error || 'Failed to delete job'));
+            showNotification('❌ Error: ' + (error.error || 'Failed to delete job'), 'error');
         }
     } catch (error) {
-        alert('Error deleting job: ' + error.message);
+        console.error('Error deleting job:', error);
+        showNotification('❌ Error deleting job: ' + error.message, 'error');
     }
 }
 
@@ -4553,14 +6326,119 @@ function getStageColor(index) {
 
 let miniPopupData = null;
 
+// ✅ NEW FUNCTION - Dynamic Layout Calculator
+function calculateOptimalCalendarLayout(stages) {
+    console.log('📐 Calculating optimal calendar layout...');
+    
+    // Step 1: Build a map of dates to stage counts
+    const dateStageMap = new Map();
+    let maxStagesPerDay = 0;
+    
+    stages.forEach((stage, idx) => {
+        if (!stage.start_date || !stage.end_date) return;
+        
+        const start = new Date(stage.start_date);
+        const end = new Date(stage.end_date);
+        
+        // Count stages for each date
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+            const dateKey = d.toISOString().split('T')[0];
+            const count = (dateStageMap.get(dateKey) || 0) + 1;
+            dateStageMap.set(dateKey, count);
+            maxStagesPerDay = Math.max(maxStagesPerDay, count);
+        }
+    });
+    
+    console.log(`📊 Max stages per day: ${maxStagesPerDay}`);
+    
+    // Step 2: Calculate optimal heights
+    const baseEventHeight = 24; // pixels per event
+    const cellPadding = 20; // top/bottom padding
+    const minCellHeight = 80; // minimum cell height
+    
+    const optimalCellHeight = Math.max(
+        minCellHeight,
+        (maxStagesPerDay * baseEventHeight) + cellPadding
+    );
+    
+    console.log(`✅ Optimal cell height: ${optimalCellHeight}px`);
+    
+    return {
+        maxStagesPerDay,
+        optimalCellHeight,
+        dateStageMap
+    };
+}
+
+// ✅ NEW FUNCTION - Apply Dynamic Styles
+function applyDynamicCalendarStyles(layoutInfo) {
+    const { optimalCellHeight, maxStagesPerDay } = layoutInfo;
+    
+    // Remove existing dynamic styles
+    const existingStyle = document.getElementById('dynamic-calendar-styles');
+    if (existingStyle) {
+        existingStyle.remove();
+    }
+    
+    // Create new style element
+    const style = document.createElement('style');
+    style.id = 'dynamic-calendar-styles';
+    
+    // Dynamic CSS based on layout analysis
+    style.textContent = `
+        /* Dynamic cell height based on stage count */
+        .fc-daygrid-day-frame {
+            min-height: ${optimalCellHeight}px !important;
+        }
+        
+        /* Adjust event spacing for dense layouts */
+        .fc-daygrid-event-harness {
+            margin-bottom: ${maxStagesPerDay > 5 ? '2px' : '4px'} !important;
+        }
+        
+        /* Event font size adjustment for dense layouts */
+        .fc-event-title {
+            font-size: ${maxStagesPerDay > 7 ? '0.7rem' : '0.75rem'} !important;
+            line-height: 1.2 !important;
+        }
+        
+        /* Compact padding for dense layouts */
+        .fc-daygrid-event {
+            padding: ${maxStagesPerDay > 5 ? '1px 3px' : '2px 4px'} !important;
+        }
+        
+        /* Adjust day number position for better visibility */
+        .fc-daygrid-day-number {
+            font-size: ${maxStagesPerDay > 7 ? '0.8rem' : '0.9rem'} !important;
+            padding: 4px !important;
+        }
+    `;
+    
+    document.head.appendChild(style);
+    console.log('✅ Applied dynamic calendar styles');
+}
+
 
 
 async function openCalendarView(projectId) {
     currentProjectForCalendar = projectId;
     
+    // Clean up any existing calendar first
+    if (calendar) {
+        console.log('🗑️ Destroying existing calendar before opening new one');
+        calendar.destroy();
+        calendar = null;
+    }
+    
+    // Stop any existing auto-refresh
+    stopAllProgressLineAutoRefresh();
+    
     try {
         // Fetch project details
-        const response = await fetch(`/api/projects/${projectId}/details`);
+        const response = await fetch(`/api/projects/${projectId}/details?_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {'Cache-Control': 'no-cache'}
+        });
         currentProjectData = await response.json();
         
         // ✅ CRITICAL: ALWAYS fetch complete reschedule history (including daily tasks)
@@ -4586,6 +6464,12 @@ async function openCalendarView(projectId) {
         console.log('Working Saturdays loaded:', Array.from(currentProjectData.saturdayWorkingDays));
         console.log('Reschedule History loaded:', currentProjectData.rescheduleHistory);
         
+        // ✅ STEP 1: Analyze layout BEFORE creating calendar
+        const layoutInfo = calculateOptimalCalendarLayout(currentProjectData.stages);
+        
+        // ✅ STEP 2: Apply dynamic styles
+        applyDynamicCalendarStyles(layoutInfo);
+        
         document.getElementById('calendarProjectTitle').textContent = `${currentProjectData.name}`;
         document.getElementById('calendarProjectDates').textContent = 
             `${new Date(currentProjectData.start_date).toLocaleDateString()} - ${new Date(currentProjectData.end_date).toLocaleDateString()}`;
@@ -4593,14 +6477,23 @@ async function openCalendarView(projectId) {
         // Show modal first
         calendarModal.show();
         
+        // Update progress line status
+        updateProgressLineStatus(projectId);
+        startProgressLineAutoRefresh(projectId);
+        
         // Wait for modal to be fully shown
         setTimeout(async () => {
             const calendarEl = document.getElementById('calendar');
             
-            // Clear any existing calendar
+            // Clear any existing calendar thoroughly
             if (calendar) {
                 calendar.destroy();
+                calendar = null;
+                console.log('🗑️ Previous calendar destroyed');
             }
+            
+            // Clear the calendar element's innerHTML to ensure clean slate
+            calendarEl.innerHTML = '';
             
             // ✅ Generate events with ghost events
             const calendarEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
@@ -4618,8 +6511,26 @@ async function openCalendarView(projectId) {
                     right: 'dayGridMonth,timeGridWeek,listMonth'
                 },                
                 height: 'auto',
-                contentHeight: 500,
-                events: calendarEvents,
+                contentHeight: 'auto',  // Let it expand as needed for all events
+                // ✅ CRITICAL FIX: Use function instead of static array so refetchEvents() works
+                events: async function(fetchInfo, successCallback, failureCallback) {
+                    try {
+                        console.log('🔄 Fetching fresh calendar events...');
+                        const freshEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
+                        console.log('✅ Generated', freshEvents.length, 'events');
+                        successCallback(freshEvents);
+                    } catch (error) {
+                        console.error('❌ Error generating events:', error);
+                        failureCallback(error);
+                    }
+                },
+                eventOrder: 'start,-duration,title',  // Order by start date FIRST, then by duration (longer first), then by title
+                eventMaxStack: layoutInfo.maxStagesPerDay + 2,  // ✅ DYNAMIC: Adjust based on layout complexity
+                dayMaxEvents: false,  // Show ALL events without "+more" links - THIS IS KEY
+                dayMaxEventRows: false,  // Don't limit the number of event rows per day
+                showNonCurrentDates: false,  // Hide dates from other months
+                fixedWeekCount: false,  // Don't show 6 weeks if month is shorter
+                editable: true,  // Enable drag and drop editing
                 eventClick: function(info) {
                     // ✅ Don't allow clicking ghost events
                     if (info.event.extendedProps.isGhost) {
@@ -4641,6 +6552,82 @@ async function openCalendarView(projectId) {
                     }
                     handleStageClickReschedule(info, currentProjectData);
                 },
+                // ✅ FIX: Handle event drag/drop - refresh calendar layout
+                eventDrop: async function(info) {
+                    console.log('📌 Event dropped, updating layout...');
+                    try {
+                        // Update backend if needed (you can add your API call here)
+                        // await fetch(...);
+                        
+                        // ✅ Reload fresh project data
+                        const response = await fetch(`/api/projects/${currentProjectData.id}/details?_t=${Date.now()}`, {
+                            cache: 'no-store',
+                            headers: {'Cache-Control': 'no-cache'}
+                        });
+                        if (response.ok) {
+                            const freshData = await response.json();
+                            // Update stages with fresh data
+                            currentProjectData.stages = freshData.stages;
+                            
+                            // ✅ RECALCULATE AND REAPPLY LAYOUT
+                            const newLayoutInfo = calculateOptimalCalendarLayout(freshData.stages);
+                            applyDynamicCalendarStyles(newLayoutInfo);
+                            
+                            console.log('✅ Loaded fresh project data');
+                        }
+                        
+                        // ✅ CRITICAL: Refresh the calendar to fix layout
+                        setTimeout(() => {
+                            if (calendar) {
+                                calendar.refetchEvents();
+                                calendar.updateSize();
+                                calendar.render();
+                                console.log('✅ Calendar layout refreshed after drop');
+                            }
+                        }, 100);
+                    } catch (error) {
+                        console.error('Error updating event:', error);
+                        info.revert(); // Revert if error
+                    }
+                },
+                // ✅ FIX: Handle event resize - refresh calendar layout
+                eventResize: async function(info) {
+                    console.log('📏 Event resized, updating layout...');
+                    try {
+                        // Update backend if needed (you can add your API call here)
+                        // await fetch(...);
+                        
+                        // ✅ Reload fresh project data
+                        const response = await fetch(`/api/projects/${currentProjectData.id}/details?_t=${Date.now()}`, {
+                            cache: 'no-store',
+                            headers: {'Cache-Control': 'no-cache'}
+                        });
+                        if (response.ok) {
+                            const freshData = await response.json();
+                            // Update stages with fresh data
+                            currentProjectData.stages = freshData.stages;
+                            
+                            // ✅ RECALCULATE AND REAPPLY LAYOUT
+                            const newLayoutInfo = calculateOptimalCalendarLayout(freshData.stages);
+                            applyDynamicCalendarStyles(newLayoutInfo);
+                            
+                            console.log('✅ Loaded fresh project data');
+                        }
+                        
+                        // ✅ CRITICAL: Refresh the calendar to fix layout
+                        setTimeout(() => {
+                            if (calendar) {
+                                calendar.refetchEvents();
+                                calendar.updateSize();
+                                calendar.render();
+                                console.log('✅ Calendar layout refreshed after resize');
+                            }
+                        }, 100);
+                    } catch (error) {
+                        console.error('Error updating event:', error);
+                        info.revert(); // Revert if error
+                    }
+                },
                 dayCellDidMount: function(info) {
                     addDayRescheduleButton(info, currentProjectData);
                 },
@@ -4659,6 +6646,17 @@ async function openCalendarView(projectId) {
             
             calendar.render();
             
+            // ✅ FORCE LAYOUT RECALCULATION - Critical for fixing messy overlaps
+            setTimeout(() => {
+                if (calendar) {
+                    // Force FullCalendar to recalculate dimensions and event positions
+                    calendar.updateSize();
+                    // Force re-render to recalculate event layout
+                    calendar.render();
+                    console.log('🔄 Forced layout recalculation');
+                }
+            }, 150);
+            
             // ✅ Apply enhancements after render INCLUDING badge refresh
             setTimeout(() => {
                 enhanceCalendarWithWeekends();
@@ -4669,7 +6667,15 @@ async function openCalendarView(projectId) {
         
     } catch (error) {
         console.error('Error loading calendar:', error);
-        alert('Error loading calendar: ' + error.message);
+        showNotification('❌ Failed to open calendar: ' + error.message, 'error');
+        // Close the modal if it was opened
+        if (typeof calendarModal !== 'undefined' && calendarModal) {
+            try {
+                calendarModal.hide();
+            } catch (e) {
+                console.warn('Could not hide calendar modal:', e);
+            }
+        }
     }
 }
 
@@ -4823,6 +6829,34 @@ console.log(`=== Total ghost events created: ${currentProjectData.rescheduleHist
                         }
                         dateStageMap.get(dateKey).push({ stage, index });
                         
+                        // ✅ NEW: If task is on HOLD, create a separate single-day event
+                        if (task.status === 'hold') {
+                            const holdStart = new Date(taskDate);
+                            const holdEnd = new Date(taskDate);
+                            holdEnd.setDate(holdEnd.getDate() + 1);
+                            
+                            events.push({
+                                title: `🔒 ${stage.name} - Day ${task.day_number}`,
+                                start: holdStart.toISOString().split('T')[0],
+                                end: holdEnd.toISOString().split('T')[0],
+                                backgroundColor: '#dc3545', // Red color
+                                borderColor: '#dc3545',
+                                classNames: ['event-hold'],
+                                extendedProps: {
+                                    stageId: stage.id,
+                                    stageIndex: index,
+                                    stageName: stage.name,
+                                    status: 'hold',
+                                    dayNumber: task.day_number,
+                                    reason: task.rescheduled_reason || 'On hold'
+                                }
+                            });
+                            
+                            console.log(`  🔒 HOLD day created: ${stage.name} Day ${task.day_number} on ${dateKey}`);
+                            return; // Skip adding to segment
+                        }
+                        
+                        // Normal segment logic for non-HOLD tasks
                         if (!segmentStart) {
                             segmentStart = new Date(taskDate);
                             lastDate = new Date(taskDate);
@@ -4846,7 +6880,7 @@ console.log(`=== Total ghost events created: ${currentProjectData.rescheduleHist
                                     dateStageMap,
                                     segmentTasks,
                                     hasAnyRescheduled,
-                                    stageRescheduleHistory // ✅ Pass reschedule info
+                                    stageRescheduleHistory
                                 ));
                                 
                                 segmentStart = new Date(taskDate);
@@ -4871,11 +6905,10 @@ console.log(`=== Total ghost events created: ${currentProjectData.rescheduleHist
                                 dateStageMap,
                                 segmentTasks,
                                 hasAnyRescheduled,
-                                stageRescheduleHistory // ✅ Pass reschedule info
+                                stageRescheduleHistory
                             ));
                         }
-                    });
-                    
+                    })                    
                     continue;
                 }
             }
@@ -5330,11 +7363,10 @@ function generateEnhancedLegend(stages) {
         
         let statusBadge = '';
         if (stage.status === 'completed') {
-            statusBadge = '<span class="badge bg-success" style="font-size: 0.6rem; padding: 2px 4px;">Ã¢Å“â€œ</span>';
+            statusBadge = '<span class="badge bg-success" style="font-size: 0.6rem; padding: 2px 4px;">✓</span>';
         } else if (stage.status === 'in-progress') {
-            statusBadge = '<span class="badge bg-warning" style="font-size: 0.6rem; padding: 2px 4px;">Ã¢Å¡Â¡</span>';
-        }
-        
+            statusBadge = '<span class="badge bg-warning" style="font-size: 0.6rem; padding: 2px 4px;">⏱</span>';
+        }        
         return `
             <div class="legend-item" style="border-left-color: ${color};">
                 <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
@@ -5426,6 +7458,26 @@ async function handleReschedule(e) {
             // ✅ Refresh main project view
             await loadProjects();
             await loadStats();
+            
+            // ✅ FORCE CALENDAR REFRESH TO FIX LAYOUT
+            console.log('🔄 Forcing calendar refresh after reschedule...');
+            if (calendar) {
+                try {
+                    calendar.destroy();
+                    calendar = null;
+                    const calendarEl = document.getElementById('calendar');
+                    if (calendarEl) {
+                        calendarEl.innerHTML = '';
+                        calendarEl.className = '';
+                        calendarEl.offsetHeight; // Force reflow
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    await openCalendarView(parseInt(projectId));
+                    console.log('✅ Calendar rebuilt successfully');
+                } catch (e) {
+                    console.error('Error rebuilding calendar:', e);
+                }
+            }
             
             showNotification('✅ Calendar updated successfully!', 'success');
             
@@ -5532,6 +7584,13 @@ async function forceCompleteCalendarRebuild(projectId) {
     } else {
         console.log(`✅ History verified: ${currentProjectData.rescheduleHistory.length} records`);
     }    
+    
+    // ✅ NEW: RECALCULATE LAYOUT with fresh data
+    console.log('📐 Recalculating layout with fresh data...');
+    const layoutInfo = calculateOptimalCalendarLayout(freshData.stages);
+    applyDynamicCalendarStyles(layoutInfo);
+    console.log('✅ Recalculated and applied new layout');
+    
     // Step 8: Regenerate calendar events
     console.log('🎨 Generating new calendar events...');
     const newEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
@@ -5557,8 +7616,23 @@ async function forceCompleteCalendarRebuild(projectId) {
             right: 'dayGridMonth,timeGridWeek,listMonth'
         },
         height: 'auto',
-        contentHeight: 600,
-        events: newEvents,
+        contentHeight: 'auto',
+        eventMaxStack: layoutInfo.maxStagesPerDay + 2,  // ✅ DYNAMIC: Adjust based on layout complexity
+        dayMaxEvents: false,
+        dayMaxEventRows: false,
+        // ✅ CRITICAL FIX: Use function instead of static array so refetchEvents() works
+        events: async function(fetchInfo, successCallback, failureCallback) {
+            try {
+                console.log('🔄 Fetching fresh calendar events...');
+                const freshEvents = await generateEnhancedCalendarEvents(currentProjectData.stages);
+                console.log('✅ Generated', freshEvents.length, 'events');
+                successCallback(freshEvents);
+            } catch (error) {
+                console.error('❌ Error generating events:', error);
+                failureCallback(error);
+            }
+        },
+        editable: true,  // Enable drag and drop editing
         eventClick: function(info) {
             if (info.event.extendedProps.isGhost) {
                 const props = info.event.extendedProps;
@@ -5571,6 +7645,74 @@ async function forceCompleteCalendarRebuild(projectId) {
                 return;
             }
             handleStageClickReschedule(info, currentProjectData);
+        },
+        // ✅ FIX: Handle event drag/drop - refresh calendar layout
+        eventDrop: async function(info) {
+            console.log('📌 Event dropped, updating layout...');
+            try {
+                // ✅ Reload fresh project data
+                const response = await fetch(`/api/projects/${currentProjectData.id}/details?_t=${Date.now()}`, {
+                    cache: 'no-store',
+                    headers: {'Cache-Control': 'no-cache'}
+                });
+                if (response.ok) {
+                    const freshData = await response.json();
+                    currentProjectData.stages = freshData.stages;
+                    
+                    // ✅ RECALCULATE AND REAPPLY LAYOUT
+                    const newLayoutInfo = calculateOptimalCalendarLayout(freshData.stages);
+                    applyDynamicCalendarStyles(newLayoutInfo);
+                    
+                    console.log('✅ Loaded fresh project data');
+                }
+                
+                // ✅ CRITICAL: Refresh the calendar to fix layout
+                setTimeout(() => {
+                    if (calendar) {
+                        calendar.refetchEvents();
+                        calendar.updateSize();
+                        calendar.render();
+                        console.log('✅ Calendar layout refreshed after drop');
+                    }
+                }, 100);
+            } catch (error) {
+                console.error('Error updating event:', error);
+                info.revert();
+            }
+        },
+        // ✅ FIX: Handle event resize - refresh calendar layout
+        eventResize: async function(info) {
+            console.log('📏 Event resized, updating layout...');
+            try {
+                // ✅ Reload fresh project data
+                const response = await fetch(`/api/projects/${currentProjectData.id}/details?_t=${Date.now()}`, {
+                    cache: 'no-store',
+                    headers: {'Cache-Control': 'no-cache'}
+                });
+                if (response.ok) {
+                    const freshData = await response.json();
+                    currentProjectData.stages = freshData.stages;
+                    
+                    // ✅ RECALCULATE AND REAPPLY LAYOUT
+                    const newLayoutInfo = calculateOptimalCalendarLayout(freshData.stages);
+                    applyDynamicCalendarStyles(newLayoutInfo);
+                    
+                    console.log('✅ Loaded fresh project data');
+                }
+                
+                // ✅ CRITICAL: Refresh the calendar to fix layout
+                setTimeout(() => {
+                    if (calendar) {
+                        calendar.refetchEvents();
+                        calendar.updateSize();
+                        calendar.render();
+                        console.log('✅ Calendar layout refreshed after resize');
+                    }
+                }, 100);
+            } catch (error) {
+                console.error('Error updating event:', error);
+                info.revert();
+            }
         },
         dayCellDidMount: function(info) {
             addDayRescheduleButton(info, currentProjectData);
@@ -5685,7 +7827,10 @@ async function recalculateProjectWithSaturdays() {
             await new Promise(resolve => setTimeout(resolve, 200));
             
             // Fetch fresh data
-            const detailsResponse = await fetch(`/api/projects/${currentProjectData.id}/details`);
+            const detailsResponse = await fetch(`/api/projects/${currentProjectData.id}/details?_t=${Date.now()}`, {
+                cache: 'no-store',
+                headers: {'Cache-Control': 'no-cache'}
+            });
             const freshData = await detailsResponse.json();
             
             // Update current data
@@ -5801,6 +7946,18 @@ async function generateDailyTasks(projectId) {
     }
 }
 
+
+// Helper function to check if task date is today or in the past
+function isTaskDateInPast(scheduledDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const taskDate = new Date(scheduledDate);
+    taskDate.setHours(0, 0, 0, 0);
+    
+    return taskDate <= today;
+}
+
 // Render daily tasks
 function renderDailyTasks(tasks) {
     const container = document.getElementById('dailyTasksList');
@@ -5869,14 +8026,30 @@ function renderDailyTasks(tasks) {
                     </div>
                     ${rescheduleInfo}
                 </div>
-                <div class="d-flex gap-2 align-items-start">
-                    ${task.status !== 'completed' ? `
-                        <button class="btn btn-sm btn-success" onclick="completeDailyTask(${task.id}, ${currentStageForDailyTasks.projectId}, ${currentStageForDailyTasks.stageId})" title="Mark as complete">
-                            <i class="fas fa-check me-1"></i>Complete
-                        </button>
+            <div class="d-flex gap-2 align-items-start">
+                    ${task.status !== 'completed' && task.status !== 'hold' ? `
+                        ${isTaskDateInPast(task.scheduled_date) ? `
+                            <button class="btn btn-sm btn-success" onclick="completeDailyTask(${task.id}, ${currentStageForDailyTasks.projectId}, ${currentStageForDailyTasks.stageId})" title="Mark as complete">
+                                <i class="fas fa-check me-1"></i>Complete
+                            </button>
+                        ` : `
+                            <button class="btn btn-sm btn-secondary" disabled title="Cannot complete future tasks">
+                                <i class="fas fa-lock me-1"></i>Future Task
+                            </button>
+                        `}
                         <button class="btn btn-sm btn-primary-custom" onclick="openRescheduleDayModal(${task.id}, ${task.day_number}, '${task.scheduled_date}')" title="Change schedule">
                             <i class="fas fa-calendar-alt me-1"></i>Reschedule
                         </button>
+                        <button class="btn btn-sm btn-warning" onclick="holdDailyTask(${task.id}, ${currentStageForDailyTasks.projectId}, ${currentStageForDailyTasks.stageId})" title="Put on hold">
+                            <i class="fas fa-lock me-1"></i>Hold
+                        </button>
+                    ` : task.status === 'hold' ? `
+                        <div class="text-center">
+                            <span class="text-warning d-block">
+                                <i class="fas fa-lock me-1"></i>
+                                ON HOLD
+                            </span>
+                        </div>
                     ` : `
                         <div class="text-center">
                             <span class="text-success d-block">
@@ -5888,8 +8061,8 @@ function renderDailyTasks(tasks) {
                             ` : ''}
                         </div>
                     `}
-                </div>
-            </div>
+                </div>            
+             </div>
         `;
     }).join('');
 }
@@ -5902,8 +8075,15 @@ async function completeDailyTask(taskId, projectId, stageId) {
             method: 'PUT'
         });
         
-        if (response.ok) {
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
             showNotification('Day marked as completed!', 'success');
+            
+            // Show if stage was automatically completed
+            if (data.stage_completed) {
+                showNotification(`🎉 All daily tasks completed! Stage marked as complete (${data.completed_tasks}/${data.total_tasks})`, 'success');
+            }
             
             // ✅ Wait for database commit
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -5917,9 +8097,16 @@ async function completeDailyTask(taskId, projectId, stageId) {
             if (calendar && currentProjectForCalendar === projectId) {
                 await refreshCalendarEvents();
             }
+            
+            // ✅ Update progress line status
+            await updateProgressLineStatus(projectId);
+        } else {
+            // Show error message from server
+            showNotification(data.error || 'Failed to complete task', 'error');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        console.error('Error completing task:', error);
+        showNotification('Error: ' + error.message, 'error');
     }
 }
 // Open reschedule day modal
@@ -6061,6 +8248,26 @@ async function confirmDayReschedule() {
                 // Now rebuild calendar with updated history
                 await forceCompleteCalendarRebuild(parseInt(projectId));
                 
+                // ✅ FORCE CALENDAR REFRESH TO FIX LAYOUT
+                console.log('🔄 Forcing calendar refresh after day reschedule...');
+                if (calendar) {
+                    try {
+                        calendar.destroy();
+                        calendar = null;
+                        const calendarEl = document.getElementById('calendar');
+                        if (calendarEl) {
+                            calendarEl.innerHTML = '';
+                            calendarEl.className = '';
+                            calendarEl.offsetHeight; // Force reflow
+                        }
+                        await new Promise(resolve => setTimeout(resolve, 150));
+                        await openCalendarView(parseInt(projectId));
+                        console.log('✅ Calendar rebuilt successfully');
+                    } catch (e) {
+                        console.error('Error rebuilding calendar:', e);
+                    }
+                }
+                
                 showNotification('✅ Calendar updated! Ghost event shows original location.', 'success');
             } else {
                 console.warn('⚠️ Calendar not available for rebuild');
@@ -6071,6 +8278,59 @@ async function confirmDayReschedule() {
         }
     } catch (error) {
         console.error('❌ Reschedule error:', error);
+        alert('Error: ' + error.message);
+    }
+}
+
+
+// Hold a daily task
+async function holdDailyTask(taskId, projectId, stageId) {
+    const reason = prompt('Reason for putting this day on hold:');
+    if (reason === null) return; // User cancelled
+    
+    if (!confirm('Are you sure you want to put this day on HOLD? Other days will continue as scheduled.')) {
+        return;
+    }
+    
+    try {
+        console.log('🔒 Putting daily task on HOLD...');
+        
+        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/hold`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                reason: reason || 'Put on hold',
+                working_saturdays: Array.from(currentProjectData?.saturdayWorkingDays || [])
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            showNotification('✅ Day marked as HOLD successfully', 'success');
+            
+            // Wait for database commit
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Reload tasks in the daily task modal
+            const tasksResponse = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks?_t=${Date.now()}`, {
+                cache: 'no-store',
+                headers: { 'Cache-Control': 'no-cache' }
+            });
+            const tasks = await tasksResponse.json();
+            renderDailyTasks(tasks);
+            
+            // Rebuild calendar
+            if (calendar && currentProjectForCalendar === projectId) {
+                showNotification('🔄 Updating calendar...', 'info');
+                await refreshCalendarEvents();
+                showNotification('✅ Calendar updated!', 'success');
+            }
+        } else {
+            alert('Error: ' + (result.error || 'Failed to hold day'));
+        }
+    } catch (error) {
+        console.error('❌ Hold error:', error);
         alert('Error: ' + error.message);
     }
 }
@@ -6257,9 +8517,9 @@ function createStageEventWithStatus(stage, index, start, end, color, dateStageMa
     // Analyze task statuses
     const allCompleted = tasks.every(t => t.status === 'completed');
     const someCompleted = tasks.some(t => t.status === 'completed');
-    const hasRescheduled = tasks.some(t => t.is_rescheduled);
+    const hasRescheduled = tasks.some(t => t.reschedule_count && t.reschedule_count > 0);
     const completedCount = tasks.filter(t => t.status === 'completed').length;
-    const rescheduledCount = tasks.filter(t => t.is_rescheduled).length;
+    const rescheduledCount = tasks.filter(t => t.reschedule_count && t.reschedule_count > 0).length;
     
     let title = stage.name;
     
@@ -6296,6 +8556,12 @@ function createStageEventWithStatus(stage, index, start, end, color, dateStageMa
     if (stage.status === 'in-progress') {
         classNames.push('stage-event-active');
     }
+    // ✅ Check if any task in this stage is on HOLD
+    const hasHoldTask = tasks.some(t => t.status === 'hold');
+    if (hasHoldTask) {
+        classNames.push('event-hold');
+    }
+
     
     // ✅ Build extended props with reschedule info
     const extendedProps = {
@@ -6334,48 +8600,618 @@ function createStageEventWithStatus(stage, index, start, end, color, dateStageMa
         classNames: classNames
     };
 }
-// Add this function to the <script> section in index.html
 
-async function exportCurrentProject(projectId) {
+// UPDATED showExcelPreview function - EXACTLY matches Excel export
+async function showExcelPreview(projectId) {
     try {
-        showNotification('ðŸ“Š Preparing Excel export...', 'info');
+        // ✅ REMOVE ANY EXISTING MODALS FIRST
+        document.querySelectorAll('#exportPreviewModal').forEach(m => m.remove());
         
-        // Use fetch to download the file
+        showNotification('Loading Excel preview...', 'info');
+        
+        // ✅ Fetch project details with cache-busting
+        const timestamp = new Date().getTime();
+        const projResponse = await fetch(`/api/projects/${projectId}/details?_=${timestamp}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
+        });
+        const projData = await projResponse.json();
+        
+        if (!projData || !projData.id) {
+            throw new Error('Project not found');
+        }
+        
+        console.log('✅ Project data loaded:', projData);
+        console.log('✅ Stages found:', projData.stages?.length || 0);
+        
+        // ✅ Fetch reschedule history
+        let rescheduleHistory = [];
+        try {
+            const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_=${timestamp}`);
+            rescheduleHistory = historyResponse.ok ? await historyResponse.json() : [];
+            console.log('✅ Reschedule history loaded:', rescheduleHistory.length, 'records');
+        } catch (error) {
+            console.warn('⚠️ Could not load reschedule history:', error);
+        }
+        
+        // ✅ Fetch daily tasks (for actual completion data) - MATCHING BACKEND
+        let dailyTasks = [];
+        try {
+            const dailyTasksResponse = await fetch(`/api/projects/${projectId}/daily-tasks?_=${timestamp}`);
+            dailyTasks = dailyTasksResponse.ok ? await dailyTasksResponse.json() : [];
+            console.log('✅ Daily tasks loaded:', dailyTasks.length, 'tasks');
+        } catch (error) {
+            console.warn('⚠️ Could not load daily tasks:', error);
+        }
+        
+        // ✅ Fetch hold dates from database
+        let holdDates = [];
+        try {
+            const holdDatesResponse = await fetch(`/api/projects/${projectId}/hold-dates?_=${timestamp}`);
+            holdDates = holdDatesResponse.ok ? await holdDatesResponse.json() : [];
+            console.log('✅ Hold dates loaded:', holdDates.length, 'hold records');
+        } catch (error) {
+            console.warn('⚠️ Could not load hold dates:', error);
+        }
+        
+        // ✅ CALCULATE ACTUAL END DATE FROM STAGES (safety check)
+        const stages = projData.stages || [];
+        let calculatedEndDate = new Date(projData.start_date);
+        
+        console.log('🔍 DEBUG - Number of stages:', stages.length);
+        stages.forEach((stage, idx) => {
+            console.log(`🔍 Stage ${idx + 1}: ${stage.name}`);
+            console.log(`   Start: ${stage.start_date}, End: ${stage.end_date}`);
+            if (stage.end_date) {
+                const stageEnd = new Date(stage.end_date);
+                if (stageEnd > calculatedEndDate) {
+                    calculatedEndDate = stageEnd;
+                    console.log(`   ✅ This is now the latest end date: ${stageEnd.toISOString().split('T')[0]}`);
+                }
+            }
+        });
+        
+        // Use the minimum of stored end_date and calculated end_date
+        const storedEndDate = new Date(projData.end_date);
+        const actualEndDate = calculatedEndDate < storedEndDate ? calculatedEndDate : storedEndDate;
+        
+        console.log('🔍 DEBUG - Stored End Date:', projData.end_date, storedEndDate.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Calculated End Date from Stages:', calculatedEndDate.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Using End Date (minimum):', actualEndDate.toISOString().split('T')[0]);
+        
+        const startDate = new Date(projData.start_date);
+        const endDate = actualEndDate;  // ✅ USE CALCULATED END DATE
+        const allDates = [];
+        
+        let currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+            allDates.push(new Date(currentDate));
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        console.log('🔍 DEBUG - Total dates generated:', allDates.length);
+        console.log('🔍 DEBUG - First date:', allDates[0]?.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Last date:', allDates[allDates.length - 1]?.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Date range:', allDates[0]?.getDate(), 'to', allDates[allDates.length - 1]?.getDate());
+        
+        // stages already declared above on line 5894
+        const workingSaturdays = new Set(projData.saturdayWorkingDays || []);
+        console.log('Working Saturdays:', workingSaturdays);
+        
+        // Build Excel-like preview
+        let html = '<div style="overflow: auto; max-height: 75vh; background: white; padding: 15px; font-family: Calibri, Arial, sans-serif;">';
+        html += '<!-- 🔥 FIXED VERSION - Check console for debug logs -->';
+        html += '<table style="border-collapse: collapse; font-size: 11px; table-layout: auto;">';
+        
+        // ==========================================
+        // STAGE DETAILS SECTION (5-column table at top)
+        // ==========================================
+        if (stages.length > 0) {
+            const stageNames = stages.map(s => {
+                const parts = s.name.split('-');
+                if (parts.length >= 2) {
+                    const category = parts.slice(0, -1).join('-').trim();
+                    const abbr = parts[parts.length - 1].trim();
+                    return `${category} -${abbr}`;
+                }
+                return s.name;
+            });
+            
+            let stageIdx = 0;
+            while (stageIdx < stageNames.length) {
+                html += '<tr>';
+                for (let col = 0; col < 5; col++) {
+                    if (stageIdx < stageNames.length) {
+                        html += `<td style="border: 1px solid #000; padding: 8px; background: white; font-weight: bold; font-size: 10px; min-width: 180px;">${stageNames[stageIdx]}</td>`;
+                        stageIdx++;
+                    } else {
+                        html += '<td style="border: 1px solid #000; padding: 8px; background: white; min-width: 180px;"></td>';
+                    }
+                }
+                html += '</tr>';
+            }
+            
+            html += '<tr><td colspan="5" style="border: none; height: 20px;"></td></tr>';
+        }
+        
+        // ==========================================
+        // MAIN SCHEDULE TABLE
+        // ==========================================
+        
+        // Headers
+        html += '<tr>';
+        html += `<td rowspan="2" style="border: 1px solid #000; padding: 8px; background: #B4C7E7; font-weight: bold; font-size: 12px; text-align: center; vertical-align: middle; min-width: 180px;">${projData.name}</td>`;
+        html += '<td rowspan="2" style="border: 1px solid #000; padding: 8px; background: #B4C7E7; font-weight: bold; font-size: 11px; text-align: center; vertical-align: middle; min-width: 150px;">Date</td>';
+        
+        const monthYear = startDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
+        html += `<td colspan="${allDates.length}" style="border: 1px solid #000; padding: 8px; background: #FFA500; font-weight: bold; font-size: 11px; text-align: center;">${monthYear}</td>`;
+        html += '</tr>';
+        
+        // Day numbers
+        html += '<tr>';
+        allDates.forEach(date => {
+            html += `<td style="border: 1px solid #000; padding: 6px; background: #B4C7E7; font-weight: bold; font-size: 11px; text-align: center; min-width: 50px;">${date.getDate()}</td>`;
+        });
+        html += '</tr>';
+        
+        // ==========================================
+        // PLANNED ROW - Build from stage dates
+        // ==========================================
+        html += '<tr style="height: 40px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; font-weight: bold; text-align: center;">Planned</td>';
+        
+        const plannedMap = {};
+        
+        stages.forEach(stage => {
+            if (stage.start_date && stage.end_date) {
+                const parts = stage.name.split('-');
+                const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
+                
+                let d = new Date(stage.start_date);
+                const endD = new Date(stage.end_date);
+                
+                while (d <= endD) {
+                    const dayOfWeek = d.getDay();
+                    const dateStr = d.toISOString().split('T')[0];
+                    const isSaturday = dayOfWeek === 6;
+                    const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+                    
+                    // Include if it's a weekday OR a working Saturday
+                    if (dayOfWeek !== 0 && (!isSaturday || isWorkingSaturday)) {
+                        if (!plannedMap[dateStr]) plannedMap[dateStr] = [];
+                        if (!plannedMap[dateStr].includes(abbr)) {
+                            plannedMap[dateStr].push(abbr);
+                        }
+                    }
+                    d.setDate(d.getDate() + 1);
+                }
+            }
+        });
+        
+        allDates.forEach(date => {
+            const dayOfWeek = date.getDay();
+            const dateStr = date.toISOString().split('T')[0];
+            const isSunday = dayOfWeek === 0;
+            const isSaturday = dayOfWeek === 6;
+            const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+            const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+            
+            const bgColor = isWeekend ? '#FFFF00' : 'white';
+            const value = plannedMap[dateStr] ? plannedMap[dateStr].sort().join(' , ') : '';
+            
+            html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; min-width: 50px; vertical-align: middle;">${value}</td>`;
+        });
+        html += '</tr>';
+        
+        // ==========================================
+        // RESCHEDULE ROWS (1-4) - MATCHING BACKEND LOGIC
+        // ==========================================
+        const stageRescheduleMap = {1: {}, 2: {}, 3: {}, 4: {}};
+        
+        // Build reschedule map matching backend logic
+        stages.forEach(stage => {
+            const parts = stage.name.split('-');
+            const stageAbbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
+            
+            const taskReschedules = rescheduleHistory.filter(r => r.stage_id === stage.id);
+            const uniqueNums = [...new Set(taskReschedules.map(r => r.reschedule_number).filter(n => n))].sort((a, b) => a - b);
+            
+            uniqueNums.forEach((rNum, idx) => {
+                const targetRow = idx + 1;
+                if (targetRow > 4) return;
+                
+                const eventTasks = taskReschedules.filter(t => t.reschedule_number === rNum);
+                eventTasks.forEach(t => {
+                    const dateStr = t.new_date.split('T')[0];
+                    if (!stageRescheduleMap[targetRow][dateStr]) {
+                        stageRescheduleMap[targetRow][dateStr] = [];
+                    }
+                    if (!stageRescheduleMap[targetRow][dateStr].includes(stageAbbr)) {
+                        stageRescheduleMap[targetRow][dateStr].push(stageAbbr);
+                    }
+                });
+            });
+        });
+        
+        // Render reschedule rows
+        for (let rNum = 1; rNum <= 4; rNum++) {
+            html += '<tr style="height: 30px;">';
+            html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+            html += `<td style="border: 1px solid #000; padding: 8px; font-weight: bold; text-align: center;">Reschedule -${rNum}</td>`;
+            
+            const rData = stageRescheduleMap[rNum] || {};
+            
+            allDates.forEach(date => {
+                const dayOfWeek = date.getDay();
+                const dateStr = date.toISOString().split('T')[0];
+                const isSunday = dayOfWeek === 0;
+                const isSaturday = dayOfWeek === 6;
+                const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+                const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+                
+                const bgColor = isWeekend ? '#FFFF00' : 'white';
+                const value = rData[dateStr] ? rData[dateStr].sort().join(' , ') : '';
+                
+                html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; min-width: 50px; vertical-align: middle;">${value}</td>`;
+            });
+            html += '</tr>';
+        }
+        
+        // ==========================================
+        // ACTUAL ROW - MATCHING BACKEND LOGIC
+        // ==========================================
+        html += '<tr style="height: 40px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: #C0C0C0; font-weight: bold; text-align: center;">Actual</td>';
+        
+        const actualMap = {};
+        const holdDatesMap = {};
+        
+        // Step 1: Build holdDatesMap from database HoldDate records
+        holdDates.forEach(holdRecord => {
+            const dateStr = holdRecord.hold_date; // Already in YYYY-MM-DD format
+            const stageName = holdRecord.stage_name;
+            const parts = stageName.split('-');
+            const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stageName.substring(0, 6);
+            
+            if (!holdDatesMap[dateStr]) holdDatesMap[dateStr] = [];
+            if (!holdDatesMap[dateStr].includes(abbr)) {
+                holdDatesMap[dateStr].push(abbr);
+                console.log(`📌 HOLD: ${dateStr} -> ${abbr} (${stageName})`);
+            }
+        });
+        
+        // Step 2: Build actualMap from real daily task records
+        stages.forEach(stage => {
+            const parts = stage.name.split('-');
+            const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
+            const tasks = dailyTasks.filter(t => t.stage_id === stage.id);
+
+            tasks.forEach(t => {
+                const ds = t.scheduled_date.split('T')[0];
+
+                if (t.status === 'hold') {
+                    // HOLD task: add to holdDatesMap on its scheduled_date (backup in case not in HoldDate table)
+                    if (!holdDatesMap[ds]) holdDatesMap[ds] = [];
+                    if (!holdDatesMap[ds].includes(abbr)) holdDatesMap[ds].push(abbr);
+                } else {
+                    // All other statuses (pending/completed/rescheduled): add to actualMap
+                    if (!actualMap[ds]) actualMap[ds] = [];
+                    actualMap[ds].push({abbr, status: t.status});
+                }
+                
+                // CRITICAL: If task was rescheduled, add original_date to holdDatesMap
+                // This matches backend logic (app.py lines 439-444)
+                if (t.original_date && t.original_date !== t.scheduled_date) {
+                    const hds = t.original_date.split('T')[0];
+                    if (!holdDatesMap[hds]) holdDatesMap[hds] = [];
+                    if (!holdDatesMap[hds].includes(abbr)) {
+                        holdDatesMap[hds].push(abbr);
+                        console.log(`📌 HOLD from reschedule: ${hds} -> ${abbr} (original date)`);
+                    }
+                }
+            });
+        });
+
+        // Step 3: Fallback for planned stages with no task record yet (e.g. DLBS on day 12)
+        // Only add if NOT already in actualMap AND NOT already in holdDatesMap
+        Object.keys(plannedMap).forEach(ds => {
+            plannedMap[ds].forEach(abbr => {
+                const inActual = (actualMap[ds] || []).some(x => x.abbr === abbr);
+                const inHold   = (holdDatesMap[ds] || []).includes(abbr);
+                if (!inActual && !inHold) {
+                    if (!actualMap[ds]) actualMap[ds] = [];
+                    actualMap[ds].push({abbr, status: 'pending'});
+                }
+            });
+        });
+
+        
+        allDates.forEach(date => {
+            const dayOfWeek = date.getDay();
+            const dateStr = date.toISOString().split('T')[0];
+            const isSunday = dayOfWeek === 0;
+            const isSaturday = dayOfWeek === 6;
+            const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+            const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+            
+            const active = actualMap[dateStr] || [];
+            const activeAbbrs = new Set(active.map(x => x.abbr));
+            const holdAbbrs = new Set(holdDatesMap[dateStr] || []);
+            
+            // Filter out holds that overlap with active tasks (matches backend app.py line 454)
+            const realHolds = [...holdAbbrs].filter(h => !activeAbbrs.has(h));
+            
+            const parts = [];
+            if (realHolds.length > 0) {
+                parts.push(`${realHolds.sort().join(' , ')}=HOLD`);
+            }
+            if (activeAbbrs.size > 0) {
+                parts.push([...activeAbbrs].sort().join(' , '));
+            }
+            
+            const value = parts.join(' , ');
+            
+            // Determine background color
+            // Priority: Weekend > Hold > Completed > Rescheduled > Default
+            let bgColor = 'white';
+            
+            if (isWeekend) {
+                bgColor = '#FFFF00'; // Yellow for weekends (highest priority)
+            } else if (holdAbbrs.size > 0) {
+                bgColor = '#FFA500'; // Orange for hold (second priority - ANY hold dates make it orange)
+            } else if (activeAbbrs.size > 0) {
+                const stats = new Set(active.map(x => x.status));
+                if (stats.has('completed')) {
+                    bgColor = '#00FF00'; // Green for completed
+                } else if (stats.has('rescheduled')) {
+                    bgColor = '#00FFFF'; // Cyan for rescheduled
+                }
+            }
+            
+            html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; min-width: 50px; vertical-align: middle;">${value}</td>`;
+        });
+        html += '</tr>';
+        
+        // ==========================================
+        // REMARKS ROW - NEW ADDITION TO MATCH EXCEL
+        // ==========================================
+        html += '<tr style="height: 60px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-style: italic; text-align: center;">Remarks</td>';
+        
+        allDates.forEach(date => {
+            const dayOfWeek = date.getDay();
+            const dateStr = date.toISOString().split('T')[0];
+            const isSunday = dayOfWeek === 0;
+            const isSaturday = dayOfWeek === 6;
+            const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+            const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+            
+            const active = actualMap[dateStr] || [];
+            const activeAbbrs = new Set(active.map(x => x.abbr));
+            const holdAbbrs = new Set(holdDatesMap[dateStr] || []);
+            const realHolds = [...holdAbbrs].filter(h => !activeAbbrs.has(h));
+            
+            let remark = '';
+            let bgColor = 'white';
+            
+            if (realHolds.length > 0) {
+                remark = "Waiting for issue tracker";
+                
+                // Try to find the actual reason from tasks
+                for (const stage of stages) {
+                    const parts = stage.name.split('-');
+                    const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
+                    
+                    if (realHolds.includes(abbr)) {
+                        // Check for manual hold
+                        const task = dailyTasks.find(t => 
+                            t.stage_id === stage.id && 
+                            t.scheduled_date.split('T')[0] === dateStr && 
+                            t.status === 'hold'
+                        );
+                        
+                        // If not found, check for rescheduled hold
+                        const rescheduleTask = task || dailyTasks.find(t => 
+                            t.stage_id === stage.id && 
+                            t.original_date && 
+                            t.original_date.split('T')[0] === dateStr
+                        );
+                        
+                        if (rescheduleTask && rescheduleTask.rescheduled_reason) {
+                            remark = rescheduleTask.rescheduled_reason;
+                            break;
+                        }
+                    }
+                }
+            } else if (isWeekend) {
+                bgColor = '#FFFF00';
+            }
+            
+            html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: left; vertical-align: top; font-size: 9px; min-width: 50px; word-wrap: break-word;">${remark}</td>`;
+        });
+        html += '</tr>';
+        
+        // ==========================================
+        // SPACING BEFORE LEGEND
+        // ==========================================
+        html += `<tr><td colspan="${allDates.length + 2}" style="border: none; height: 20px;"></td></tr>`;
+        
+        // ==========================================
+        // LEGEND SECTION - MATCHING EXCEL EXACTLY
+        // ==========================================
+        html += '<tr style="height: 25px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: #FFA500; min-width: 180px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; min-width: 150px;">Hold</td>';
+        html += '<td colspan="2" style="border: 1px solid #000; padding: 8px;">If project goes on hold from Customer</td>';
+        html += '</tr>';
+        
+        html += '<tr style="height: 25px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: white;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px;">Changes</td>';
+        html += '<td colspan="2" style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '</tr>';
+        
+        html += '<tr style="height: 25px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: #FFFF00;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px;">Holidays</td>';
+        html += '<td colspan="2" style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '</tr>';
+        
+        html += '</table></div>';
+        
+        // ==========================================
+        // CREATE MODAL
+        // ==========================================
+        const completedTasksCount = dailyTasks.filter(t => t.status === 'completed').length;
+        
+        const modalHTML = `
+            <div class="modal fade" id="exportPreviewModal" tabindex="-1">
+                <div class="modal-dialog modal-fullscreen">
+                    <div class="modal-content">
+                        <div class="modal-header" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                            <h5 class="modal-title">📊 Excel Preview - ${projData.name} <span style="font-size: 0.8em; opacity: 0.8;">[FIXED v2 - Days ${allDates[0]?.getDate()}-${allDates[allDates.length-1]?.getDate()}]</span></h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body" style="background: #f5f5f5; padding: 20px;">
+                            <div style="background: #fff3cd; border: 1px solid #ffc107; padding: 10px; margin-bottom: 15px; border-radius: 5px;">
+                                <strong>🔧 Debug Info:</strong> Showing ${allDates.length} days from ${allDates[0]?.toLocaleDateString()} to ${allDates[allDates.length-1]?.toLocaleDateString()} 
+                                | Check browser console (F12) for detailed logs
+                            </div>
+                            ${html}
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+                                <i class="fas fa-times me-2"></i>Close Preview
+                            </button>
+                            <button class="btn btn-success btn-lg" onclick="downloadExcelFromPreview(${projectId})">
+                                <i class="fas fa-file-excel me-2"></i> Download Excel File
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        const existingModal = document.getElementById('exportPreviewModal');
+        if (existingModal) existingModal.remove();
+        
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        const modal = new bootstrap.Modal(document.getElementById('exportPreviewModal'));
+        modal.show();
+        
+        document.getElementById('exportPreviewModal').addEventListener('hidden.bs.modal', function () {
+            this.remove();
+        });
+        
+        showNotification(`✅ Preview loaded with ${stages.length} stages!`, 'success');
+        
+    } catch (error) {
+        console.error('Preview error:', error);
+        showNotification('❌ Preview error: ' + error.message, 'error');
+    }
+}
+
+// Keep these at the end
+window.showExportPreview = showExcelPreview;
+console.log('✅ Excel Preview with stage data loaded!');
+
+async function downloadExcelFromPreview(projectId) {
+    try {
+        showNotification('📥 Generating Excel file...', 'info');
+        
+        const response = await fetch(`/api/projects/${projectId}/export-excel`);
+        
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        
+        const contentDisposition = response.headers.get('content-disposition');
+        let filename = `Project_${projectId}_Tracker.xlsx`;
+        
+        if (contentDisposition) {
+            const match = contentDisposition.match(/filename="?(.+)"?/i);
+            if (match) filename = match[1];
+        }
+        
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        
+        setTimeout(() => {
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }, 100);
+        
+        showNotification('✅ Excel file downloaded: ' + filename, 'success');
+        
+        const modal = bootstrap.Modal.getInstance(document.getElementById('exportPreviewModal'));
+        if (modal) modal.hide();
+        
+    } catch (error) {
+        console.error('Download error:', error);
+        showNotification('❌ Download failed: ' + error.message, 'error');
+    }
+}
+
+window.showExportPreview = showExcelPreview;
+console.log('✅ Excel Preview with stage data loaded!');
+
+
+// Override just the export function to work with the current preview
+window.exportCurrentProject = async function(projectId) {
+    try {
+        console.log('Export button clicked for project:', projectId);
+        showNotification('Preparing Excel export...', 'info');
+        
         const response = await fetch(`/api/projects/${projectId}/export-excel`);
         
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
         
-        // Get the blob
         const blob = await response.blob();
-        
-        // Create download link
         const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `Project_${projectId}_Tracker_${new Date().toISOString().split('T')[0]}.xlsx`;
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = `Project_${projectId}_${new Date().toISOString().split('T')[0]}.xlsx`;
         
-        // Trigger download
-        document.body.appendChild(link);
-        link.click();
+        document.body.appendChild(a);
+        a.click();
         
-        // Cleanup
-        document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
         
-        showNotification('âœ… Excel file downloaded successfully!', 'success');
+        showNotification('Excel file downloaded successfully!', 'success');
         
     } catch (error) {
-        console.error('âŒ Export failed:', error);
-        showNotification('Failed to export: ' + error.message, 'error');
-        alert('Export Error: ' + error.message + '\n\nPlease check the browser console for more details.');
+        console.error('Export error:', error);
+        showNotification('Export failed: ' + error.message, 'error');
     }
-}
+};
+
+console.log('✅ Export function fixed!');
+
+
 // Load projects with caching
 async function loadProjects() {
     try {
-        const response = await fetch('/api/projects');
+        const response = await fetch(`/api/projects?_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {'Cache-Control': 'no-cache'}
+        });
         projects = await response.json();
         allProjectsCache = projects;
         
@@ -6395,6 +9231,38 @@ async function loadProjects() {
             </div>
         `;
     }
+}
+// ✅ NEW FUNCTION: Handle clicks on parallel stages
+function setupParallelStageClickHandlers() {
+    document.querySelectorAll('.stage-group-container').forEach(container => {
+        // Add click event to the container
+        container.addEventListener('click', function(e) {
+            const stageStep = e.target.closest('.progress-step');
+            
+            if (stageStep && stageStep.getAttribute('data-in-parallel') === 'true') {
+                const stageId = parseInt(stageStep.getAttribute('data-stage-id'));
+                const projectId = parseInt(stageStep.getAttribute('data-project-id'));
+                
+                // Get current status from circle classes
+                const circle = stageStep.querySelector('.step-circle');
+                let currentStatus = 'pending';
+                
+                if (circle.classList.contains('completed')) {
+                    currentStatus = 'completed';
+                } else if (circle.classList.contains('active')) {
+                    currentStatus = 'in-progress';
+                }
+                
+                // Update the stage
+                updateStageStatus(projectId, stageId, currentStatus);
+            }
+        });
+        
+        // Make parallel stages look clickable
+        container.querySelectorAll('.progress-step[data-in-parallel="true"]').forEach(step => {
+            step.style.cursor = 'pointer';
+        });
+    });
 }
 
 // Handle search with debouncing
@@ -6551,245 +9419,285 @@ function clearProjectSearch() {
 }
 
 
-// Add this function in your <script> section:
-</script>
-</body>
-</html>
 
 
+// ============================================================================
+// EDIT PROJECT FUNCTIONALITY
+// ============================================================================
 
+let isEditMode = false;
+let editingProjectId = null;
 
-
-
-
-
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Login - Project Dashboard</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        body {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }
-        
-        .login-container {
-            background: white;
-            border-radius: 20px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            overflow: hidden;
-            max-width: 900px;
-            width: 100%;
-            display: flex;
-        }
-        
-        .login-left {
-            flex: 1;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 60px 40px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-        }
-        
-        .login-left h1 {
-            font-size: 2.5rem;
-            font-weight: 700;
-            margin-bottom: 20px;
-        }
-        
-        .login-left p {
-            font-size: 1.1rem;
-            opacity: 0.9;
-        }
-        
-        .login-right {
-            flex: 1;
-            padding: 60px 40px;
-        }
-        
-        .login-right h2 {
-            font-size: 2rem;
-            font-weight: 700;
-            margin-bottom: 10px;
-            color: #333;
-        }
-        
-        .login-right p {
-            color: #6c757d;
-            margin-bottom: 30px;
-        }
-        
-        .form-control {
-            border-radius: 10px;
-            padding: 12px 15px;
-            border: 2px solid #e9ecef;
-        }
-        
-        .form-control:focus {
-            border-color: #667eea;
-            box-shadow: none;
-        }
-        
-        .btn-login {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
-            border-radius: 10px;
-            padding: 12px;
-            color: white;
-            font-weight: 600;
-            width: 100%;
-            transition: transform 0.2s;
-        }
-        
-        .btn-login:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
-        }
-        
-        .input-group-text {
-            background: white;
-            border: 2px solid #e9ecef;
-            border-right: none;
-            border-radius: 10px 0 0 10px;
-        }
-        
-        .input-group .form-control {
-            border-left: none;
-            border-radius: 0 10px 10px 0;
-        }
-        
-        .alert {
-            border-radius: 10px;
-        }
-        
-        @media (max-width: 768px) {
-            .login-container {
-                flex-direction: column;
-            }
-            
-            .login-left {
-                padding: 40px 30px;
-            }
-            
-            .login-right {
-                padding: 40px 30px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <div class="login-left">
-            <div>
-                <i class="fas fa-chart-line fa-4x mb-4"></i>
-                <h1>Project Dashboard</h1>
-                <p>Manage your projects, track tasks, and collaborate with your team all in one place.</p>
-            </div>
-        </div>
-        
-        <div class="login-right">
-            <h2>Welcome Back!</h2>
-            <p>Sign in to continue to your dashboard</p>
-            
-            <div id="alertContainer"></div>
-            
-            <form id="loginForm">
-                <div class="mb-3">
-                    <label class="form-label">Username</label>
-                    <div class="input-group">
-                        <span class="input-group-text">
-                            <i class="fas fa-user"></i>
-                        </span>
-                        <input type="text" class="form-control" id="username" placeholder="Enter username" required>
-                    </div>
-                </div>
-                
-                <div class="mb-4">
-                    <label class="form-label">Password</label>
-                    <div class="input-group">
-                        <span class="input-group-text">
-                            <i class="fas fa-lock"></i>
-                        </span>
-                        <input type="password" class="form-control" id="password" placeholder="Enter password" required>
-                    </div>
-                </div>
-                
-                <button type="submit" class="btn btn-login">
-                    <i class="fas fa-sign-in-alt me-2"></i> Sign In
-                </button>
-            </form>
-            
-            <div class="mt-4 text-center">
-                <small class="text-muted">
-                    Default credentials: <strong>admin</strong> / <strong>admin123</strong>
-                </small>
-            </div>
-        </div>
-    </div>
+async function openEditProjectModal(projectId, event) {
+    if (event) event.stopPropagation();
     
-    <script>
-        document.getElementById('loginForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            const alertContainer = document.getElementById('alertContainer');
-            
-            // Clear previous alerts
-            alertContainer.innerHTML = '';
-            
-            try {
-                const response = await fetch('/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, password })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    // Show success message
-                    alertContainer.innerHTML = `
-                        <div class="alert alert-success">
-                            <i class="fas fa-check-circle me-2"></i>
-                            Login successful! Redirecting...
-                        </div>
-                    `;
-                    
-                    // Redirect to dashboard
-                    setTimeout(() => {
-                        window.location.href = '/dashboard';
-                    }, 1000);
-                } else {
-                    // Show error message
-                    alertContainer.innerHTML = `
-                        <div class="alert alert-danger">
-                            <i class="fas fa-exclamation-circle me-2"></i>
-                            ${data.message || 'Invalid username or password'}
-                        </div>
-                    `;
-                }
-            } catch (error) {
-                alertContainer.innerHTML = `
-                    <div class="alert alert-danger">
-                        <i class="fas fa-exclamation-circle me-2"></i>
-                        An error occurred. Please try again.
-                    </div>
-                `;
-            }
+    try {
+        // ⭐ Clear any old cached data first ⭐
+        window.originalProjectData = null;
+        
+        console.log('=== OPENING EDIT MODAL ===');
+        console.log('Project ID:', projectId);
+        
+        showNotification('Loading job details...', 'info');
+        
+        // Fetch project details
+        const response = await fetch(`/api/projects/${projectId}/details`);
+        const project = await response.json();
+
+        // ⭐ Store fresh original data ⭐
+        window.originalProjectData = project;
+
+        console.log('Loaded project:', project);
+        
+        // Set edit mode
+        isEditMode = true;
+        editingProjectId = projectId;
+        
+        console.log('Set isEditMode to:', isEditMode);
+        console.log('Set editingProjectId to:', editingProjectId);
+        
+        // Update modal title
+        document.querySelector('#projectModal .modal-title').textContent = 'Edit Job';
+        
+        // Update submit button text
+        document.querySelector('#projectForm button[type="submit"]').textContent = 'Update Job';
+        
+        // Fill in basic project info
+        document.getElementById('projectName').value = project.name;
+        document.getElementById('projectStartDate').value = project.start_date;
+        
+        // Load working Saturdays
+        workingSaturdays.clear();
+        if (project.saturdayWorkingDays) {
+            project.saturdayWorkingDays.forEach(date => workingSaturdays.add(date));
+        }
+        
+        // Load employees first
+        await loadEmployees();
+        
+        // Fill in members
+        selectedMembers = project.members.map(m => m.id);
+        const membersContainer = document.getElementById('selectedMembers');
+        membersContainer.innerHTML = '';
+        project.members.forEach(member => {
+            const badge = document.createElement('span');
+            badge.className = 'badge bg-primary me-2 mb-2';
+            badge.innerHTML = `
+                ${member.username}
+                <i class="fas fa-times ms-2" style="cursor: pointer;" onclick="removeMember(${member.id})"></i>
+            `;
+            membersContainer.appendChild(badge);
         });
-    </script>
+        
+        // Clear stages container
+        stageCounter = 0;
+        document.getElementById('stagesContainer').innerHTML = '';
+        
+        // Load stages
+        for (const stage of project.stages) {
+            addEditStage(stage);
+        }
+        
+        // Update projected end date
+        if (typeof updateProjectEndDate === 'function') {
+            updateProjectEndDate();
+        }
+        
+        // Show modal
+        projectModal.show();
+        
+        showNotification('Job loaded successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error loading project for edit:', error);
+        showNotification('Error loading job details: ' + error.message, 'error');
+    }
+}
+
+// Add stage for editing
+function addEditStage(stageData) {
+    const stageId = stageCounter++;
+    const container = document.getElementById('stagesContainer');
+    
+    const stageDiv = document.createElement('div');
+    stageDiv.id = `stage-${stageId}`;
+    stageDiv.className = 'stage-item p-2 mb-2 border rounded';
+    stageDiv.style.backgroundColor = '#f8f9fa';
+    
+    // ✅ Store database ID for updates
+    if (stageData.id) {
+        stageDiv.setAttribute('data-db-id', stageData.id);
+    }
+    
+    // ✅ NEW: Store original values for change detection
+    if (stageData.name) {
+        stageDiv.setAttribute('data-original-name', stageData.name);
+    }
+    if (stageData.duration_days) {
+        stageDiv.setAttribute('data-original-duration', stageData.duration_days);
+    }
+    
+    stageDiv.innerHTML = `
+        <div class="d-flex align-items-start gap-2">
+            <div style="min-width: 30px;">
+                <input type="checkbox" class="form-check-input mt-1" id="stageCheck-${stageId}" checked>
+            </div>
+            <div class="flex-grow-1">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <input type="text" class="form-control form-control-sm" id="stageName-${stageId}" 
+                               placeholder="Stage name" value="${stageData.name || ''}" style="font-size: 0.85rem;">
+                    </div>
+                    <div class="col-md-3">
+                        <div class="input-group input-group-sm">
+                            <input type="number" class="form-control" id="stageDuration-${stageId}" 
+                                   value="${stageData.duration_days || 1}" min="1" onchange="updateProjectEndDate()" style="font-size: 0.85rem;">
+                            <span class="input-group-text" style="font-size: 0.75rem;">days</span>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <select class="form-select form-select-sm" id="stageManager-${stageId}" style="font-size: 0.85rem;">
+                            <option value="">No manager</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="row g-2 mt-1">
+                    <div class="col-md-6">
+                        <input type="date" class="form-control form-control-sm" id="stageStartDate-${stageId}" 
+                               value="${stageData.start_date || ''}"
+                               data-is-custom="${stageData.start_date ? 'true' : 'false'}"
+                               onchange="this.setAttribute('data-is-custom','true'); updateProjectEndDate();" style="font-size: 0.85rem;">
+                        <small class="text-muted" style="font-size: 0.7rem;">Custom start (optional)</small>
+                    </div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-danger" onclick="removeStage(${stageId})" style="font-size: 0.75rem;">
+                <i class="fas fa-trash"></i>
+            </button>
+        </div>
+    `;
+    
+    container.appendChild(stageDiv);
+    
+    // Populate manager dropdown
+    const managerSelect = document.getElementById(`stageManager-${stageId}`);
+    if (typeof employees !== 'undefined' && employees && employees.length > 0) {
+        employees.forEach(emp => {
+            const option = document.createElement('option');
+            option.value = emp.id;
+            option.textContent = `${emp.username} (${emp.role})`;
+            if (stageData.manager_id && emp.id === stageData.manager_id) {
+                option.selected = true;
+            }
+            managerSelect.appendChild(option);
+        });
+    }
+}
+
+// ============================================================================
+// PROGRESS LINE STATUS UPDATE FUNCTIONALITY
+// ============================================================================
+
+// Update progress line with calendar status
+async function updateProgressLineStatus(projectId) {
+    try {
+        console.log(`[Progress Line] Fetching status for project ${projectId}...`);
+        const response = await fetch(`/api/projects/${projectId}/stage-status`);
+        const data = await response.json();
+        
+        if (data.success) {
+            console.log(`[Progress Line] Received ${data.stages.length} stages:`, data.stages);
+            
+            let updatedCount = 0;
+            data.stages.forEach(stage => {
+                // Find the circle element for this stage
+                const stepElement = document.querySelector(`[data-stage-id="${stage.id}"]`);
+                const circleElement = stepElement ? stepElement.querySelector('.step-circle') : null;
+                
+                if (circleElement) {
+                    // Remove all status classes
+                    circleElement.classList.remove(
+                        'not-started', 
+                        'in-progress', 
+                        'completed', 
+                        'completed-rescheduled',
+                        'overdue',
+                        'active'  // Remove legacy class
+                    );
+                    
+                    // Add new status class
+                    circleElement.classList.add(stage.status);
+                    updatedCount++;
+                    
+                    console.log(`[Progress Line] ✓ Updated stage "${stage.name}" (ID: ${stage.id}) to ${stage.status} (rescheduled: ${stage.was_rescheduled})`);
+                    
+                    // Optional: Add tooltip with details
+                    let tooltipText = `${stage.name}\nStatus: ${stage.status}\nProgress: ${stage.progress}%`;
+                    if (stage.was_rescheduled) {
+                        tooltipText += `\nRescheduled ${stage.reschedule_count} time(s)`;
+                    }
+                    circleElement.title = tooltipText;
+                } else {
+                    console.warn(`[Progress Line] ⚠️ Could not find element for stage "${stage.name}" (ID: ${stage.id})`);
+                }
+            });
+            
+            console.log(`[Progress Line] ✅ Updated ${updatedCount}/${data.stages.length} circles`);
+        } else {
+            console.error('[Progress Line] API returned success: false', data);
+        }
+    } catch (error) {
+        console.error('[Progress Line] Error updating progress line status:', error);
+    }
+}
+
+// Auto-refresh progress line every 30 seconds
+let progressRefreshIntervals = {};
+
+function startProgressLineAutoRefresh(projectId) {
+    // Clear existing interval for this project
+    if (progressRefreshIntervals[projectId]) {
+        clearInterval(progressRefreshIntervals[projectId]);
+    }
+    
+    // Initial update
+    updateProgressLineStatus(projectId);
+    
+    // Set up auto-refresh
+    progressRefreshIntervals[projectId] = setInterval(() => {
+        updateProgressLineStatus(projectId);
+    }, 30000); // Refresh every 30 seconds
+}
+
+// Stop auto-refresh when needed
+function stopProgressLineAutoRefresh(projectId) {
+    if (progressRefreshIntervals[projectId]) {
+        clearInterval(progressRefreshIntervals[projectId]);
+        delete progressRefreshIntervals[projectId];
+    }
+}
+
+// Stop all auto-refresh intervals
+function stopAllProgressLineAutoRefresh() {
+    Object.keys(progressRefreshIntervals).forEach(projectId => {
+        stopProgressLineAutoRefresh(projectId);
+    });
+}
+
+
+// Helper function to reset form
+function resetProjectForm() {
+    document.getElementById('projectForm').reset();
+    document.getElementById('stagesContainer').innerHTML = '';
+    document.getElementById('selectedMembers').innerHTML = '';
+    document.querySelector('#projectModal .modal-title').textContent = 'Create New Job';
+    document.querySelector('#projectForm button[type="submit"]').textContent = 'Create Job';
+    stageCounter = 0;
+    selectedMembers = [];
+    workingSaturdays.clear();
+    isEditMode = false;
+    editingProjectId = null;
+}
+</script>
 </body>
 </html>
