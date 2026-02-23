@@ -2744,6 +2744,11 @@ if __name__ == '__main__':
 
 
 
+
+
+
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -7329,7 +7334,7 @@ function generateEnhancedLegend(stages) {
     legendContainer.innerHTML = legendHTML;
 }
 
-// ✅ UPDATED: handleReschedule - Add forced refresh
+// ✅ UPDATED: handleReschedule - Let the backend handle the cascade safely
 async function handleReschedule(e) {
     e.preventDefault();
     
@@ -7399,59 +7404,23 @@ async function handleReschedule(e) {
         });
         
         if (response.ok) {
-            // ── Step 2: Cascade to all subsequent non-completed stages ─────────
-            const cascadeStages = currentProjectData.stages
-                .filter(s => s.id !== stageId && s.status !== 'completed')
-                .filter((s, _, arr) => {
-                    const rescheduledStage = currentProjectData.stages.find(x => x.id === stageId);
-                    if (!rescheduledStage) return false;
-                    const rIdx = currentProjectData.stages.indexOf(rescheduledStage);
-                    const sIdx = currentProjectData.stages.indexOf(s);
-                    return sIdx > rIdx;
-                });
-
-            if (cascadeStages.length > 0) {
-                showNotification(`Shifting ${cascadeStages.length} subsequent stage(s)...`, 'info');
-                
-                // Reschedule each one sequentially so the backend recalculates dates correctly
-                for (const stage of cascadeStages) {
-                    try {
-                        const cascadeResp = await fetch(`/api/projects/${projectId}/reschedule`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                stage_id: stage.id,
-                                days: days,
-                                reason: `Cascaded from stage shift: ${reason || 'rescheduled'}`,
-                                include_saturday: includeSaturdayAsWorkingDay,
-                                working_saturdays: Array.from(currentProjectData.saturdayWorkingDays || [])
-                            })
-                        });
-                        if (!cascadeResp.ok) {
-                            console.warn(`Cascade reschedule failed for stage "${stage.name}"`);
-                        }
-                    } catch (cascadeErr) {
-                        console.warn(`Could not cascade reschedule for stage ${stage.name}:`, cascadeErr);
-                    }
-                }
-            }
-
+            // BACKEND HANDLES CASCADE PERFECTLY NOW. JS CASCADE LOOP REMOVED TO PREVENT DB LOCKS.
+            
             showNotification('Stage rescheduled successfully!', 'success');
             rescheduleModal.hide();
             
-            // ✅ CRITICAL: Wait for database transaction to fully commit
-            console.log('⏳ Waiting for database commit (3 seconds)...');
-            await new Promise(resolve => setTimeout(resolve, 3000));
+            // Wait for DB write buffers to settle securely
+            console.log('⏳ Waiting for database commit (1 second)...');
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
-            // ✅ Force complete calendar rebuild with verified data
             console.log('🔨 Starting COMPLETE calendar rebuild...');
             await forceCompleteCalendarRebuild(parseInt(projectId));
             
-            // ✅ Refresh main project view
+            // Refresh main project view
             await loadProjects();
             await loadStats();
             
-            // ✅ FORCE CALENDAR REFRESH TO FIX LAYOUT
+            // FORCE CALENDAR REFRESH
             console.log('🔄 Forcing calendar refresh after reschedule...');
             if (calendar) {
                 try {
@@ -7482,7 +7451,9 @@ async function handleReschedule(e) {
         alert('Error rescheduling: ' + error.message);
     }
 }
+
 // ✅ NEW FUNCTION: Complete calendar rebuild with verification
+
 async function forceCompleteCalendarRebuild(projectId) {
     console.log('🔨 Starting COMPLETE calendar rebuild...');
     
