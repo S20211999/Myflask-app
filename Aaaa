@@ -171,6 +171,12 @@ def generate_excel_file(project_id, save_to_backend=True):
         # ==========================================
         stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
         
+        # Build a GLOBAL mapping: reschedule_number → row (1-4)
+        # This ensures all stages cascaded in the same reschedule event share the same row.
+        all_history = DailyTaskRescheduleHistory.query.filter_by(project_id=project_id).all()
+        global_r_nums = sorted(set(h.reschedule_number for h in all_history if h.reschedule_number))
+        global_rnum_to_row = {r_num: idx + 1 for idx, r_num in enumerate(global_r_nums)}
+        
         for stage in stages:
             parts = stage.name.split('-')
             stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
@@ -180,19 +186,17 @@ def generate_excel_file(project_id, save_to_backend=True):
                 stage_id=stage.id
             ).all()
             
-            unique_nums = sorted(list(set(r.reschedule_number for r in task_reschedules if r.reschedule_number)))
-            
-            for idx, r_num in enumerate(unique_nums):
-                target_row = idx + 1
-                if target_row > 4: continue
-                
-                event_tasks = [t for t in task_reschedules if t.reschedule_number == r_num]
-                for t in event_tasks:
-                    date_str = t.new_date.strftime('%Y-%m-%d')
-                    if date_str not in stage_reschedule_map[target_row]:
-                        stage_reschedule_map[target_row][date_str] = []
-                    if stage_abbr not in stage_reschedule_map[target_row][date_str]:
-                        stage_reschedule_map[target_row][date_str].append(stage_abbr)
+            for t in task_reschedules:
+                if not t.reschedule_number:
+                    continue
+                target_row = global_rnum_to_row.get(t.reschedule_number, 0)
+                if target_row < 1 or target_row > 4:
+                    continue
+                date_str = t.new_date.strftime('%Y-%m-%d')
+                if date_str not in stage_reschedule_map[target_row]:
+                    stage_reschedule_map[target_row][date_str] = []
+                if stage_abbr not in stage_reschedule_map[target_row][date_str]:
+                    stage_reschedule_map[target_row][date_str].append(stage_abbr)
 
         # ==========================================
         # 2. SETUP EXCEL & HEADERS
@@ -347,36 +351,30 @@ def generate_excel_file(project_id, save_to_backend=True):
         
         planned_map = {}
         for stage in stages:
-            if stage.start_date and stage.end_date:
-                parts = stage.name.split('-')
-                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-                d = stage.start_date
-                while d <= stage.end_date:
-                    if is_working_day(d, False, working_saturdays):
-                        ds = d.strftime('%Y-%m-%d')
-                        if ds not in planned_map: 
-                            planned_map[ds] = []
-                        planned_map[ds].append(abbr)
-                    d += timedelta(days=1)
-        
-        # ✅ ADD RESCHEDULE DATES TO PLANNED ROW
-        # When a task is rescheduled to a new date, that date should appear in the Planned row
-        for stage in stages:
             parts = stage.name.split('-')
             abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            
-            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
-                project_id=project_id, 
-                stage_id=stage.id
+            stage_tasks = StageDailyTask.query.filter_by(
+                project_id=project_id, stage_id=stage.id
             ).all()
-            
-            for reschedule in task_reschedules:
-                # Add the NEW date to planned_map (where the task is now scheduled)
-                new_ds = reschedule.new_date.strftime('%Y-%m-%d')
-                if new_ds not in planned_map:
-                    planned_map[new_ds] = []
-                if abbr not in planned_map[new_ds]:
-                    planned_map[new_ds].append(abbr)
+            if stage_tasks:
+                for t in stage_tasks:
+                    orig = t.original_date if t.original_date else t.scheduled_date
+                    ds = orig.strftime('%Y-%m-%d')
+                    if ds not in planned_map:
+                        planned_map[ds] = []
+                    if abbr not in planned_map[ds]:
+                        planned_map[ds].append(abbr)
+            else:
+                if stage.start_date and stage.end_date:
+                    d = stage.start_date
+                    while d <= stage.end_date:
+                        if is_working_day(d, False, working_saturdays):
+                            ds = d.strftime('%Y-%m-%d')
+                            if ds not in planned_map:
+                                planned_map[ds] = []
+                            if abbr not in planned_map[ds]:
+                                planned_map[ds].append(abbr)
+                        d += timedelta(days=1)
                     
         for i, d in enumerate(all_dates):
             cell = ws.cell(current_row, i+3)
@@ -455,7 +453,7 @@ def generate_excel_file(project_id, save_to_backend=True):
                         actual_map[ds] = []
                     actual_map[ds].append((abbr, t.status))
                 
-                if t.original_date and t.original_date != t.scheduled_date:
+                if t.original_date and t.original_date != t.scheduled_date and t.status == 'rescheduled':
                     hds = t.original_date.strftime('%Y-%m-%d')
                     if hds not in hold_dates_map: 
                         hold_dates_map[hds] = []
@@ -529,12 +527,25 @@ def generate_excel_file(project_id, save_to_backend=True):
                     parts = stage.name.split('-')
                     abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
                     if abbr in real_holds:
-                        task = StageDailyTask.query.filter_by(stage_id=stage.id, scheduled_date=d, status='hold').first()
-                        if not task:
-                            task = StageDailyTask.query.filter_by(stage_id=stage.id, original_date=d).first()
-                        
+                        hold_record = HoldDate.query.filter_by(
+                            project_id=project_id, stage_id=stage.id, hold_date=d
+                        ).first()
+                        if hold_record and hold_record.reason:
+                            reason = hold_record.reason
+                            break
+                        task = StageDailyTask.query.filter_by(
+                            stage_id=stage.id, scheduled_date=d, status='hold'
+                        ).first()
                         if task and task.rescheduled_reason:
                             reason = task.rescheduled_reason
+                            break
+                        history = DailyTaskRescheduleHistory.query.filter_by(
+                            project_id=project_id, stage_id=stage.id
+                        ).filter(
+                            DailyTaskRescheduleHistory.original_date == d
+                        ).order_by(DailyTaskRescheduleHistory.rescheduled_at.desc()).first()
+                        if history and history.reason and not history.reason.startswith('Auto-') and not history.reason.startswith('Cascaded'):
+                            reason = history.reason
                             break
                 
                 cell.value = reason
@@ -1596,13 +1607,31 @@ def reschedule_stage(project_id):
             project.end_date = latest_end
             project.working_saturdays = json.dumps(list(working_saturdays))
         
-        # Delete old daily tasks before regenerating (critical for HOLD display)
-        old_tasks_count = StageDailyTask.query.filter_by(project_id=project_id).count()
+        # Snapshot original_dates BEFORE deleting tasks.
+        original_date_snapshot = {}
+        existing_tasks = StageDailyTask.query.filter_by(project_id=project_id).all()
+        for et in existing_tasks:
+            key = (et.stage_id, et.day_number)
+            stored = original_date_snapshot.get(key)
+            candidate = et.original_date if et.original_date else et.scheduled_date
+            if stored is None or candidate < stored:
+                original_date_snapshot[key] = candidate
+
+        old_tasks_count = len(existing_tasks)
         StageDailyTask.query.filter_by(project_id=project_id).delete()
         print(f'   🗑️ Deleted {old_tasks_count} old daily tasks for project {project_id}')
         
-        # Regenerate daily tasks
         generate_daily_tasks_for_project(project_id, working_saturdays)
+
+        db.session.flush()
+        new_tasks = StageDailyTask.query.filter_by(project_id=project_id).all()
+        for nt in new_tasks:
+            if nt.stage_id == stage_id:
+                continue
+            key = (nt.stage_id, nt.day_number)
+            if key in original_date_snapshot:
+                nt.original_date = original_date_snapshot[key]
+        print(f'   ✅ Restored original_dates for {len(new_tasks)} regenerated tasks')
         
         # ✅ COMMIT EVERYTHING
         db.session.commit()
@@ -1804,6 +1833,7 @@ def complete_daily_task(project_id, stage_id, task_id):
         'total_tasks': len(all_tasks)
     })
 
+
 @app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/reschedule', methods=['POST'])
 @login_required
 def reschedule_daily_task(project_id, stage_id, task_id):
@@ -1829,7 +1859,8 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         task.reschedule_count = (task.reschedule_count or 0) + 1
         
         # ✅ FIX: Store CURRENT scheduled_date as original_date for THIS reschedule
-        current_location = task.scheduled_date  
+        # This is the date the task is being moved FROM (not the very first original date)
+        current_location = task.scheduled_date  # This is where the task is NOW
         
         # Keep track of the very first original date (for reference only)
         if not task.original_date:
@@ -1846,15 +1877,16 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         print(f"   Stage: {stage.name}, Day {task.day_number}")
         print(f"   Global Reschedule Number: {global_reschedule_num}")
         print(f"   Current Location: {current_location} → New: {new_date}")
+        print(f"   Task Reschedule count: {task.reschedule_count}")
         
-        # ✅ CREATE DAILY TASK HISTORY WITH CURRENT LOCATION
+        # ✅ CREATE DAILY TASK HISTORY WITH CURRENT LOCATION (not original_date)
         task_history = DailyTaskRescheduleHistory(
             project_id=project_id,
             stage_id=stage_id,
             task_id=task.id,
             day_number=task.day_number,
             reschedule_number=global_reschedule_num,
-            original_date=current_location,
+            original_date=current_location,  # ✅ USE CURRENT LOCATION, not task.original_date
             new_date=new_date,
             days_shifted=abs(days_to_shift),
             reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days_to_shift)} day(s)",
@@ -1862,7 +1894,11 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         )
         db.session.add(task_history)
         
-        # UPDATE SUBSEQUENT NON-COMPLETED TASKS IN THIS STAGE
+        # ✅ REMOVED STAGE-LEVEL HISTORY - IT WAS CREATING DUPLICATE GHOST EVENTS!
+        # Only daily task history should be created for daily task reschedules
+        
+        print(f"   ✅ Created daily task history with global reschedule #{global_reschedule_num}")        
+        # UPDATE SUBSEQUENT NON-COMPLETED TASKS
         all_stage_tasks = StageDailyTask.query.filter_by(
             stage_id=stage_id
         ).filter(
@@ -1872,6 +1908,8 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         
         for subsequent_task in all_stage_tasks:
             subsequent_task.reschedule_count = (subsequent_task.reschedule_count or 0) + 1
+            
+            # ✅ FIX: Use CURRENT scheduled_date as the "from" location
             subsequent_current_location = subsequent_task.scheduled_date
             
             if not subsequent_task.original_date:
@@ -1895,7 +1933,7 @@ def reschedule_daily_task(project_id, stage_id, task_id):
                 task_id=subsequent_task.id,
                 day_number=subsequent_task.day_number,
                 reschedule_number=global_reschedule_num,
-                original_date=subsequent_current_location,
+                original_date=subsequent_current_location,  # ✅ USE CURRENT LOCATION
                 new_date=subsequent_new_date,
                 days_shifted=abs(days_to_shift),
                 reason=f"Auto-reschedule due to Day {task.day_number}",
@@ -1911,18 +1949,19 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         if all_tasks_in_stage:
             stage.start_date = min(t.scheduled_date for t in all_tasks_in_stage)
             stage.end_date = max(t.scheduled_date for t in all_tasks_in_stage)
-            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")        
+            print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
 
-        # =======================================================
-        # ✅ NEW CASCADE LOGIC FOR ALL UPCOMING STAGES
-        # =======================================================
+        # ── CASCADE TO SUBSEQUENT STAGES ──────────────────────────────────────────
+        # Shift all daily tasks in stages that come after the rescheduled stage,
+        # and create DailyTaskRescheduleHistory records so they appear in Reschedule rows.
         subsequent_stages = ProjectStage.query.filter(
             ProjectStage.project_id == project_id,
             ProjectStage.order > stage.order,
             ProjectStage.status != 'completed'
         ).order_by(ProjectStage.order).all()
-        
+
         for sub_stage in subsequent_stages:
+            # Shift stage-level dates
             if sub_stage.start_date:
                 sub_stage.start_date = add_working_days(
                     sub_stage.start_date, days_to_shift, False, working_saturdays
@@ -1931,32 +1970,48 @@ def reschedule_daily_task(project_id, stage_id, task_id):
                 sub_stage.end_date = add_working_days(
                     sub_stage.end_date, days_to_shift, False, working_saturdays
                 )
-            
-            # Shift all daily tasks for this upcoming stage
-            sub_tasks = StageDailyTask.query.filter_by(stage_id=sub_stage.id).all()
-            for st_task in sub_tasks:
-                # We shift the scheduled date forward
-                st_task.scheduled_date = add_working_days(
-                    st_task.scheduled_date, days_to_shift, False, working_saturdays
-                )
-                
-                # ✅ CRITICAL FIX: Ensure original_date is cleared for cascaded tasks.
-                # By clearing it, the Excel export will NOT draw a "HOLD" at the task's old location.
-                # The stage seamlessly shifts to the new date.
-                st_task.original_date = None
-                
-                # Ensure status remains pending (so it doesn't get colored as rescheduled)
-                if st_task.status == 'rescheduled':
-                    st_task.status = 'pending'
-            
-            print(f"   ↪️ Cascaded shift to upcoming stage: {sub_stage.name}")
 
-        # Update project end date based on last stage
-        all_stages = ProjectStage.query.filter_by(project_id=project_id).all()
-        if all_stages:
-            latest_end = max(s.end_date for s in all_stages if s.end_date)
-            project.end_date = latest_end
-        
+            # Shift each daily task and record history
+            sub_tasks = StageDailyTask.query.filter_by(
+                stage_id=sub_stage.id
+            ).filter(
+                StageDailyTask.status != 'completed'
+            ).order_by(StageDailyTask.day_number).all()
+
+            for sub_task in sub_tasks:
+                sub_original_location = sub_task.scheduled_date
+
+                # Preserve original_date (first-ever planned date)
+                if not sub_task.original_date:
+                    sub_task.original_date = sub_task.scheduled_date
+
+                sub_new_date = add_working_days(
+                    sub_task.scheduled_date, days_to_shift, False, working_saturdays
+                )
+                sub_task.scheduled_date = sub_new_date
+                # Keep status as pending (seamless cascade, not a user-visible reschedule)
+                if sub_task.status == 'rescheduled':
+                    sub_task.status = 'pending'
+
+                # Create history record with the SAME global reschedule number
+                # so it appears in the correct Reschedule-N row
+                sub_history = DailyTaskRescheduleHistory(
+                    project_id=project_id,
+                    stage_id=sub_stage.id,
+                    task_id=sub_task.id,
+                    day_number=sub_task.day_number,
+                    reschedule_number=global_reschedule_num,
+                    original_date=sub_original_location,
+                    new_date=sub_new_date,
+                    days_shifted=abs(days_to_shift),
+                    reason=f"Cascaded from {stage.name} reschedule #{global_reschedule_num}",
+                    rescheduled_by=get_current_user().id
+                )
+                db.session.add(sub_history)
+
+            print(f"   ↪️ Cascaded to subsequent stage: {sub_stage.name}")
+        # ── END CASCADE ───────────────────────────────────────────────────────────
+
         # ✅ COMMIT
         db.session.commit()
         
@@ -1966,6 +2021,18 @@ def reschedule_daily_task(project_id, stage_id, task_id):
             print(f"✅ Excel regenerated in backend for project {project_id}")
         except Exception as excel_error:
             print(f"⚠️ Excel regeneration failed: {excel_error}")
+        
+        # ✅ VERIFY
+        verification = DailyTaskRescheduleHistory.query.filter_by(
+            project_id=project_id,
+            task_id=task_id,
+            reschedule_number=global_reschedule_num
+        ).first()
+        
+        if verification:
+            print(f"   ✅ VERIFIED: Daily task history record exists")
+        else:
+            print(f"   ⚠️ WARNING: History record not found!")
         
         log_activity(f"Rescheduled day {task.day_number} of stage '{stage.name}' (Global Reschedule #{global_reschedule_num})")
         
@@ -1982,7 +2049,7 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 400
-
+    
 @app.route('/api/projects/<int:project_id>/stages/<int:stage_id>/daily-tasks/<int:task_id>/hold', methods=['POST'])
 @login_required
 def hold_daily_task(project_id, stage_id, task_id):
@@ -2358,11 +2425,18 @@ def update_project(project_id):
         
         # ✅ DELETE old daily tasks and regenerate them with new dates
         deleted_count = StageDailyTask.query.filter_by(project_id=project.id).delete()
-        db.session.flush()  # Ensure delete completes before regeneration
+        db.session.flush()
         print(f"🗑️ Deleted {deleted_count} old daily tasks for project {project.id}")
         
         generate_daily_tasks_for_project(project.id, working_saturdays)
         print(f"✨ Generated new daily tasks for project {project.id}")
+        
+        # Reset original_date = scheduled_date for all fresh tasks (edit resets the plan baseline)
+        db.session.flush()
+        fresh_tasks = StageDailyTask.query.filter_by(project_id=project.id).all()
+        for ft in fresh_tasks:
+            ft.original_date = ft.scheduled_date
+        print(f"✅ Reset original_date baseline for {len(fresh_tasks)} tasks after edit")
         
         # ✅ SAVE ALL CHANGES TO DATABASE
         # This commits all the replaced/updated data
@@ -2765,6 +2839,7 @@ if __name__ == '__main__':
 
 
 
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2783,7 +2858,7 @@ if __name__ == '__main__':
 body {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
-    padding: 10px;
+    padding: 20px;
 }
 
 .stat-card {
@@ -4956,35 +5031,26 @@ span[style*="background: rgb(102, 126, 234)"] {
                                   placeholder="e.g., Resource availability..."></textarea>
                     </div>
                     
-                    <!-- Impact Warning + Cascade Preview -->
-                    <div id="rescheduleImpactWarning" style="display: none;">
-                        <!-- Summary alert -->
-                        <div class="alert alert-warning py-2 mb-2" style="font-size: 0.85rem;">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            <span id="rescheduleImpactText"></span>
-                        </div>
-                        <!-- Cascade chain table -->
-                        <div id="cascadePreviewBox" style="display:none; background:#f8f9fa; border-radius:10px; padding:12px; border:1px solid #dee2e6;">
-                            <div class="d-flex align-items-center mb-2" style="font-size:0.8rem; font-weight:700; color:#495057;">
-                                <i class="fas fa-link me-2" style="color:#667eea;"></i>
-                                Cascade Impact — Stages that will shift:
-                            </div>
-                            <div id="cascadePreviewList"></div>
-                        </div>
+                    <!-- Impact Warning -->
+                    <div class="alert alert-warning py-2" id="rescheduleImpactWarning" style="display: none; font-size: 0.85rem;">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <span id="rescheduleImpactText"></span>
                     </div>
                     
                     <input type="hidden" id="rescheduleProjectId">
                     <input type="hidden" id="rescheduleStageId">
                     <input type="hidden" id="rescheduleStageStartDate">
                     <input type="hidden" id="rescheduleStageEndDate">
-
-                    <div class="d-grid gap-2 mt-3">
-                        <button type="submit" class="btn btn-primary-custom">
-                            <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    </div>
-                </form>               
+                    
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary-custom" onclick="confirmDayReschedule()">
+                        <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
+                    </button>
+                    <button class="btn btn-warning" onclick="holdDayTask()">
+                        <i class="fas fa-lock me-2"></i>Put on Hold
+                    </button>
+                    <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                </div>               
             </div>
         </div>
     </div>
@@ -5377,10 +5443,10 @@ span[style*="background: rgb(102, 126, 234)"] {
     }
 
     async function init() {
-        try { await loadDefaultStagesFromAPI(); } catch(e) { console.warn('loadDefaultStages failed:', e); }
-        try { await loadEmployees(); } catch(e) { console.warn('loadEmployees failed:', e); }
-        try { await loadStats(); } catch(e) { console.warn('loadStats failed:', e); }
-        try { await loadProjects(); } catch(e) { console.error('loadProjects failed:', e); }
+        await loadDefaultStagesFromAPI();
+        await loadEmployees();
+        await loadStats();
+        await loadProjects();
     }
 
     async function loadDefaultStagesFromAPI() {
@@ -5642,19 +5708,97 @@ span[style*="background: rgb(102, 126, 234)"] {
     }
 
     async function loadStats() {
-        try {
-            const response = await fetch('/api/stats');
-            const data = await response.json();
-            document.getElementById('totalProjects').textContent = data.total_projects ?? 0;
-            document.getElementById('activeProjects').textContent = data.active_projects ?? 0;
-            document.getElementById('totalTasks').textContent = data.total_tasks ?? 0;
-            document.getElementById('totalEmployees').textContent = data.total_employees ?? 0;
-        } catch(e) {
-            console.warn('Stats load failed:', e);
-        }
+        const response = await fetch('/api/stats');
+        const data = await response.json();
+        document.getElementById('totalProjects').textContent = data.total_projects;
+        document.getElementById('activeProjects').textContent = data.active_projects;
+        document.getElementById('totalTasks').textContent = data.total_tasks;
+        document.getElementById('totalEmployees').textContent = data.total_employees;
     }
 
-    // NOTE: loadProjects() is defined globally below (uses search/filter/pagination)
+async function loadProjects() {
+    try {
+        console.log('📦 Loading projects...');
+        const response = await fetch(`/api/projects?_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {'Cache-Control': 'no-cache'}
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        projects = await response.json();
+        console.log('📦 Projects loaded:', projects.length, projects);
+        
+        if (projects.length === 0) {
+            const container = document.getElementById('allProjectsSection');
+            container.innerHTML = '<p class="text-muted text-center py-4">No jobs yet. Create your first job!</p>';
+            return;
+        }
+        
+        // Fetch details for each project
+        const projectsWithDetails = await Promise.all(
+            projects.map(async (project) => {
+                try {
+                    console.log(`📋 Fetching details for project ${project.id}: "${project.name}"...`);
+                    const detailsResponse = await fetch(`/api/projects/${project.id}/details?_t=${Date.now()}`, {
+                        cache: 'no-store',
+                        headers: {'Cache-Control': 'no-cache'}
+                    });
+                    
+                    if (!detailsResponse.ok) {
+                        console.error(`❌ Failed to fetch details for project ${project.id}`);
+                        return null;
+                    }
+                    
+                    const details = await detailsResponse.json();
+                    console.log(`✅ Details loaded for project ${project.id}:`, {
+                        name: details.name,
+                        stages: details.stages.length,
+                        stagesData: details.stages
+                    });
+                    return details;
+                } catch (error) {
+                    console.error(`❌ Error fetching project ${project.id}:`, error);
+                    return null;
+                }
+            })
+        );
+        
+        // Filter out null values
+        const validProjects = projectsWithDetails.filter(p => p !== null);
+        console.log('✅ Valid projects to render:', validProjects.length);
+        
+        if (validProjects.length === 0) {
+            const container = document.getElementById('allProjectsSection');
+            container.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Jobs exist but couldn't load details. Please refresh the page.
+                </div>
+            `;
+            return;
+        }
+        
+        // Force clear and re-render
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = '';
+        renderProjectsWithStages(validProjects);
+    } catch (error) {
+        console.error('Error loading projects:', error);
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Error loading jobs: ${error.message}
+                <button class="btn btn-sm btn-outline-danger ms-3" onclick="loadProjects()">
+                    <i class="fas fa-redo me-1"></i> Retry
+                </button>
+            </div>
+        `;
+    }
+}    
 
 function renderProjectsWithStages(projectsData) {
         const container = document.getElementById('allProjectsSection');
@@ -7383,30 +7527,19 @@ async function handleReschedule(e) {
         .slice(0, stageIndex)
         .some(s => s.status === 'completed');
     
-    // Find subsequent stages (for confirm message)
-    const subsequentStages = currentProjectData.stages
-        .filter((s, sIdx) => sIdx > stageIndex && s.status !== 'completed');
-
-    const stageName = currentProjectData.stages[stageIndex]?.name || 'this stage';
-    const direction = days > 0 ? `forward` : `backward`;
-    let confirmMsg = `⏱ Reschedule Confirmation\n\n`;
-    confirmMsg += `Stage: "${stageName}"\n`;
-    confirmMsg += `Shift: ${Math.abs(days)} working day(s) ${direction}\n\n`;
+    let confirmMsg = `Are you sure you want to shift this stage by ${days} working days?\n\n`;
+    
     if (hasCompletedBefore) {
-        confirmMsg += `✅ Completed stages before this will NOT be changed.\n`;
+        confirmMsg += '✅ Completed stages will remain unchanged\n';
     }
-    if (subsequentStages.length > 0) {
-        confirmMsg += `🔗 Cascade: The following ${subsequentStages.length} stage(s) will also shift by ${Math.abs(days)} day(s):\n`;
-        subsequentStages.forEach(s => { confirmMsg += `   • ${s.name}\n`; });
-    }
-    confirmMsg += `\n✅ Weekends excluded from calculation.\n\nProceed?`;
+    confirmMsg += '✅ This stage and subsequent stages will be shifted\n';
+    confirmMsg += '✅ Weekends will be excluded from calculation';
     
     if (!confirm(confirmMsg)) {
         return;
     }
     
     try {
-        // ── Step 1: Reschedule the selected stage ──────────────────────────────
         const response = await fetch(`/api/projects/${projectId}/reschedule`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -7420,43 +7553,6 @@ async function handleReschedule(e) {
         });
         
         if (response.ok) {
-            // ── Step 2: Cascade to all subsequent non-completed stages ─────────
-            const cascadeStages = currentProjectData.stages
-                .filter(s => s.id !== stageId && s.status !== 'completed')
-                .filter((s, _, arr) => {
-                    const rescheduledStage = currentProjectData.stages.find(x => x.id === stageId);
-                    if (!rescheduledStage) return false;
-                    const rIdx = currentProjectData.stages.indexOf(rescheduledStage);
-                    const sIdx = currentProjectData.stages.indexOf(s);
-                    return sIdx > rIdx;
-                });
-
-            if (cascadeStages.length > 0) {
-                showNotification(`Shifting ${cascadeStages.length} subsequent stage(s)...`, 'info');
-                
-                // Reschedule each one sequentially so the backend recalculates dates correctly
-                for (const stage of cascadeStages) {
-                    try {
-                        const cascadeResp = await fetch(`/api/projects/${projectId}/reschedule`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                stage_id: stage.id,
-                                days: days,
-                                reason: `Cascaded from stage shift: ${reason || 'rescheduled'}`,
-                                include_saturday: includeSaturdayAsWorkingDay,
-                                working_saturdays: Array.from(currentProjectData.saturdayWorkingDays || [])
-                            })
-                        });
-                        if (!cascadeResp.ok) {
-                            console.warn(`Cascade reschedule failed for stage "${stage.name}"`);
-                        }
-                    } catch (cascadeErr) {
-                        console.warn(`Could not cascade reschedule for stage ${stage.name}:`, cascadeErr);
-                    }
-                }
-            }
-
             showNotification('Stage rescheduled successfully!', 'success');
             rescheduleModal.hide();
             
@@ -7759,15 +7855,12 @@ function adjustRescheduleDays(delta) {
         if (!days || days === 0) {
             document.getElementById('rescheduleNewDatesPreview').style.display = 'none';
             document.getElementById('rescheduleImpactWarning').style.display = 'none';
-            document.getElementById('cascadePreviewBox').style.display = 'none';
             return;
         }
         
         const startDate = new Date(document.getElementById('rescheduleStageStartDate').value);
         const endDate = new Date(document.getElementById('rescheduleStageEndDate').value);
-        const stageId = parseInt(document.getElementById('rescheduleStageId').value);
         
-        // New dates for THIS stage
         const newStart = addWorkingDays(startDate, days);
         const newEnd = addWorkingDays(endDate, days);
         
@@ -7775,46 +7868,11 @@ function adjustRescheduleDays(delta) {
             `${newStart.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})} - ${newEnd.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})}`;
         document.getElementById('rescheduleNewDatesPreview').style.display = 'block';
         
-        // Find subsequent stages
-        const rIdx = currentProjectData.stages ? currentProjectData.stages.findIndex(s => s.id === stageId) : -1;
-        const subsequentStages = (currentProjectData.stages || []).filter((s, sIdx) => {
-            return sIdx > rIdx && s.status !== 'completed';
-        });
-
-        const direction = days > 0 ? 'forward' : 'backward';
-        const absDays = Math.abs(days);
-        const impactText = subsequentStages.length > 0
-            ? `This stage + ${subsequentStages.length} subsequent stage(s) will shift ${direction} by ${absDays} working day(s)`
-            : `Only this stage will shift ${direction} by ${absDays} working day(s)`;
+        const impactText = days > 0 
+            ? `All subsequent stages will be pushed forward by ${days} working day(s)`
+            : `All subsequent stages will be pulled backward by ${Math.abs(days)} working day(s)`;
         document.getElementById('rescheduleImpactText').textContent = impactText;
         document.getElementById('rescheduleImpactWarning').style.display = 'block';
-
-        // Build cascade preview list
-        if (subsequentStages.length > 0) {
-            const stageColors = ['#667eea','#764ba2','#f093fb','#f5576c','#4facfe','#00f2fe','#43e97b','#38f9d7','#fa709a','#fee140'];
-            let listHTML = '';
-            subsequentStages.forEach((s, i) => {
-                const origStart = s.start_date ? new Date(s.start_date) : null;
-                const origEnd = s.end_date ? new Date(s.end_date) : null;
-                const shiftedStart = origStart ? addWorkingDays(origStart, days) : null;
-                const shiftedEnd = origEnd ? addWorkingDays(origEnd, days) : null;
-                const color = stageColors[(rIdx + 1 + i) % stageColors.length];
-                const fmt = d => d ? d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : '—';
-                const arrow = days > 0 ? '→' : '←';
-                listHTML += `
-                <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; margin-bottom:4px; background:white; border-radius:7px; border-left:3px solid ${color}; font-size:0.78rem;">
-                    <div style="width:8px; height:8px; border-radius:50%; background:${color}; flex-shrink:0;"></div>
-                    <div style="flex:1; font-weight:600; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
-                    <div style="color:#6c757d; white-space:nowrap;">${fmt(origStart)} – ${fmt(origEnd)}</div>
-                    <div style="color:#667eea; font-weight:700;">${arrow}</div>
-                    <div style="color:#28a745; font-weight:700; white-space:nowrap;">${fmt(shiftedStart)} – ${fmt(shiftedEnd)}</div>
-                </div>`;
-            });
-            document.getElementById('cascadePreviewList').innerHTML = listHTML;
-            document.getElementById('cascadePreviewBox').style.display = 'block';
-        } else {
-            document.getElementById('cascadePreviewBox').style.display = 'none';
-        }
     }
 
 function enhanceCalendarWithWeekends() {
@@ -8816,87 +8874,32 @@ async function showExcelPreview(projectId) {
         html += '<td style="border: 1px solid #000; padding: 8px; font-weight: bold; text-align: center;">Planned</td>';
         
         const plannedMap = {};
-
-        // ── Cascade-aware planned row ──────────────────────────────────────────
-        // When a stage is rescheduled (+N days), every subsequent stage that was
-        // originally scheduled to start ≤ the rescheduled stage's new end date
-        // must also be pushed forward, otherwise they overlap on the same cell.
-
-        // Build a set of stage IDs that were directly rescheduled (not daily tasks)
-        const stageRescheduleShifts = new Map(); // stageId → net working-day shift
-        rescheduleHistory.forEach(h => {
-            if (h.type !== 'daily_task') {
-                const shift = h.direction === 'forward'
-                    ? (h.days_shifted || 0)
-                    : -(h.days_shifted || 0);
-                stageRescheduleShifts.set(
-                    h.stage_id,
-                    (stageRescheduleShifts.get(h.stage_id) || 0) + shift
-                );
-            }
-        });
-
-        // Local working-day helpers (use the preview's own workingSaturdays set)
-        function _isWD(date) {
-            const day = date.getDay();
-            if (day === 0) return false;
-            if (day === 6) return workingSaturdays.has(date.toISOString().split('T')[0]);
-            return true;
-        }
-        function _addWD(d, n) {
-            if (n === 0) return new Date(d);
-            const dir = n > 0 ? 1 : -1;
-            let cur = new Date(d);
-            let rem = Math.abs(n);
-            while (rem > 0) { cur.setDate(cur.getDate() + dir); if (_isWD(cur)) rem--; }
-            return cur;
-        }
-
-        // Process stages in their display order; cascade the rescheduled end date
-        // forward so subsequent sequential stages don't pile up.
-        const _sorted = [...stages].sort((a, b) => (a.order || 0) - (b.order || 0));
-        let _cascadeEnd = null; // latest end-date that requires cascade
-
-        const plannedStageDates = _sorted.map(stage => {
-            if (!stage.start_date || !stage.end_date) return { stage, start: null, end: null };
-
-            let start = new Date(stage.start_date + 'T12:00:00');
-            let end   = new Date(stage.end_date   + 'T12:00:00');
-            const dur = stage.duration_days || 1;
-
-            if (stageRescheduleShifts.has(stage.id)) {
-                // Directly rescheduled – use its current DB dates and update cascade tracker
-                if (!_cascadeEnd || end > _cascadeEnd) _cascadeEnd = new Date(end);
-            } else if (_cascadeEnd && start <= _cascadeEnd) {
-                // This stage overlaps with the rescheduled zone → push it forward
-                start = _addWD(_cascadeEnd, 1);
-                end   = _addWD(start, dur - 1);
-                if (!_cascadeEnd || end > _cascadeEnd) _cascadeEnd = new Date(end);
-            }
-
-            return { stage, start, end };
-        });
-
-        plannedStageDates.forEach(({ stage, start, end }) => {
-            if (!start || !end) return;
+        stages.forEach(stage => {
             const parts = stage.name.split('-');
             const abbr  = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
-
-            let d = new Date(start);
-            while (d <= end) {
-                const dayOfWeek = d.getDay();
-                const dateStr   = d.toISOString().split('T')[0];
-                const isSat     = dayOfWeek === 6;
-                const isWorkSat = isSat && workingSaturdays.has(dateStr);
-
-                if (dayOfWeek !== 0 && (!isSat || isWorkSat)) {
+            const stageTasks = dailyTasks.filter(t => t.stage_id === stage.id);
+            if (stageTasks.length > 0) {
+                stageTasks.forEach(t => {
+                    const orig = t.original_date ? t.original_date : t.scheduled_date;
+                    const dateStr = orig.split('T')[0];
                     if (!plannedMap[dateStr]) plannedMap[dateStr] = [];
                     if (!plannedMap[dateStr].includes(abbr)) plannedMap[dateStr].push(abbr);
+                });
+            } else {
+                if (stage.start_date && stage.end_date) {
+                    let d = new Date(stage.start_date + 'T12:00:00');
+                    const end = new Date(stage.end_date + 'T12:00:00');
+                    while (d <= end) {
+                        const dow = d.getDay(); const ds = d.toISOString().split('T')[0];
+                        if (dow !== 0 && (dow !== 6 || workingSaturdays.has(ds))) {
+                            if (!plannedMap[ds]) plannedMap[ds] = [];
+                            if (!plannedMap[ds].includes(abbr)) plannedMap[ds].push(abbr);
+                        }
+                        d.setDate(d.getDate() + 1);
+                    }
                 }
-                d.setDate(d.getDate() + 1);
             }
         });
-        // ── end cascade-aware planned row ──────────────────────────────────────
         
         allDates.forEach(date => {
             const dayOfWeek = date.getDay();
@@ -8917,29 +8920,28 @@ async function showExcelPreview(projectId) {
         // RESCHEDULE ROWS (1-4) - MATCHING BACKEND LOGIC
         // ==========================================
         const stageRescheduleMap = {1: {}, 2: {}, 3: {}, 4: {}};
-        
-        // Build reschedule map matching backend logic
+
+        // Build a GLOBAL mapping: reschedule_number → row (1-4)
+        // Ensures all stages cascaded in the same reschedule event share the same row.
+        const dailyTaskHistory = rescheduleHistory.filter(r => r.type === 'daily_task' && r.reschedule_number);
+        const globalRNums = [...new Set(dailyTaskHistory.map(r => r.reschedule_number))].sort((a, b) => a - b);
+        const globalRnumToRow = {};
+        globalRNums.forEach((rNum, idx) => { globalRnumToRow[rNum] = idx + 1; });
+
         stages.forEach(stage => {
             const parts = stage.name.split('-');
             const stageAbbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
-            
-            const taskReschedules = rescheduleHistory.filter(r => r.stage_id === stage.id);
-            const uniqueNums = [...new Set(taskReschedules.map(r => r.reschedule_number).filter(n => n))].sort((a, b) => a - b);
-            
-            uniqueNums.forEach((rNum, idx) => {
-                const targetRow = idx + 1;
-                if (targetRow > 4) return;
-                
-                const eventTasks = taskReschedules.filter(t => t.reschedule_number === rNum);
-                eventTasks.forEach(t => {
-                    const dateStr = t.new_date.split('T')[0];
-                    if (!stageRescheduleMap[targetRow][dateStr]) {
-                        stageRescheduleMap[targetRow][dateStr] = [];
-                    }
-                    if (!stageRescheduleMap[targetRow][dateStr].includes(stageAbbr)) {
-                        stageRescheduleMap[targetRow][dateStr].push(stageAbbr);
-                    }
-                });
+
+            const taskReschedules = rescheduleHistory.filter(r => r.stage_id === stage.id && r.type === 'daily_task' && r.reschedule_number);
+
+            taskReschedules.forEach(t => {
+                const targetRow = globalRnumToRow[t.reschedule_number];
+                if (!targetRow || targetRow > 4) return;
+                const dateStr = t.new_date.split('T')[0];
+                if (!stageRescheduleMap[targetRow][dateStr]) stageRescheduleMap[targetRow][dateStr] = [];
+                if (!stageRescheduleMap[targetRow][dateStr].includes(stageAbbr)) {
+                    stageRescheduleMap[targetRow][dateStr].push(stageAbbr);
+                }
             });
         });
         
@@ -9010,9 +9012,7 @@ async function showExcelPreview(projectId) {
                     actualMap[ds].push({abbr, status: t.status});
                 }
                 
-                // CRITICAL: If task was rescheduled, add original_date to holdDatesMap
-                // This matches backend logic (app.py lines 439-444)
-                if (t.original_date && t.original_date !== t.scheduled_date) {
+                if (t.original_date && t.original_date !== t.scheduled_date && t.status === 'rescheduled') {
                     const hds = t.original_date.split('T')[0];
                     if (!holdDatesMap[hds]) holdDatesMap[hds] = [];
                     if (!holdDatesMap[hds].includes(abbr)) {
@@ -9108,31 +9108,25 @@ async function showExcelPreview(projectId) {
             
             if (realHolds.length > 0) {
                 remark = "Waiting for issue tracker";
-                
-                // Try to find the actual reason from tasks
                 for (const stage of stages) {
                     const parts = stage.name.split('-');
                     const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
-                    
                     if (realHolds.includes(abbr)) {
-                        // Check for manual hold
-                        const task = dailyTasks.find(t => 
-                            t.stage_id === stage.id && 
-                            t.scheduled_date.split('T')[0] === dateStr && 
-                            t.status === 'hold'
+                        const holdRecord = holdDates.find(h =>
+                            h.stage_id === stage.id && h.hold_date.split('T')[0] === dateStr && h.reason
                         );
-                        
-                        // If not found, check for rescheduled hold
-                        const rescheduleTask = task || dailyTasks.find(t => 
-                            t.stage_id === stage.id && 
-                            t.original_date && 
-                            t.original_date.split('T')[0] === dateStr
+                        if (holdRecord) { remark = holdRecord.reason; break; }
+                        const holdTask = dailyTasks.find(t =>
+                            t.stage_id === stage.id && t.scheduled_date.split('T')[0] === dateStr &&
+                            t.status === 'hold' && t.rescheduled_reason
                         );
-                        
-                        if (rescheduleTask && rescheduleTask.rescheduled_reason) {
-                            remark = rescheduleTask.rescheduled_reason;
-                            break;
-                        }
+                        if (holdTask) { remark = holdTask.rescheduled_reason; break; }
+                        const historyEntry = rescheduleHistory.find(h =>
+                            h.stage_id === stage.id &&
+                            h.original_date && h.original_date.split('T')[0] === dateStr &&
+                            h.reason && !h.reason.startsWith('Auto-') && !h.reason.startsWith('Cascaded')
+                        );
+                        if (historyEntry) { remark = historyEntry.reason; break; }
                     }
                 }
             } else if (isWeekend) {
@@ -9309,31 +9303,20 @@ console.log('✅ Export function fixed!');
 
 // Load projects with caching
 async function loadProjects() {
-    const container = document.getElementById('allProjectsSection');
     try {
-        container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Loading jobs...</p></div>';
-        
         const response = await fetch(`/api/projects?_t=${Date.now()}`, {
             cache: 'no-store',
             headers: {'Cache-Control': 'no-cache'}
         });
-        
-        if (!response.ok) throw new Error(`Server error: ${response.status}`);
-        
         projects = await response.json();
         allProjectsCache = projects;
         
-        if (projects.length === 0) {
-            container.innerHTML = '<p class="text-muted text-center py-4"><i class="fas fa-folder-open me-2"></i>No jobs yet. Create your first job!</p>';
-            document.getElementById('resultsCount').textContent = 'Showing 0 jobs';
-            return;
-        }
-        
         // Initial filter and display
-        performSearch();
+        handleProjectSearch();
         
     } catch (error) {
         console.error('Error loading projects:', error);
+        const container = document.getElementById('allProjectsSection');
         container.innerHTML = `
             <div class="alert alert-danger">
                 <i class="fas fa-exclamation-triangle me-2"></i>
@@ -9464,10 +9447,6 @@ async function displayPaginatedProjects() {
         projectsToDisplay.map(async (project) => {
             try {
                 const response = await fetch(`/api/projects/${project.id}/details`);
-                if (!response.ok) {
-                    console.error(`Failed to fetch details for project ${project.id}: ${response.status}`);
-                    return null;
-                }
                 return await response.json();
             } catch (error) {
                 console.error(`Error loading project ${project.id}:`, error);
@@ -9478,20 +9457,6 @@ async function displayPaginatedProjects() {
     
     // Filter out failed requests
     const validProjects = projectsWithDetails.filter(p => p !== null);
-    
-    if (validProjects.length === 0) {
-        container.innerHTML = `
-            <div class="alert alert-warning text-center">
-                <i class="fas fa-exclamation-triangle me-2"></i>
-                Could not load job details. 
-                <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadProjects()">
-                    <i class="fas fa-redo me-1"></i> Retry
-                </button>
-            </div>
-        `;
-        updatePaginationControls();
-        return;
-    }
     
     // Render projects
     renderProjectsWithStages(validProjects);
@@ -9601,27 +9566,22 @@ async function openEditProjectModal(projectId, event) {
         document.getElementById('stagesContainer').innerHTML = '';
         
         // === SMART DETECTION LOGIC START ===
-        let currentExpectedStart = getNextWorkingDay(new Date(project.start_date));
-        
+        let prevStageEnd = null;
         for (const stage of project.stages) {
-            let isCustom = true; 
-            
-            if (stage.start_date) {
-                const actualStart = new Date(stage.start_date);
-                // Check if actual start matches the expected sequential start
-                const isSameDate = actualStart.toISOString().split('T')[0] === currentExpectedStart.toISOString().split('T')[0];
-                
-                if (isSameDate) {
-                    isCustom = false; // No gap detected, treat as auto-flow
+            let isCustom = false;
+            if (stage.start_date && prevStageEnd !== null) {
+                const actualStart = new Date(stage.start_date + 'T12:00:00');
+                const expectedStart = addWorkingDays(prevStageEnd, 1);
+                if (actualStart.toISOString().split('T')[0] !== expectedStart.toISOString().split('T')[0]) {
+                    isCustom = true;
                 }
-                
-                // Calculate where the NEXT stage is expected to start
-                const baseStart = isCustom ? actualStart : currentExpectedStart;
-                const duration = stage.duration_days || 1;
-                const stageEnd = addWorkingDays(baseStart, duration - 1);
-                currentExpectedStart = addWorkingDays(stageEnd, 1);
             }
-            
+            if (stage.end_date) {
+                prevStageEnd = new Date(stage.end_date + 'T12:00:00');
+            } else if (stage.start_date) {
+                const s = new Date(stage.start_date + 'T12:00:00');
+                prevStageEnd = addWorkingDays(s, (stage.duration_days || 1) - 1);
+            }
             addEditStage(stage, isCustom);
         }
         // === SMART DETECTION LOGIC END ===
@@ -9807,18 +9767,3 @@ function resetProjectForm() {
 </script>
 </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
