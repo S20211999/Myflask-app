@@ -34,8 +34,6 @@ class User(db.Model):
 class Project(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(200), nullable=False)
-    client_name = db.Column(db.String(200))          # ✅ ADD THIS
-    project_manager = db.Column(db.String(200))      # ✅ ADD THIS    
     description = db.Column(db.Text)
     status = db.Column(db.String(20), default='active')
     start_date = db.Column(db.Date)
@@ -44,7 +42,7 @@ class Project(db.Model):
     created_by = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     working_saturdays = db.Column(db.Text, default='[]')
-    current_reschedule_number = db.Column(db.Integer, default=0)  # âœ… ADD THIS LINE    # Store as JSON array
+    current_reschedule_number = db.Column(db.Integer, default=0)  # ✅ ADD THIS LINE    # Store as JSON array
 
 class ProjectStage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -81,7 +79,7 @@ class ScheduleHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     project_id = db.Column(db.Integer, db.ForeignKey('project.id'), nullable=False)
     stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'))
-    reschedule_number = db.Column(db.Integer, default=1)  # âœ… ADD THIS
+    reschedule_number = db.Column(db.Integer, default=1)  # ✅ ADD THIS
     original_date = db.Column(db.Date)
     new_date = db.Column(db.Date)
     reason = db.Column(db.Text)
@@ -108,6 +106,7 @@ class StageDailyTask(db.Model):
     day_number = db.Column(db.Integer, nullable=False)  # 1, 2, 3, etc.
     scheduled_date = db.Column(db.Date, nullable=False)
     original_date = db.Column(db.Date)  # Track if rescheduled
+    planned_date = db.Column(db.Date)   # ✅ FROZEN at creation - NEVER updated - used for Planned row in Excel
     status = db.Column(db.String(20), default='pending')  # pending, completed, rescheduled
     completed_at = db.Column(db.DateTime)
     rescheduled_reason = db.Column(db.Text)
@@ -120,7 +119,7 @@ class DailyTaskRescheduleHistory(db.Model):
     stage_id = db.Column(db.Integer, db.ForeignKey('project_stage.id'), nullable=False)
     task_id = db.Column(db.Integer, db.ForeignKey('stage_daily_task.id'), nullable=False)
     day_number = db.Column(db.Integer, nullable=False)
-    reschedule_number = db.Column(db.Integer, default=1)  # âœ… ADD THIS
+    reschedule_number = db.Column(db.Integer, default=1)  # ✅ ADD THIS
     original_date = db.Column(db.Date, nullable=False)
     new_date = db.Column(db.Date, nullable=False)
     days_shifted = db.Column(db.Integer, nullable=False)
@@ -144,6 +143,16 @@ class HoldDate(db.Model):
 # ============================================================================
 
 def generate_excel_file(project_id, save_to_backend=True):
+    """
+    Generate Excel file for a project and optionally save to backend.
+    
+    Args:
+        project_id: The project ID to generate Excel for
+        save_to_backend: If True, saves the file to static/excel_exports/
+    
+    Returns:
+        BytesIO object containing the Excel file, or None on error
+    """
     try:
         project = Project.query.get(project_id)
         if not project:
@@ -151,12 +160,20 @@ def generate_excel_file(project_id, save_to_backend=True):
             return None
             
         stages = ProjectStage.query.filter_by(project_id=project_id).order_by(ProjectStage.order).all()
+        
+        # Parse Working Saturdays
         try:
             working_saturdays = set(json.loads(project.working_saturdays) if project.working_saturdays else [])
         except:
             working_saturdays = set()
 
+        # ==========================================
+        # 1. PREPARE RESCHEDULE MAP (STAGE-WISE)
+        # ==========================================
         stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
+        
+        # Build a GLOBAL mapping: reschedule_number → row (1-4)
+        # This ensures all stages cascaded in the same reschedule event share the same row.
         all_history = DailyTaskRescheduleHistory.query.filter_by(project_id=project_id).all()
         global_r_nums = sorted(set(h.reschedule_number for h in all_history if h.reschedule_number))
         global_rnum_to_row = {r_num: idx + 1 for idx, r_num in enumerate(global_r_nums)}
@@ -164,288 +181,76 @@ def generate_excel_file(project_id, save_to_backend=True):
         for stage in stages:
             parts = stage.name.split('-')
             stage_abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(project_id=project_id, stage_id=stage.id).all()
+            
+            task_reschedules = DailyTaskRescheduleHistory.query.filter_by(
+                project_id=project_id, 
+                stage_id=stage.id
+            ).all()
+            
             for t in task_reschedules:
-                if not t.reschedule_number: continue
+                if not t.reschedule_number:
+                    continue
                 target_row = global_rnum_to_row.get(t.reschedule_number, 0)
-                if target_row < 1 or target_row > 4: continue
+                if target_row < 1 or target_row > 4:
+                    continue
                 date_str = t.new_date.strftime('%Y-%m-%d')
                 if date_str not in stage_reschedule_map[target_row]:
                     stage_reschedule_map[target_row][date_str] = []
                 if stage_abbr not in stage_reschedule_map[target_row][date_str]:
                     stage_reschedule_map[target_row][date_str].append(stage_abbr)
 
+        # ==========================================
+        # 2. SETUP EXCEL & HEADERS
+        # ==========================================
         wb = Workbook()
         ws = wb.active
         ws.title = "Schedule_Tracker"
         
-        # Colors matching the image
-        yellow_header_fill = PatternFill(start_color="FFC000", end_color="FFC000", fill_type="solid")
-        light_blue_header = PatternFill(start_color="9BC2E6", end_color="9BC2E6", fill_type="solid")
-        gray_actual_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+        # Styles
+        gray_header = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        light_blue_header = PatternFill(start_color="B4C7E7", end_color="B4C7E7", fill_type="solid")
+        orange_header = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
+        green_fill = PatternFill(start_color="00FF00", end_color="00FF00", fill_type="solid")
+        orange_fill = PatternFill(start_color="FFA500", end_color="FFA500", fill_type="solid")
         cyan_fill = PatternFill(start_color="00FFFF", end_color="00FFFF", fill_type="solid")
         yellow_fill = PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid")
-        orange_fill = PatternFill(start_color="FF9900", end_color="FF9900", fill_type="solid")
+        light_gray = PatternFill(start_color="D3D3D3", end_color="D3D3D3", fill_type="solid")
+        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
         
         thin_border = Border(left=Side(style='thin'), right=Side(style='thin'), top=Side(style='thin'), bottom=Side(style='thin'))
+        medium_border = Border(left=Side(style='medium'), right=Side(style='medium'), top=Side(style='medium'), bottom=Side(style='medium'))
 
-        
-        # 2. CALCULATE DATES
+        # Timeline
         project_start = project.start_date
         project_end = project.end_date
+        
+        if not project_start or not project_end:
+            print(f"⚠️ Project {project_id} missing start/end dates")
+            return None
+            
         all_dates = []
         current_date = project_start
         while current_date <= project_end:
             all_dates.append(current_date)
             current_date += timedelta(days=1)
-            
-        if not all_dates:  
-            all_dates = [datetime.now()]
 
-        # 3. NOW SET COLUMN WIDTHS (Because 'ws' and 'all_dates' both exist now!)
-        # ==========================================
-        # SET COLUMN WIDTHS (Including narrow weekends)
-        # ==========================================
-        ws.column_dimensions['A'].width = 25
-        
-        for i, d in enumerate(all_dates):
-            col_letter = get_column_letter(i + 2)
-            ds = d.strftime('%Y-%m-%d')
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and ds not in working_saturdays
-            
-            if is_sunday or is_non_working_saturday:
-                # 🛑 Reduce width for weekend columns
-                ws.column_dimensions[col_letter].width = 3
-            else:
-                # 🟢 Standard width for working days
-                ws.column_dimensions[col_letter].width = 6      
-                
-        # Set standard width for a few trailing blank columns at the end
-        for i in range(len(all_dates) + 2, len(all_dates) + 6):
-            ws.column_dimensions[get_column_letter(i)].width = 6
+        if not all_dates:
+            print(f"⚠️ No dates in project range")
+            return None
+
+        current_row = 1
+
+        # Set Widths
+        ws.column_dimensions['A'].width = 28
+        ws.column_dimensions['B'].width = 28
+        ws.column_dimensions['C'].width = 28
+        ws.column_dimensions['D'].width = 28
+        ws.column_dimensions['E'].width = 28
+        for i in range(6, len(all_dates) + 10):
+            ws.column_dimensions[get_column_letter(i)].width = 15
 
         # ==========================================
-        # 1. TOP HEADER (Matches Image exactly)
-        # ==========================================
-        ws.merge_cells('A2:A5')
-        try:
-            from openpyxl.drawing.image import Image as OpenpyxlImage
-            import os
-            img_path = 'sienna_logo.png' # Using the logo uploaded if exists
-            if os.path.exists(img_path):
-                img = OpenpyxlImage(img_path)
-                img.width = 170
-                img.height = 70
-                ws.add_image(img, "A2")
-            else:
-                c_logo = ws.cell(2, 1, value="Sienna Ecad\nTechnologies")
-                c_logo.font = Font(bold=True, italic=True, size=14, color="000080")
-                c_logo.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-        except Exception as e:
-            c_logo = ws.cell(2, 1, value="Sienna Ecad\nTechnologies")
-            c_logo.font = Font(bold=True, italic=True, size=14, color="000080")
-            c_logo.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-
-        ws.merge_cells('B2:M2')
-        c_title = ws.cell(2, 2, value="Sienna Ecad Technologies")
-        c_title.fill = yellow_header_fill
-        c_title.font = Font(bold=True, size=20, color="FFFFFF")
-        c_title.alignment = Alignment(horizontal='center', vertical='center')
-
-        ws.merge_cells('B3:E3')
-        ws.cell(3, 2, value="JOB NO.")
-        ws.merge_cells('F3:M3')
-        ws.cell(3, 6, value=project.name)
-
-        ws.merge_cells('B4:E4')
-        ws.cell(4, 2, value="CLINT NAME")
-        ws.merge_cells('F4:M4')
-        ws.cell(4, 6, value=getattr(project, 'client_name', 'XYZ') or 'XYZ')
-
-        ws.merge_cells('B5:E5')
-        ws.cell(5, 2, value="PROJECT MANEGER")
-        ws.merge_cells('F5:M5')
-        ws.cell(5, 6, value=getattr(project, 'project_manager', 'XYZ') or 'XYZ')
-
-        # Borders for Header
-        for r in range(2, 6):
-            ws.cell(r, 1).border = thin_border
-            for c in range(2, 14):
-                ws.cell(r, c).border = thin_border
-
-        # ==========================================
-        # 2. MAIN TIMELINE (First column shifted left)
-        # ==========================================
-        current_row = 7
-
-        # Date & Month Header
-        ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row+1, end_column=1)
-        c = ws.cell(current_row, 1, value="Date")
-        c.fill = light_blue_header
-        c.border = thin_border
-        c.alignment = Alignment(horizontal='center', vertical='center')
-        c.font = Font(bold=True)
-
-        ws.merge_cells(start_row=current_row, start_column=2, end_row=current_row, end_column=len(all_dates)+1)
-        c = ws.cell(current_row, 2, value=all_dates[0].strftime('%b-%y'))
-        c.fill = light_blue_header
-        c.border = thin_border
-        c.alignment = Alignment(horizontal='center', vertical='center')
-        c.font = Font(bold=True)
-        current_row += 1
-
-        # Day Numbers
-        for i, d in enumerate(all_dates):
-            c = ws.cell(current_row, i+2, value=d.day)
-            c.fill = yellow_header_fill
-            c.border = thin_border
-            c.alignment = Alignment(horizontal='center', vertical='center')
-            c.font = Font(bold=True)
-        current_row += 1
-
-        # Planned Row
-        ws.cell(current_row, 1, value="Planned").border = thin_border
-        ws.cell(current_row, 1).font = Font(bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(horizontal='center', vertical='center')
-        
-        planned_map = {}
-        for stage in stages:
-            parts = stage.name.split('-')
-            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            stage_tasks = StageDailyTask.query.filter_by(project_id=project_id, stage_id=stage.id).all()
-            if stage_tasks:
-                for t in stage_tasks:
-                    orig = t.original_date if t.original_date else t.scheduled_date
-                    ds = orig.strftime('%Y-%m-%d')
-                    if ds not in planned_map: planned_map[ds] = []
-                    if abbr not in planned_map[ds]: planned_map[ds].append(abbr)
-            else:
-                if stage.start_date and stage.end_date:
-                    d = stage.start_date
-                    while d <= stage.end_date:
-                        if is_working_day(d, False, working_saturdays):
-                            ds = d.strftime('%Y-%m-%d')
-                            if ds not in planned_map: planned_map[ds] = []
-                            if abbr not in planned_map[ds]: planned_map[ds].append(abbr)
-                        d += timedelta(days=1)
-                    
-        for i, d in enumerate(all_dates):
-            cell = ws.cell(current_row, i+2)
-            ds = d.strftime('%Y-%m-%d')
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-            
-            if ds in planned_map:
-                cell.value = ' , '.join(sorted(set(planned_map[ds])))
-                cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
-                cell.font = Font(size=8, bold=True)
-            if is_sunday or is_non_working_saturday: cell.fill = yellow_fill
-            cell.border = thin_border
-        ws.row_dimensions[current_row].height = 25
-        current_row += 1
-
-        # Reschedule Rows (1-4)
-        for r_num in range(1, 5):
-            ws.cell(current_row, 1, value=f"Reschedule -{r_num}").border = thin_border
-            ws.cell(current_row, 1).font = Font(bold=True)
-            ws.cell(current_row, 1).alignment = Alignment(horizontal='center', vertical='center')
-            r_data = stage_reschedule_map.get(r_num, {})
-            for i, d in enumerate(all_dates):
-                cell = ws.cell(current_row, i+2)
-                ds = d.strftime('%Y-%m-%d')
-                is_sunday = d.weekday() == 6
-                is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-                
-                if ds in r_data:
-                    cell.value = ' , '.join(sorted(set(r_data[ds])))
-                    cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
-                    cell.font = Font(size=8, bold=True)
-                if is_sunday or is_non_working_saturday: cell.fill = yellow_fill
-                cell.border = thin_border
-            ws.row_dimensions[current_row].height = 25
-            current_row += 1
-
-        # Actual Row
-        ws.cell(current_row, 1, value="Actual").border = thin_border
-        ws.cell(current_row, 1).fill = gray_actual_fill
-        ws.cell(current_row, 1).font = Font(bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(horizontal='center', vertical='center')
-
-        actual_map, hold_dates_map = {}, {}
-        for stage in stages:
-            parts = stage.name.split('-')
-            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
-            for t in tasks:
-                ds = t.scheduled_date.strftime('%Y-%m-%d')
-                if t.status == 'hold':
-                    if ds not in hold_dates_map: hold_dates_map[ds] = []
-                    if abbr not in hold_dates_map[ds]: hold_dates_map[ds].append(abbr)
-                else:
-                    if ds not in actual_map: actual_map[ds] = []
-                    actual_map[ds].append((abbr, t.status))
-                
-                if t.original_date and t.original_date != t.scheduled_date and t.status == 'rescheduled':
-                    hds = t.original_date.strftime('%Y-%m-%d')
-                    if hds not in hold_dates_map: hold_dates_map[hds] = []
-                    if abbr not in hold_dates_map[hds]: hold_dates_map[hds].append(abbr)
-                        
-        for i, d in enumerate(all_dates):
-            cell = ws.cell(current_row, i+2)
-            ds = d.strftime('%Y-%m-%d')
-            active = actual_map.get(ds, [])
-            active_abbrs = set(x[0] for x in active)
-            hold_abbrs = set(hold_dates_map.get(ds, []))
-            real_holds = hold_abbrs - active_abbrs
-            
-            parts = []
-            if real_holds: parts.append(f"{' , '.join(sorted(real_holds))}=HOLD")
-            if active_abbrs: parts.append(' , '.join(sorted(active_abbrs)))
-            if parts: cell.value = ' , '.join(parts)
-            
-            cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
-            cell.font = Font(size=8, bold=True)
-            cell.border = thin_border
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-            
-            if is_sunday or is_non_working_saturday: cell.fill = yellow_fill
-            elif real_holds: cell.fill = orange_fill
-            elif active_abbrs:
-                stats = set(x[1] for x in active)
-                if 'rescheduled' in stats: cell.fill = cyan_fill
-        ws.row_dimensions[current_row].height = 25
-        current_row += 1
-
-        # Remarks Row
-        ws.cell(current_row, 1, value="Remarks").border = thin_border
-        ws.cell(current_row, 1).font = Font(size=10, italic=True, bold=True)
-        ws.cell(current_row, 1).alignment = Alignment(vertical='center', horizontal='center')
-
-        for i, d in enumerate(all_dates):
-            ds = d.strftime('%Y-%m-%d')
-            active = actual_map.get(ds, [])
-            active_abbrs = set(x[0] for x in active)
-            hold_abbrs = set(hold_dates_map.get(ds, []))
-            real_holds = hold_abbrs - active_abbrs
-            cell = ws.cell(current_row, i+2)
-            is_sunday = d.weekday() == 6
-            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
-            
-            if real_holds:
-                reason = "Waiting for issue tracker"
-                cell.value = reason
-                cell.alignment = Alignment(text_rotation=0, horizontal='left', vertical='top', wrap_text=True)
-                cell.font = Font(size=8)
-            elif is_sunday or is_non_working_saturday: 
-                cell.fill = yellow_fill
-            cell.border = thin_border
-        ws.row_dimensions[current_row].height = 40
-        current_row += 3
-        
-        # ==========================================
-        # 3. MOVED TOP TABLE TO BOTTOM SIDE
+        # STAGE DETAILS TABLE (TOP SECTION)
         # ==========================================
         stage_list = []
         for stage in stages:
@@ -457,104 +262,413 @@ def generate_excel_file(project_id, save_to_backend=True):
             else:
                 stage_list.append(stage.name)
         
-        # Define the column slots matching your layout:
-        # A(1), B:D(2-4), E:G(5-7), H:K(8-11), L:N(12-14)
-        slots = [
-            (1, 1),    # Slot 1: Col A
-            (2, 4),    # Slot 2: Col B to D
-            (5, 7),    # Slot 3: Col E to G
-            (8, 11),   # Slot 4: Col H to K
-            (12, 14)   # Slot 5: Col L to N
-        ]
-        
         max_cols = 5
         table_row = current_row
         col_idx = 0
         
         for stage_text in stage_list:
-            start_col, end_col = slots[col_idx]
+            col = col_idx + 1
             
-            # Write value to the first cell
-            cell = ws.cell(table_row, start_col, value=stage_text)
-            cell.font = Font(size=9, bold=True)
+            cell = ws.cell(table_row, col, value=stage_text)
+            cell.fill = white_fill
+            cell.border = thin_border
+            cell.font = Font(size=10, bold=True)
             cell.alignment = Alignment(horizontal='left', vertical='center')
-            
-            # Apply borders to ALL cells in the group to ensure proper rendering
-            for c in range(start_col, end_col + 1):
-                ws.cell(table_row, c).border = thin_border
-            
-            # Merge the columns
-            if start_col != end_col:
-                ws.merge_cells(start_row=table_row, start_column=start_col, end_row=table_row, end_column=end_col)
             
             col_idx += 1
             if col_idx >= max_cols:
                 col_idx = 0
                 table_row += 1
         
-        # Fill the remaining empty cells in the last row so the table grid is complete
         if col_idx > 0:
-            while col_idx < max_cols:
-                start_col, end_col = slots[col_idx]
-                for c in range(start_col, end_col + 1):
-                    ws.cell(table_row, c).border = thin_border
-                
-                if start_col != end_col:
-                    ws.merge_cells(start_row=table_row, start_column=start_col, end_row=table_row, end_column=end_col)
-                col_idx += 1
             table_row += 1
         
         current_row = table_row + 2
 
         # ==========================================
-        # 4. LEGEND TABLE (Bottom)
+        # HEADER ROW 1: Month-Year header
+        # ==========================================
+        ws.cell(current_row, 1, value="")
+        ws.cell(current_row, 1).border = thin_border
+        
+        ws.cell(current_row, 2, value="")
+        ws.cell(current_row, 2).fill = gray_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        start_col = 3
+        end_col = len(all_dates) + 2
+        ws.merge_cells(start_row=current_row, start_column=start_col, end_row=current_row, end_column=end_col)
+        
+        month_year_text = all_dates[0].strftime('%b-%y')
+        cell = ws.cell(current_row, start_col, value=month_year_text)
+        cell.fill = orange_header
+        cell.border = thin_border
+        cell.alignment = Alignment(horizontal='center', vertical='center')
+        cell.font = Font(bold=True, size=11)
+        
+        header_row_1 = current_row
+        current_row += 1
+
+        # ==========================================
+        # HEADER ROW 2: Day numbers
+        # ==========================================
+        ws.cell(current_row, 1, value="")
+        ws.cell(current_row, 1).border = thin_border
+        
+        ws.cell(current_row, 2, value="")
+        ws.cell(current_row, 2).fill = gray_header
+        ws.cell(current_row, 2).border = thin_border
+        
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3, value=d.day)
+            cell.fill = light_blue_header
+            cell.border = thin_border
+            cell.alignment = Alignment(horizontal='center', vertical='center')
+            cell.font = Font(bold=True, size=11)
+        
+        header_row_2 = current_row
+        current_row += 1
+
+        # Merge A and B for Project Name and "Date"
+        ws.merge_cells(start_row=header_row_1, start_column=1, end_row=header_row_2, end_column=1)
+        ws.cell(header_row_1, 1, value=project.name)
+        ws.cell(header_row_1, 1).fill = light_blue_header
+        ws.cell(header_row_1, 1).border = thin_border
+        ws.cell(header_row_1, 1).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(header_row_1, 1).font = Font(bold=True, size=12)
+
+        ws.merge_cells(start_row=header_row_1, start_column=2, end_row=header_row_2, end_column=2)
+        ws.cell(header_row_1, 2, value="Date")
+        ws.cell(header_row_1, 2).fill = light_blue_header
+        ws.cell(header_row_1, 2).border = thin_border
+        ws.cell(header_row_1, 2).alignment = Alignment(horizontal='center', vertical='center')
+        ws.cell(header_row_1, 2).font = Font(bold=True, size=11)
+
+        # --- PLANNED ROW ---
+        ws.cell(current_row, 1, value="").border = thin_border
+        ws.cell(current_row, 2, value="Planned").border = thin_border
+        ws.cell(current_row, 2).font = Font(bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+        
+        planned_map = {}
+
+        # ==========================================
+        # FIX: Build planned_map using `planned_date` — the column that is set
+        # ONCE at task creation and NEVER updated by any reschedule or cascade.
+        # This guarantees the Planned row always shows the original project plan
+        # regardless of how many times stages have been rescheduled.
+        # ==========================================
+
+        # Detect "extended" tasks: StageDailyTask rows added via Extend & Reschedule.
+        # These tasks have NO planned_date (they didn't exist in the original plan).
+        # We exclude them from Planned so they only appear in the Reschedule row.
+        all_history_task_ids = set(
+            h.task_id for h in all_history
+            if h.task_id is not None
+        )
+        extended_task_ids = set(
+            t.id for t in StageDailyTask.query.filter_by(
+                project_id=project_id
+            ).filter(
+                StageDailyTask.planned_date == None
+            ).all()
+            if t.id in all_history_task_ids
+        )
+
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            stage_tasks = StageDailyTask.query.filter_by(
+                project_id=project_id, stage_id=stage.id
+            ).all()
+            if stage_tasks:
+                for t in stage_tasks:
+                    # Skip extended tasks — they were added AFTER the original plan
+                    if t.id in extended_task_ids:
+                        continue
+
+                    # ✅ Use planned_date (frozen at creation) — NEVER changes after reschedules
+                    # Fall back to original_date, then scheduled_date for legacy tasks
+                    # that predate the planned_date column
+                    if t.planned_date:
+                        orig = t.planned_date
+                    elif t.original_date:
+                        orig = t.original_date
+                    else:
+                        orig = t.scheduled_date
+
+                    ds = orig.strftime('%Y-%m-%d')
+                    if ds not in planned_map:
+                        planned_map[ds] = []
+                    if abbr not in planned_map[ds]:
+                        planned_map[ds].append(abbr)
+            else:
+                if stage.start_date and stage.end_date:
+                    d = stage.start_date
+                    while d <= stage.end_date:
+                        if is_working_day(d, False, working_saturdays):
+                            ds = d.strftime('%Y-%m-%d')
+                            if ds not in planned_map:
+                                planned_map[ds] = []
+                            if abbr not in planned_map[ds]:
+                                planned_map[ds].append(abbr)
+                        d += timedelta(days=1)
+                    
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            ds = d.strftime('%Y-%m-%d')
+            
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if ds in planned_map:
+                cell.value = ' , '.join(sorted(set(planned_map[ds])))
+                cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+                cell.font = Font(size=9, bold=True)
+            
+            if is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            
+            cell.border = thin_border
+        
+        ws.row_dimensions[current_row].height = 40
+        current_row += 1
+
+        # --- RESCHEDULE ROWS (1-4) ---
+        for r_num in range(1, 5):
+            ws.cell(current_row, 1, value="").border = thin_border
+            ws.cell(current_row, 2, value=f"Reschedule -{r_num}").border = thin_border
+            ws.cell(current_row, 2).font = Font(bold=True)
+            ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+            
+            r_data = stage_reschedule_map.get(r_num, {})
+            
+            for i, d in enumerate(all_dates):
+                cell = ws.cell(current_row, i+3)
+                ds = d.strftime('%Y-%m-%d')
+                
+                is_sunday = d.weekday() == 6
+                is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+                
+                if ds in r_data:
+                    cell.value = ' , '.join(sorted(set(r_data[ds])))
+                    cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+                    cell.font = Font(size=9, bold=True)
+                
+                if is_sunday or is_non_working_saturday:
+                    cell.fill = yellow_fill
+                
+                cell.border = thin_border
+            
+            ws.row_dimensions[current_row].height = 30
+            current_row += 1
+
+        # --- ACTUAL ROW ---
+        ws.cell(current_row, 1, value="").border = thin_border
+        ws.cell(current_row, 2, value="Actual").border = thin_border
+        ws.cell(current_row, 2).fill = PatternFill(start_color="C0C0C0", end_color="C0C0C0", fill_type="solid")
+        ws.cell(current_row, 2).font = Font(bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(horizontal='center', vertical='center')
+
+        actual_map = {}
+        hold_dates_map = {}
+
+        for stage in stages:
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
+            
+            for t in tasks:
+                ds = t.scheduled_date.strftime('%Y-%m-%d')
+                
+                if t.status == 'hold':
+                    if ds not in hold_dates_map:
+                        hold_dates_map[ds] = []
+                    if abbr not in hold_dates_map[ds]:
+                        hold_dates_map[ds].append(abbr)
+                else:
+                    if ds not in actual_map: 
+                        actual_map[ds] = []
+                    actual_map[ds].append((abbr, t.status))
+                
+                if t.original_date and t.original_date != t.scheduled_date and t.status == 'rescheduled':
+                    hds = t.original_date.strftime('%Y-%m-%d')
+                    if hds not in hold_dates_map: 
+                        hold_dates_map[hds] = []
+                    if abbr not in hold_dates_map[hds]:
+                        hold_dates_map[hds].append(abbr)
+                        
+        for i, d in enumerate(all_dates):
+            cell = ws.cell(current_row, i+3)
+            ds = d.strftime('%Y-%m-%d')
+            
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            
+            real_holds = hold_abbrs - active_abbrs
+            
+            parts = []
+            if real_holds: 
+                parts.append(f"{' , '.join(sorted(real_holds))}=HOLD")
+            if active_abbrs: 
+                parts.append(' , '.join(sorted(active_abbrs)))
+            
+            if parts:
+                cell.value = ' , '.join(parts)
+            
+            cell.alignment = Alignment(text_rotation=0, horizontal='center', vertical='center')
+            cell.font = Font(size=9, bold=True)
+            cell.border = thin_border
+            
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            elif real_holds: 
+                cell.fill = orange_fill
+            elif active_abbrs:
+                stats = set(x[1] for x in active)
+                if 'completed' in stats: 
+                    cell.fill = green_fill
+                elif 'rescheduled' in stats: 
+                    cell.fill = cyan_fill
+
+        ws.row_dimensions[current_row].height = 40
+        current_row += 1
+
+        # ==========================================
+        # REMARKS ROW
+        # ==========================================
+        ws.cell(current_row, 1, value="").border = thin_border
+
+        ws.cell(current_row, 2, value="Remarks").border = thin_border
+        ws.cell(current_row, 2).font = Font(size=10, italic=True, bold=True)
+        ws.cell(current_row, 2).alignment = Alignment(vertical='center', horizontal='center')
+
+        for i, d in enumerate(all_dates):
+            ds = d.strftime('%Y-%m-%d')
+            active = actual_map.get(ds, [])
+            active_abbrs = set(x[0] for x in active)
+            hold_abbrs = set(hold_dates_map.get(ds, []))
+            real_holds = hold_abbrs - active_abbrs
+            
+            cell = ws.cell(current_row, i+3)
+            
+            is_sunday = d.weekday() == 6
+            is_non_working_saturday = d.weekday() == 5 and d not in working_saturdays
+            
+            if real_holds:
+                reason = "Waiting for issue tracker"
+                for stage in stages:
+                    parts = stage.name.split('-')
+                    abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+                    if abbr in real_holds:
+                        hold_record = HoldDate.query.filter_by(
+                            project_id=project_id, stage_id=stage.id, hold_date=d
+                        ).first()
+                        if hold_record and hold_record.reason:
+                            reason = hold_record.reason
+                            break
+                        task = StageDailyTask.query.filter_by(
+                            stage_id=stage.id, scheduled_date=d, status='hold'
+                        ).first()
+                        if task and task.rescheduled_reason:
+                            reason = task.rescheduled_reason
+                            break
+                        history = DailyTaskRescheduleHistory.query.filter_by(
+                            project_id=project_id, stage_id=stage.id
+                        ).filter(
+                            DailyTaskRescheduleHistory.original_date == d
+                        ).order_by(DailyTaskRescheduleHistory.rescheduled_at.desc()).first()
+                        if history and history.reason and not history.reason.startswith('Auto-') and not history.reason.startswith('Cascaded'):
+                            reason = history.reason
+                            break
+                
+                cell.value = reason
+                cell.alignment = Alignment(text_rotation=0, horizontal='left', vertical='top', wrap_text=True)
+                cell.font = Font(size=9)
+            elif is_sunday or is_non_working_saturday:
+                cell.fill = yellow_fill
+            
+            cell.border = thin_border
+
+        ws.row_dimensions[current_row].height = 60
+        current_row += 1
+        current_row += 2
+        
+        # ==========================================
+        # LEGEND TABLE
         # ==========================================
         cell_a1 = ws.cell(current_row, 1, value="")
         cell_a1.fill = orange_fill
         cell_a1.border = thin_border
+        
         cell_b1 = ws.cell(current_row, 2, value="Hold")
         cell_b1.border = thin_border
-        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=9)
+        cell_b1.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b1.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
         cell_c1 = ws.cell(current_row, 3, value="If project goes on hold from Customer")
         cell_c1.border = thin_border
-        for col in range(4, 6): ws.cell(current_row, col).border = thin_border
+        cell_c1.alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+        cell_c1.font = Font(size=10)
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
         current_row += 1
         
         cell_a2 = ws.cell(current_row, 1, value="")
         cell_a2.border = thin_border
+        
         cell_b2 = ws.cell(current_row, 2, value="Changes")
         cell_b2.border = thin_border
-        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=9)
+        cell_b2.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b2.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
         cell_c2 = ws.cell(current_row, 3, value="")
         cell_c2.border = thin_border
-        for col in range(4, 6): ws.cell(current_row, col).border = thin_border
+        ws.cell(current_row, 4).border = thin_border
+        
+        ws.row_dimensions[current_row].height = 25
         current_row += 1
         
         cell_a3 = ws.cell(current_row, 1, value="")
         cell_a3.fill = yellow_fill
         cell_a3.border = thin_border
+        
         cell_b3 = ws.cell(current_row, 2, value="Holidays")
         cell_b3.border = thin_border
-        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=9)
+        cell_b3.alignment = Alignment(horizontal='left', vertical='center')
+        cell_b3.font = Font(size=10)
+        
+        ws.merge_cells(start_row=current_row, start_column=3, end_row=current_row, end_column=4)
         cell_c3 = ws.cell(current_row, 3, value="")
         cell_c3.border = thin_border
-        for col in range(4, 6): ws.cell(current_row, col).border = thin_border
+        ws.cell(current_row, 4).border = thin_border
         
-        # Reset A's width since we override it during stages loop
-        ws.column_dimensions['A'].width = 25
+        ws.row_dimensions[current_row].height = 25
         
+        # Save to BytesIO
         excel_file = BytesIO()
         wb.save(excel_file)
         excel_file.seek(0)
         
+        # Save to backend if requested
         if save_to_backend:
             import os
             backend_dir = os.path.join(os.path.dirname(__file__), 'static', 'excel_exports')
             os.makedirs(backend_dir, exist_ok=True)
+            
             backend_filepath = os.path.join(backend_dir, f"{project.name}_Tracker_{project_id}.xlsx")
             with open(backend_filepath, 'wb') as f:
                 f.write(excel_file.getvalue())
-            excel_file.seek(0)
+            
+            print(f"✅ Excel saved to backend: {backend_filepath}")
+            excel_file.seek(0)  # Reset pointer after writing
         
         return excel_file
         
@@ -726,6 +840,7 @@ def generate_daily_tasks_for_project(project_id, working_saturdays=None):
                     project_id=project_id,
                     day_number=day_number,
                     scheduled_date=current_date,
+                    planned_date=current_date,  # ✅ FROZEN - never updated after creation
                     status='pending'
                 )
                 db.session.add(daily_task)
@@ -957,8 +1072,6 @@ def projects():
             
             project = Project(
                 name=data['name'],
-                client_name=data.get('client_name', ''),          # ADD THIS
-                project_manager=data.get('project_manager', ''),  # ADD THIS                
                 description=data.get('description', ''),
                 start_date=project_start_date,
                 end_date=project_end_date,
@@ -996,7 +1109,7 @@ def projects():
             
             db.session.commit()
             
-        # âœ… NEW: Generate daily tasks immediately after project creation
+        # ✅ NEW: Generate daily tasks immediately after project creation
             try:
                 generate_daily_tasks_for_project(project.id, working_saturdays)
                 print(f"\u2714 Generated daily tasks for project {project.id}")
@@ -1064,8 +1177,6 @@ def project_details(project_id):
     data = {
         'id': project.id,
         'name': project.name,
-        'client_name': project.client_name,          # ADD THIS
-        'project_manager': project.project_manager,  # ADD THIS        
         'description': project.description,
         'status': project.status,
         'progress': project.progress,
@@ -1370,6 +1481,7 @@ def update_stage_status(project_id, stage_id):
                         day_number=day_num,
                         scheduled_date=task_date,
                         original_date=task_date,
+                        planned_date=task_date,  # ✅ FROZEN - never updated after creation
                         status='pending'
                     )
                     db.session.add(daily_task)
@@ -1695,6 +1807,7 @@ def get_stage_daily_tasks(project_id, stage_id):
             'day_number': t.day_number,
             'scheduled_date': t.scheduled_date.isoformat(),
             'original_date': t.original_date.isoformat() if t.original_date else None,
+            'planned_date': t.planned_date.isoformat() if t.planned_date else (t.original_date.isoformat() if t.original_date else t.scheduled_date.isoformat()),
             'status': t.status,
             'completed_at': t.completed_at.strftime('%Y-%m-%d %H:%M') if t.completed_at else None,
             'rescheduled_reason': t.rescheduled_reason,
@@ -1767,6 +1880,9 @@ def complete_daily_task(project_id, stage_id, task_id):
 def reschedule_daily_task(project_id, stage_id, task_id):
     data = request.get_json()
     days_to_shift = data.get('days', 0)
+    extend_days = data.get('extend_days', 0)    # ✅ extra days to append to stage
+    mode = data.get('mode', 'shift_by_days')    # ✅ shift_by_days | extend_and_reschedule | to_specific_date
+    target_date_str = data.get('target_date')   # ✅ used by to_specific_date mode
     reason = data.get('reason', '')
     working_saturdays = set(data.get('working_saturdays', []))
     
@@ -1774,6 +1890,32 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         task = StageDailyTask.query.get_or_404(task_id)
         stage = ProjectStage.query.get_or_404(stage_id)
         project = Project.query.get_or_404(project_id)
+
+        # ── to_specific_date: convert target date → working-day shift ──────────
+        if mode == 'to_specific_date' and target_date_str:
+            target_date = datetime.strptime(target_date_str, '%Y-%m-%d').date()
+            current = task.scheduled_date
+            if target_date == current:
+                days_to_shift = 0
+            elif target_date > current:
+                # count working days between current and target (positive)
+                d, count = current + timedelta(days=1), 0
+                while d <= target_date:
+                    if is_working_day(d, False, working_saturdays):
+                        count += 1
+                    d += timedelta(days=1)
+                days_to_shift = count
+            else:
+                # target is in the past — negative shift
+                d, count = target_date + timedelta(days=1), 0
+                while d <= current:
+                    if is_working_day(d, False, working_saturdays):
+                        count += 1
+                    d += timedelta(days=1)
+                days_to_shift = -count
+            print(f"   [to_specific_date] {current} → {target_date} = {days_to_shift} working day(s)")
+            # treat the rest as a normal shift
+            mode = 'shift_by_days'
         
         # PREVENT RESCHEDULING COMPLETED TASKS
         if task.status == 'completed':
@@ -1787,87 +1929,194 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         task.reschedule_count = (task.reschedule_count or 0) + 1
         
         # ✅ FIX: Store CURRENT scheduled_date as original_date for THIS reschedule
-        # This is the date the task is being moved FROM (not the very first original date)
         current_location = task.scheduled_date  # This is where the task is NOW
         
         # Keep track of the very first original date (for reference only)
         if not task.original_date:
             task.original_date = task.scheduled_date
-        
-        # Calculate new date
-        new_date = add_working_days(task.scheduled_date, days_to_shift, False, working_saturdays)
-        
-        task.scheduled_date = new_date
-        task.status = 'rescheduled'
-        task.rescheduled_reason = reason
-        
-        print(f"\n📋 DAILY TASK RESCHEDULE:")
-        print(f"   Stage: {stage.name}, Day {task.day_number}")
-        print(f"   Global Reschedule Number: {global_reschedule_num}")
-        print(f"   Current Location: {current_location} → New: {new_date}")
-        print(f"   Task Reschedule count: {task.reschedule_count}")
-        
-        # ✅ CREATE DAILY TASK HISTORY WITH CURRENT LOCATION (not original_date)
-        task_history = DailyTaskRescheduleHistory(
-            project_id=project_id,
-            stage_id=stage_id,
-            task_id=task.id,
-            day_number=task.day_number,
-            reschedule_number=global_reschedule_num,
-            original_date=current_location,  # ✅ USE CURRENT LOCATION, not task.original_date
-            new_date=new_date,
-            days_shifted=abs(days_to_shift),
-            reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days_to_shift)} day(s)",
-            rescheduled_by=get_current_user().id
-        )
-        db.session.add(task_history)
-        
-        # ✅ REMOVED STAGE-LEVEL HISTORY - IT WAS CREATING DUPLICATE GHOST EVENTS!
-        # Only daily task history should be created for daily task reschedules
-        
-        print(f"   ✅ Created daily task history with global reschedule #{global_reschedule_num}")        
-        # UPDATE SUBSEQUENT NON-COMPLETED TASKS
-        all_stage_tasks = StageDailyTask.query.filter_by(
-            stage_id=stage_id
-        ).filter(
-            StageDailyTask.day_number > task.day_number,
-            StageDailyTask.status != 'completed'
-        ).order_by(StageDailyTask.day_number).all()
-        
-        for subsequent_task in all_stage_tasks:
-            subsequent_task.reschedule_count = (subsequent_task.reschedule_count or 0) + 1
+
+        # ============================================================
+        # EXTEND & RESCHEDULE MODE
+        # ============================================================
+        if mode == 'extend_and_reschedule':
+            print(f"\n📋 EXTEND & RESCHEDULE:")
+            print(f"   Stage: {stage.name}, Selected Day {task.day_number}")
+            print(f"   Shift: {days_to_shift} working day(s), Extend: {extend_days} new day(s)")
+            print(f"   Global Reschedule Number: {global_reschedule_num}")
+
+            # --- STEP 1: Shift selected day AND all subsequent same-stage non-completed tasks ---
+            selected_day_num = task.day_number
+
+            tasks_to_shift = StageDailyTask.query.filter_by(
+                stage_id=stage_id
+            ).filter(
+                StageDailyTask.day_number >= selected_day_num,
+                StageDailyTask.status != 'completed'
+            ).order_by(StageDailyTask.day_number).all()
+
+            for t in tasks_to_shift:
+                t_original_loc = t.scheduled_date
+                if not t.original_date:
+                    t.original_date = t.scheduled_date
+
+                if days_to_shift != 0:
+                    t_new_date = add_working_days(t.scheduled_date, days_to_shift, False, working_saturdays)
+                    t.scheduled_date = t_new_date
+                    t.status = 'rescheduled'
+                    t.reschedule_count = (t.reschedule_count or 0) + 1
+                    if not t.rescheduled_reason:
+                        t.rescheduled_reason = reason or f"Extend & Reschedule: shifted {days_to_shift} day(s)"
+
+                    t_history = DailyTaskRescheduleHistory(
+                        project_id=project_id,
+                        stage_id=stage_id,
+                        task_id=t.id,
+                        day_number=t.day_number,
+                        reschedule_number=global_reschedule_num,
+                        original_date=t_original_loc,
+                        new_date=t_new_date,
+                        days_shifted=abs(days_to_shift),
+                        reason=reason if reason else f"Extend & Reschedule #{global_reschedule_num}: shifted {abs(days_to_shift)} day(s)",
+                        rescheduled_by=get_current_user().id
+                    )
+                    db.session.add(t_history)
+
+            print(f"   ✅ Shifted {len(tasks_to_shift)} existing task(s) from Day {selected_day_num} onwards")
+
+            # --- STEP 2: Append extend_days new tasks after the last existing task ---
+            if extend_days > 0:
+                db.session.flush()  # ensure shifted dates are visible
+                all_stage_tasks_sorted = StageDailyTask.query.filter_by(
+                    stage_id=stage_id
+                ).order_by(StageDailyTask.day_number.desc()).all()
+
+                last_day_num = all_stage_tasks_sorted[0].day_number if all_stage_tasks_sorted else 0
+                last_date = all_stage_tasks_sorted[0].scheduled_date if all_stage_tasks_sorted else stage.end_date
+
+                next_date = add_working_days(last_date, 1, False, working_saturdays)
+                newly_added_tasks = []
+                for i in range(extend_days):
+                    new_day_num = last_day_num + i + 1
+                    new_task_obj = StageDailyTask(
+                        stage_id=stage_id,
+                        project_id=project_id,
+                        day_number=new_day_num,
+                        scheduled_date=next_date,
+                        status='pending'
+                    )
+                    db.session.add(new_task_obj)
+                    newly_added_tasks.append((new_day_num, next_date))
+                    print(f"   ✅ Added new Day {new_day_num} → {next_date}")
+                    next_date = add_working_days(next_date, 1, False, working_saturdays)
+
+                db.session.flush()
+                for new_day_num, new_date_val in newly_added_tasks:
+                    new_task_record = StageDailyTask.query.filter_by(
+                        stage_id=stage_id, day_number=new_day_num
+                    ).first()
+                    if new_task_record:
+                        extended_history = DailyTaskRescheduleHistory(
+                            project_id=project_id,
+                            stage_id=stage_id,
+                            task_id=new_task_record.id,
+                            day_number=new_day_num,
+                            reschedule_number=global_reschedule_num,
+                            original_date=new_date_val,
+                            new_date=new_date_val,
+                            days_shifted=0,
+                            reason=reason if reason else f"Extended: new Day {new_day_num} added via Extend & Reschedule #{global_reschedule_num}",
+                            rescheduled_by=get_current_user().id
+                        )
+                        db.session.add(extended_history)
+                        print(f"   ✅ Created history record for new Day {new_day_num} → {new_date_val}")
+
+                # Increase stage duration to reflect extended days
+                stage.duration_days = (stage.duration_days or 0) + extend_days
+
+            # Update stage start/end based on actual task dates
+            db.session.flush()
+            all_stage_tasks_now = StageDailyTask.query.filter_by(stage_id=stage_id).order_by(StageDailyTask.day_number).all()
+            if all_stage_tasks_now:
+                stage.start_date = min(t.scheduled_date for t in all_stage_tasks_now)
+                stage.end_date = max(t.scheduled_date for t in all_stage_tasks_now)
+                print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
+
+            # Capture new_date for the return payload (selected task's new date after shift)
+            db.session.flush()
+            updated_task = StageDailyTask.query.get(task_id)
+            new_date = updated_task.scheduled_date if updated_task else add_working_days(current_location, days_to_shift, False, working_saturdays)
+
+        else:
+            # ============================================================
+            # ORIGINAL SHIFT-BY-DAYS (and to_specific_date) LOGIC — unchanged
+            # ============================================================
+            new_date = add_working_days(task.scheduled_date, days_to_shift, False, working_saturdays)
             
-            # ✅ FIX: Use CURRENT scheduled_date as the "from" location
-            subsequent_current_location = subsequent_task.scheduled_date
+            task.scheduled_date = new_date
+            task.status = 'rescheduled'
+            task.rescheduled_reason = reason
             
-            if not subsequent_task.original_date:
-                subsequent_task.original_date = subsequent_task.scheduled_date
+            print(f"\n📋 DAILY TASK RESCHEDULE:")
+            print(f"   Stage: {stage.name}, Day {task.day_number}")
+            print(f"   Global Reschedule Number: {global_reschedule_num}")
+            print(f"   Current Location: {current_location} → New: {new_date}")
+            print(f"   Task Reschedule count: {task.reschedule_count}")
             
-            subsequent_new_date = add_working_days(
-                subsequent_task.scheduled_date, 
-                days_to_shift, 
-                False, 
-                working_saturdays
-            )
-            
-            subsequent_task.scheduled_date = subsequent_new_date
-            subsequent_task.status = 'rescheduled'
-            if not subsequent_task.rescheduled_reason:
-                subsequent_task.rescheduled_reason = f"Auto-shifted due to Day {task.day_number} reschedule"
-            
-            subsequent_history = DailyTaskRescheduleHistory(
+            task_history = DailyTaskRescheduleHistory(
                 project_id=project_id,
                 stage_id=stage_id,
-                task_id=subsequent_task.id,
-                day_number=subsequent_task.day_number,
+                task_id=task.id,
+                day_number=task.day_number,
                 reschedule_number=global_reschedule_num,
-                original_date=subsequent_current_location,  # ✅ USE CURRENT LOCATION
-                new_date=subsequent_new_date,
+                original_date=current_location,
+                new_date=new_date,
                 days_shifted=abs(days_to_shift),
-                reason=f"Auto-reschedule due to Day {task.day_number}",
+                reason=reason if reason else f"Reschedule #{global_reschedule_num}: Shifted {abs(days_to_shift)} day(s)",
                 rescheduled_by=get_current_user().id
             )
-            db.session.add(subsequent_history)
+            db.session.add(task_history)
+            
+            print(f"   ✅ Created daily task history with global reschedule #{global_reschedule_num}")        
+            # UPDATE SUBSEQUENT NON-COMPLETED TASKS
+            all_stage_tasks = StageDailyTask.query.filter_by(
+                stage_id=stage_id
+            ).filter(
+                StageDailyTask.day_number > task.day_number,
+                StageDailyTask.status != 'completed'
+            ).order_by(StageDailyTask.day_number).all()
+            
+            for subsequent_task in all_stage_tasks:
+                subsequent_task.reschedule_count = (subsequent_task.reschedule_count or 0) + 1
+                subsequent_current_location = subsequent_task.scheduled_date
+                
+                if not subsequent_task.original_date:
+                    subsequent_task.original_date = subsequent_task.scheduled_date
+                
+                subsequent_new_date = add_working_days(
+                    subsequent_task.scheduled_date, 
+                    days_to_shift, 
+                    False, 
+                    working_saturdays
+                )
+                
+                subsequent_task.scheduled_date = subsequent_new_date
+                subsequent_task.status = 'rescheduled'
+                if not subsequent_task.rescheduled_reason:
+                    subsequent_task.rescheduled_reason = f"Auto-shifted due to Day {task.day_number} reschedule"
+                
+                subsequent_history = DailyTaskRescheduleHistory(
+                    project_id=project_id,
+                    stage_id=stage_id,
+                    task_id=subsequent_task.id,
+                    day_number=subsequent_task.day_number,
+                    reschedule_number=global_reschedule_num,
+                    original_date=subsequent_current_location,
+                    new_date=subsequent_new_date,
+                    days_shifted=abs(days_to_shift),
+                    reason=f"Auto-reschedule due to Day {task.day_number}",
+                    rescheduled_by=get_current_user().id
+                )
+                db.session.add(subsequent_history)
         
         # Update stage dates based on actual task dates
         all_tasks_in_stage = StageDailyTask.query.filter_by(stage_id=stage_id).order_by(
@@ -1880,8 +2129,11 @@ def reschedule_daily_task(project_id, stage_id, task_id):
             print(f"   ✅ Updated stage dates: {stage.start_date} to {stage.end_date}")
 
         # ── CASCADE TO SUBSEQUENT STAGES ──────────────────────────────────────────
-        # Shift all daily tasks in stages that come after the rescheduled stage,
-        # and create DailyTaskRescheduleHistory records so they appear in Reschedule rows.
+        if mode == 'extend_and_reschedule':
+            cascade_shift = days_to_shift + extend_days
+        else:
+            cascade_shift = days_to_shift
+
         subsequent_stages = ProjectStage.query.filter(
             ProjectStage.project_id == project_id,
             ProjectStage.order > stage.order,
@@ -1892,11 +2144,11 @@ def reschedule_daily_task(project_id, stage_id, task_id):
             # Shift stage-level dates
             if sub_stage.start_date:
                 sub_stage.start_date = add_working_days(
-                    sub_stage.start_date, days_to_shift, False, working_saturdays
+                    sub_stage.start_date, cascade_shift, False, working_saturdays
                 )
             if sub_stage.end_date:
                 sub_stage.end_date = add_working_days(
-                    sub_stage.end_date, days_to_shift, False, working_saturdays
+                    sub_stage.end_date, cascade_shift, False, working_saturdays
                 )
 
             # Shift each daily task and record history
@@ -1914,7 +2166,7 @@ def reschedule_daily_task(project_id, stage_id, task_id):
                     sub_task.original_date = sub_task.scheduled_date
 
                 sub_new_date = add_working_days(
-                    sub_task.scheduled_date, days_to_shift, False, working_saturdays
+                    sub_task.scheduled_date, cascade_shift, False, working_saturdays
                 )
                 sub_task.scheduled_date = sub_new_date
                 # Keep status as pending (seamless cascade, not a user-visible reschedule)
@@ -1922,7 +2174,6 @@ def reschedule_daily_task(project_id, stage_id, task_id):
                     sub_task.status = 'pending'
 
                 # Create history record with the SAME global reschedule number
-                # so it appears in the correct Reschedule-N row
                 sub_history = DailyTaskRescheduleHistory(
                     project_id=project_id,
                     stage_id=sub_stage.id,
@@ -1931,20 +2182,18 @@ def reschedule_daily_task(project_id, stage_id, task_id):
                     reschedule_number=global_reschedule_num,
                     original_date=sub_original_location,
                     new_date=sub_new_date,
-                    days_shifted=abs(days_to_shift),
+                    days_shifted=abs(cascade_shift),
                     reason=f"Cascaded from {stage.name} reschedule #{global_reschedule_num}",
                     rescheduled_by=get_current_user().id
                 )
                 db.session.add(sub_history)
 
-            print(f"   ↪️ Cascaded to subsequent stage: {sub_stage.name}")
+            print(f"   ↪️ Cascaded to subsequent stage: {sub_stage.name} (shift={cascade_shift})")
         # ── END CASCADE ───────────────────────────────────────────────────────────
 
         # ✅ UPDATE PROJECT END DATE
-        # Flush to ensure all stage date updates are visible to queries
         db.session.flush()
         
-        # Recalculate project end date based on the latest stage end date
         all_stages = ProjectStage.query.filter_by(project_id=project_id).all()
         if all_stages:
             latest_end = max((s.end_date for s in all_stages if s.end_date), default=None)
@@ -2087,6 +2336,7 @@ def generate_daily_tasks(project_id):
                         project_id=project_id,
                         day_number=day_number,
                         scheduled_date=current_date,
+                        planned_date=current_date,  # ✅ FROZEN - never updated after creation
                         status='pending'
                     )
                     db.session.add(daily_task)
@@ -2121,6 +2371,7 @@ def get_all_project_daily_tasks(project_id):
             'day_number': task.day_number,
             'scheduled_date': task.scheduled_date.isoformat() if task.scheduled_date else None,
             'original_date': task.original_date.isoformat() if task.original_date else None,
+            'planned_date': task.planned_date.isoformat() if task.planned_date else (task.original_date.isoformat() if task.original_date else (task.scheduled_date.isoformat() if task.scheduled_date else None)),
             'status': task.status,
             'completed_at': task.completed_at.isoformat() if task.completed_at else None,
             'reschedule_count': task.reschedule_count or 0
@@ -2225,8 +2476,6 @@ def get_complete_reschedule_history(project_id):
 def export_project_to_excel(project_id):
     """
     Generate Excel with stage-specific reschedule rows, clean weekly timeline, and correct Hold coloring.
-    
-    This uses the generate_excel_file() helper which saves to backend automatically.
     """
     try:
         excel_file = generate_excel_file(project_id, save_to_backend=True)
@@ -2277,10 +2526,7 @@ def update_project(project_id):
         data = request.get_json()
         
         # ✅ COMPLETELY REPLACE THE OLD DATA WITH NEW DATA
-        # This is the correct approach - overwrite the original
         project.name = data.get('name', project.name)
-        project.client_name = data.get('client_name', project.client_name)          #  ADD THIS
-        project.project_manager = data.get('project_manager', project.project_manager) #  ADD THIS        
         project.description = data.get('description', project.description)
         
         # Update working Saturdays - REPLACES old data
@@ -2307,7 +2553,6 @@ def update_project(project_id):
             
             
             # ✅ CRITICAL FIX: Delete stages that were unchecked (not in the update)
-            # Get IDs of stages that are being kept/updated
             kept_stage_ids = set()
             for stage_data in calculated_stages:
                 if 'id' in stage_data and stage_data['id']:
@@ -2317,38 +2562,26 @@ def update_project(project_id):
             existing_stages = ProjectStage.query.filter_by(project_id=project.id).all()
             for existing_stage in existing_stages:
                 if existing_stage.id not in kept_stage_ids:
-                    # This stage was unchecked - delete it and its related data
                     print(f"🗑️ Deleting unchecked stage: {existing_stage.name} (ID: {existing_stage.id})")
                     
-                    # Delete related daily tasks
                     StageDailyTask.query.filter_by(stage_id=existing_stage.id).delete()
-                    
-                    # Delete related schedule history
                     ScheduleHistory.query.filter_by(stage_id=existing_stage.id).delete()
-                    
-                    # Delete related reschedule history
                     DailyTaskRescheduleHistory.query.filter_by(stage_id=existing_stage.id).delete()
-                    
-                    # Delete related hold dates
                     HoldDate.query.filter_by(stage_id=existing_stage.id).delete()
-                    
-                    # Delete the stage itself
                     db.session.delete(existing_stage)
-            # Update or create stages - THIS REPLACES THE OLD STAGE DATA
+
             for stage_data in calculated_stages:
                 if 'id' in stage_data and stage_data['id']:
-                    # ✅ UPDATE EXISTING STAGE - REPLACES ALL FIELDS
                     stage = ProjectStage.query.get(stage_data['id'])
                     if stage:
-                        stage.name = stage_data['name']  # NEW name replaces old
-                        stage.order = stage_data['order']  # NEW order replaces old
-                        stage.duration_days = stage_data['duration_days']  # NEW duration replaces old
-                        stage.start_date = stage_data['start_date']  # NEW start_date replaces old
-                        stage.end_date = stage_data['end_date']  # NEW end_date replaces old
-                        stage.manager_id = stage_data.get('manager_id')  # NEW manager replaces old
-                        stage.parallel_group_id = stage_data.get('parallel_group_id')  # NEW parallel group
+                        stage.name = stage_data['name']
+                        stage.order = stage_data['order']
+                        stage.duration_days = stage_data['duration_days']
+                        stage.start_date = stage_data['start_date']
+                        stage.end_date = stage_data['end_date']
+                        stage.manager_id = stage_data.get('manager_id')
+                        stage.parallel_group_id = stage_data.get('parallel_group_id')
                 else:
-                    # ✅ CREATE NEW STAGE
                     stage = ProjectStage(
                         project_id=project.id,
                         name=stage_data['name'],
@@ -2378,10 +2611,10 @@ def update_project(project_id):
         fresh_tasks = StageDailyTask.query.filter_by(project_id=project.id).all()
         for ft in fresh_tasks:
             ft.original_date = ft.scheduled_date
-        print(f"✅ Reset original_date baseline for {len(fresh_tasks)} tasks after edit")
+            ft.planned_date = ft.scheduled_date  # ✅ Re-freeze planned_date to new baseline after edit
+        print(f"✅ Reset original_date and planned_date baseline for {len(fresh_tasks)} tasks after edit")
         
         # ✅ SAVE ALL CHANGES TO DATABASE
-        # This commits all the replaced/updated data
         db.session.commit()
         
         # ✅ AUTOMATICALLY SHIFT TASKS TO FILL GAPS AFTER UPDATE
@@ -2395,11 +2628,10 @@ def update_project(project_id):
         except Exception as e:
             print(f"Warning: Excel generation failed: {e}")
         
-        # The edited data is now the NEW ORIGINAL data
         return jsonify({
             'success': True,
             'id': project.id,
-            'auto_shift_result': shift_result  # Include shift info in response
+            'auto_shift_result': shift_result
         }), 200
         
     except Exception as e:
@@ -2622,15 +2854,7 @@ def init_db():
                     conn.commit()
                 print("[SUCCESS] Added current_reschedule_number column")
 
-            # ADD THESE LINES TO UPDATE EXISTING DATABASE
-            if 'client_name' not in project_columns:
-                with db.engine.connect() as conn:
-                    conn.execute(text("ALTER TABLE project ADD COLUMN client_name VARCHAR(200)"))
-                    conn.execute(text("ALTER TABLE project ADD COLUMN project_manager VARCHAR(200)"))
-                    conn.commit()
-                print("✅ Added client_name and project_manager columns")           
-
-
+            
             # ==========================================
             # 1. SCHEDULE_HISTORY TABLE (Stage-level reschedules)
             # ==========================================
@@ -2647,7 +2871,6 @@ def init_db():
             if existing_records:
                 print(f"[INFO] Checking {len(existing_records)} existing reschedule records...")
                 
-                # Group by project_id and stage_id
                 from collections import defaultdict
                 grouped = defaultdict(list)
                 
@@ -2655,7 +2878,6 @@ def init_db():
                     key = (record.project_id, record.stage_id)
                     grouped[key].append(record)
                 
-                # Number them sequentially per stage
                 for (proj_id, stage_id), records in grouped.items():
                     records.sort(key=lambda r: r.rescheduled_at)
                     for idx, record in enumerate(records, 1):
@@ -2667,7 +2889,7 @@ def init_db():
                 print("[SUCCESS] Backfilled reschedule numbers for stage-level reschedules")
             
             # ==========================================
-            # 2. STAGE_DAILY_TASK TABLE (Add reschedule_count)
+            # 2. STAGE_DAILY_TASK TABLE (Add reschedule_count + planned_date)
             # ==========================================
             if inspector.has_table('stage_daily_task'):
                 task_columns = [col['name'] for col in inspector.get_columns('stage_daily_task')]
@@ -2677,6 +2899,41 @@ def init_db():
                         conn.execute(text("ALTER TABLE stage_daily_task ADD COLUMN reschedule_count INTEGER DEFAULT 0"))
                         conn.commit()
                     print("[SUCCESS] Added reschedule_count column to stage_daily_task")
+                
+                # ✅ NEW: Add planned_date column — frozen at task creation, never updated
+                if 'planned_date' not in task_columns:
+                    print("[INFO] Adding planned_date column to stage_daily_task...")
+                    with db.engine.connect() as conn:
+                        conn.execute(text("ALTER TABLE stage_daily_task ADD COLUMN planned_date DATE"))
+                        conn.commit()
+                    print("[SUCCESS] Added planned_date column to stage_daily_task")
+                    
+                    # Backfill planned_date for existing tasks.
+                    # For tasks with no reschedule history, planned_date = scheduled_date (they haven't moved).
+                    # For tasks with history, planned_date = the earliest original_date in their history.
+                    print("[INFO] Backfilling planned_date for existing tasks...")
+                    
+                    # Build earliest original_date per task from history
+                    from collections import defaultdict
+                    earliest_original = defaultdict(lambda: None)
+                    all_hist = DailyTaskRescheduleHistory.query.all()
+                    for h in all_hist:
+                        if h.task_id:
+                            cur = earliest_original[h.task_id]
+                            if cur is None or h.original_date < cur:
+                                earliest_original[h.task_id] = h.original_date
+                    
+                    all_existing_tasks = StageDailyTask.query.all()
+                    for et in all_existing_tasks:
+                        if et.id in earliest_original and earliest_original[et.id]:
+                            et.planned_date = earliest_original[et.id]
+                        elif et.original_date:
+                            et.planned_date = et.original_date
+                        else:
+                            et.planned_date = et.scheduled_date
+                    
+                    db.session.commit()
+                    print(f"[SUCCESS] Backfilled planned_date for {len(all_existing_tasks)} tasks")
             else:
                 db.create_all()
                 print("✅ Created stage_daily_task table")
@@ -2786,27 +3043,6 @@ if __name__ == '__main__':
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -2825,7 +3061,7 @@ if __name__ == '__main__':
 body {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     min-height: 100vh;
-    padding: 10px;
+    padding: 20px;
 }
 
 .stat-card {
@@ -4812,14 +5048,7 @@ span[style*="background: rgb(102, 126, 234)"] {
                         <label class="form-label">Job Number</label>
                         <input type="text" class="form-control form-control-sm" id="projectName" required placeholder="Enter job number">
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label">Client Name</label>
-                        <input type="text" class="form-control form-control-sm" id="clientName" placeholder="Enter client name">
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">Project Manager</label>
-                        <input type="text" class="form-control form-control-sm" id="projectManager" placeholder="Enter project manager">
-                    </div>
+                    <!-- REMOVED DESCRIPTION FIELD -->
                     <div class="mb-3">
                         <label class="form-label">Start Date</label>
                         <input type="date" class="form-control form-control-sm" id="projectStartDate" required onchange="updateProjectEndDate()">
@@ -5005,35 +5234,26 @@ span[style*="background: rgb(102, 126, 234)"] {
                                   placeholder="e.g., Resource availability..."></textarea>
                     </div>
                     
-                    <!-- Impact Warning + Cascade Preview -->
-                    <div id="rescheduleImpactWarning" style="display: none;">
-                        <!-- Summary alert -->
-                        <div class="alert alert-warning py-2 mb-2" style="font-size: 0.85rem;">
-                            <i class="fas fa-exclamation-triangle me-2"></i>
-                            <span id="rescheduleImpactText"></span>
-                        </div>
-                        <!-- Cascade chain table -->
-                        <div id="cascadePreviewBox" style="display:none; background:#f8f9fa; border-radius:10px; padding:12px; border:1px solid #dee2e6;">
-                            <div class="d-flex align-items-center mb-2" style="font-size:0.8rem; font-weight:700; color:#495057;">
-                                <i class="fas fa-link me-2" style="color:#667eea;"></i>
-                                Cascade Impact — Stages that will shift:
-                            </div>
-                            <div id="cascadePreviewList"></div>
-                        </div>
+                    <!-- Impact Warning -->
+                    <div class="alert alert-warning py-2" id="rescheduleImpactWarning" style="display: none; font-size: 0.85rem;">
+                        <i class="fas fa-exclamation-triangle me-2"></i>
+                        <span id="rescheduleImpactText"></span>
                     </div>
                     
                     <input type="hidden" id="rescheduleProjectId">
                     <input type="hidden" id="rescheduleStageId">
                     <input type="hidden" id="rescheduleStageStartDate">
                     <input type="hidden" id="rescheduleStageEndDate">
-
-                    <div class="d-grid gap-2 mt-3">
-                        <button type="submit" class="btn btn-primary-custom">
-                            <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
-                        </button>
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                    </div>
-                </form>               
+                    
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary-custom" onclick="confirmDayReschedule()">
+                        <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
+                    </button>
+                    <button class="btn btn-warning" onclick="holdDayTask()">
+                        <i class="fas fa-lock me-2"></i>Put on Hold
+                    </button>
+                    <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                </div>               
             </div>
         </div>
     </div>
@@ -5057,41 +5277,205 @@ span[style*="background: rgb(102, 126, 234)"] {
 </div>
 
 <!-- Reschedule Single Day Modal -->
+<style>
+.rdm-mode-btn {
+    flex: 1;
+    padding: 9px 6px;
+    border: 2px solid #dee2e6;
+    border-radius: 10px;
+    background: #f8f9fa;
+    cursor: pointer;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #495057;
+    transition: all 0.18s ease;
+    text-align: center;
+    line-height: 1.3;
+}
+.rdm-mode-btn.active {
+    border-color: #667eea;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #fff;
+    box-shadow: 0 3px 12px rgba(102,126,234,0.35);
+}
+.rdm-mode-btn:hover:not(.active) {
+    border-color: #adb5bd;
+    background: #e9ecef;
+}
+.rdm-mode-icon { font-size: 1.1rem; display: block; margin-bottom: 2px; }
+.rdm-panel { display: none; }
+.rdm-panel.active { display: block; }
+.rdm-info-card {
+    background: linear-gradient(135deg, #f0f4ff, #e8d5ff);
+    border: 1px solid #c5b4f5;
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+.rdm-preview-box {
+    background: #f0fdf4;
+    border: 1px solid #86efac;
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    color: #166534;
+    margin-top: 10px;
+}
+.rdm-warn-box {
+    background: #fffbeb;
+    border: 1px solid #fde68a;
+    border-radius: 8px;
+    padding: 9px 13px;
+    font-size: 0.82rem;
+    color: #92400e;
+    margin-top: 10px;
+}
+.rdm-optional-badge {
+    display: inline-block;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: 5px;
+}
+.rdm-divider { border-top: 1px solid #dee2e6; margin: 14px 0; }
+</style>
+
 <div class="modal fade" id="rescheduleDayModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-dialog modal-dialog-centered modal-md">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title text-white">Reschedule Day</h5>
+            <div class="modal-header" style="background: linear-gradient(135deg, #667eea, #764ba2);">
+                <h5 class="modal-title text-white"><i class="fas fa-calendar-alt me-2"></i>Reschedule Day</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body">
-                <div class="alert alert-info" id="dayRescheduleInfo"></div>
-                
-                <div class="mb-3">
-                    <label class="form-label fw-bold">Shift by working days:</label>
+            <div class="modal-body p-3">
+
+                <!-- Day info card -->
+                <div class="rdm-info-card">
+                    <div id="dayRescheduleInfo" class="mb-0" style="font-size:0.9rem;"></div>
+                </div>
+
+                <!-- Mode selector -->
+                <div class="d-flex gap-2 mb-3">
+                    <button class="rdm-mode-btn active" id="rdmBtn_shift" onclick="rdmSetMode('shift')">
+                        <span class="rdm-mode-icon">⇄</span>Shift by Days
+                    </button>
+                    <button class="rdm-mode-btn" id="rdmBtn_extend" onclick="rdmSetMode('extend')">
+                        <span class="rdm-mode-icon">⊞</span>Extend &amp; Reschedule
+                    </button>
+                    <button class="rdm-mode-btn" id="rdmBtn_date" onclick="rdmSetMode('date')">
+                        <span class="rdm-mode-icon">⊡</span>To Specific Date
+                    </button>
+                </div>
+
+                <!-- ── Panel 1: Shift by working days (original) ── -->
+                <div class="rdm-panel active" id="rdmPanel_shift">
+                    <label class="form-label fw-bold mb-2">Shift by working days:</label>
                     <div class="input-group">
                         <button class="btn btn-outline-secondary" type="button" onclick="adjustDayShift(-1)">
                             <i class="fas fa-minus"></i>
                         </button>
-                        <input type="number" class="form-control text-center fw-bold" id="dayShiftAmount" value="0">
+                        <input type="number" class="form-control text-center fw-bold" id="dayShiftAmount" value="0" oninput="updateDayReschedulePreview()">
                         <button class="btn btn-outline-secondary" type="button" onclick="adjustDayShift(1)">
                             <i class="fas fa-plus"></i>
                         </button>
                         <span class="input-group-text">days</span>
                     </div>
+                    <div id="dayReschedulePreview" style="display:none;" class="rdm-preview-box mt-2"></div>
                 </div>
-                
-                <div class="mb-3">
-                    <label class="form-label fw-bold">Reason:</label>
+
+                <!-- ── Panel 2: Extend & Reschedule ── -->
+                <div class="rdm-panel" id="rdmPanel_extend">
+                    <p class="text-muted small mb-2">
+                        The selected day <strong>and all days after it</strong> shift forward by N working days.
+                        Then, M new extra days are appended to the stage.
+                        Subsequent stages cascade by the shift amount only.
+                    </p>
+
+                    <!-- Row 1: Shift amount -->
+                    <label class="form-label fw-bold mb-1">Reschedule (shift) by working days:</label>
+                    <div class="input-group mb-3">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustExtendShiftDays(-1)">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" class="form-control text-center fw-bold" id="extendShiftAmount" value="1" min="1" oninput="updateExtendPreview()">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustExtendShiftDays(1)">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <span class="input-group-text">days</span>
+                    </div>
+
+                    <!-- Row 2: Extra days to add -->
+                    <label class="form-label fw-bold mb-1">Add extra days to stage:</label>
+                    <div class="input-group mb-2">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustExtendDays(-1)">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" class="form-control text-center fw-bold" id="extendDaysAmount" value="0" min="0" oninput="updateExtendPreview()">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustExtendDays(1)">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <span class="input-group-text">days</span>
+                    </div>
+
+                    <div id="extendPreview" class="rdm-preview-box mt-2">
+                        <i class="fas fa-info-circle me-1"></i>
+                        Selected day &amp; subsequent days shift <strong id="extendPreviewShift">+1</strong> working day(s) forward.
+                        <span id="extendPreviewAddSpan"> Then <strong id="extendPreviewAdd">0</strong> new day(s) are appended to this stage.</span>
+                    </div>
+                    <div class="rdm-warn-box">
+                        <i class="fas fa-exclamation-triangle me-1"></i>
+                        This affects <strong>all subsequent days</strong> in this stage and every stage that follows.
+                    </div>
+                </div>
+
+                <!-- ── Panel 3: Reschedule to Specific Date ── -->
+                <div class="rdm-panel" id="rdmPanel_date">
+                    <p class="text-muted small mb-2">
+                        Pin this day to a specific calendar date. All subsequent days in this stage and following stages shift by the same offset.
+                    </p>
+                    <label class="form-label fw-bold mb-2">Target date:</label>
+                    <input type="date" class="form-control mb-2" id="rdmTargetDate" onchange="updateDatePreview()">
+                    <div id="rdmDatePreview" style="display:none;" class="rdm-preview-box mb-2"></div>
+
+                    <div class="rdm-divider"></div>
+                    <div class="mb-2" style="font-size:0.85rem;">
+                        <span class="rdm-optional-badge">Optional</span>
+                        <strong>Also extend by additional days after pinning:</strong>
+                    </div>
+                    <div class="input-group">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustDateExtendDays(-1)">
+                            <i class="fas fa-minus"></i>
+                        </button>
+                        <input type="number" class="form-control text-center fw-bold" id="rdmDateExtendDays" value="0" min="0" oninput="updateDatePreview()">
+                        <button class="btn btn-outline-secondary" type="button" onclick="adjustDateExtendDays(1)">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                        <span class="input-group-text">extra days</span>
+                    </div>
+                    <div class="rdm-warn-box mt-2">
+                        <i class="fas fa-exclamation-triangle me-1"></i>
+                        Rescheduling to a past date is allowed but will be flagged in history.
+                    </div>
+                </div>
+
+                <!-- Shared: Reason -->
+                <div class="mt-3 mb-3">
+                    <label class="form-label fw-bold">Reason <span class="text-muted fw-normal small">(required)</span>:</label>
                     <textarea class="form-control" id="dayRescheduleReason" rows="2" placeholder="Why is this day being rescheduled?"></textarea>
                 </div>
-                
-                <div id="dayReschedulePreview" style="display: none;" class="alert alert-success"></div>
-                
+
+                <!-- Hidden fields -->
                 <input type="hidden" id="rescheduleTaskId">
                 <input type="hidden" id="rescheduleTaskProjectId">
                 <input type="hidden" id="rescheduleTaskStageId">
-                
+                <input type="hidden" id="rdmCurrentDate">
+                <input type="hidden" id="rdmCurrentMode" value="shift">
+
                 <div class="d-grid gap-2">
                     <button class="btn btn-primary-custom" onclick="confirmDayReschedule()">
                         <i class="fas fa-check-circle me-2"></i>Confirm Reschedule
@@ -5101,7 +5485,7 @@ span[style*="background: rgb(102, 126, 234)"] {
             </div>
         </div>
     </div>
-</div>  
+</div>
 
 
 <!-- Add this right before the opening <script> tag -->
@@ -5426,10 +5810,10 @@ span[style*="background: rgb(102, 126, 234)"] {
     }
 
     async function init() {
-        try { await loadDefaultStagesFromAPI(); } catch(e) { console.warn('loadDefaultStages failed:', e); }
-        try { await loadEmployees(); } catch(e) { console.warn('loadEmployees failed:', e); }
-        try { await loadStats(); } catch(e) { console.warn('loadStats failed:', e); }
-        try { await loadProjects(); } catch(e) { console.error('loadProjects failed:', e); }
+        await loadDefaultStagesFromAPI();
+        await loadEmployees();
+        await loadStats();
+        await loadProjects();
     }
 
     async function loadDefaultStagesFromAPI() {
@@ -5691,19 +6075,97 @@ span[style*="background: rgb(102, 126, 234)"] {
     }
 
     async function loadStats() {
-        try {
-            const response = await fetch('/api/stats');
-            const data = await response.json();
-            document.getElementById('totalProjects').textContent = data.total_projects ?? 0;
-            document.getElementById('activeProjects').textContent = data.active_projects ?? 0;
-            document.getElementById('totalTasks').textContent = data.total_tasks ?? 0;
-            document.getElementById('totalEmployees').textContent = data.total_employees ?? 0;
-        } catch(e) {
-            console.warn('Stats load failed:', e);
-        }
+        const response = await fetch('/api/stats');
+        const data = await response.json();
+        document.getElementById('totalProjects').textContent = data.total_projects;
+        document.getElementById('activeProjects').textContent = data.active_projects;
+        document.getElementById('totalTasks').textContent = data.total_tasks;
+        document.getElementById('totalEmployees').textContent = data.total_employees;
     }
 
-    // NOTE: loadProjects() is defined globally below (uses search/filter/pagination)
+async function loadProjects() {
+    try {
+        console.log('📦 Loading projects...');
+        const response = await fetch(`/api/projects?_t=${Date.now()}`, {
+            cache: 'no-store',
+            headers: {'Cache-Control': 'no-cache'}
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        projects = await response.json();
+        console.log('📦 Projects loaded:', projects.length, projects);
+        
+        if (projects.length === 0) {
+            const container = document.getElementById('allProjectsSection');
+            container.innerHTML = '<p class="text-muted text-center py-4">No jobs yet. Create your first job!</p>';
+            return;
+        }
+        
+        // Fetch details for each project
+        const projectsWithDetails = await Promise.all(
+            projects.map(async (project) => {
+                try {
+                    console.log(`📋 Fetching details for project ${project.id}: "${project.name}"...`);
+                    const detailsResponse = await fetch(`/api/projects/${project.id}/details?_t=${Date.now()}`, {
+                        cache: 'no-store',
+                        headers: {'Cache-Control': 'no-cache'}
+                    });
+                    
+                    if (!detailsResponse.ok) {
+                        console.error(`❌ Failed to fetch details for project ${project.id}`);
+                        return null;
+                    }
+                    
+                    const details = await detailsResponse.json();
+                    console.log(`✅ Details loaded for project ${project.id}:`, {
+                        name: details.name,
+                        stages: details.stages.length,
+                        stagesData: details.stages
+                    });
+                    return details;
+                } catch (error) {
+                    console.error(`❌ Error fetching project ${project.id}:`, error);
+                    return null;
+                }
+            })
+        );
+        
+        // Filter out null values
+        const validProjects = projectsWithDetails.filter(p => p !== null);
+        console.log('✅ Valid projects to render:', validProjects.length);
+        
+        if (validProjects.length === 0) {
+            const container = document.getElementById('allProjectsSection');
+            container.innerHTML = `
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Jobs exist but couldn't load details. Please refresh the page.
+                </div>
+            `;
+            return;
+        }
+        
+        // Force clear and re-render
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = '';
+        renderProjectsWithStages(validProjects);
+    } catch (error) {
+        console.error('Error loading projects:', error);
+        const container = document.getElementById('allProjectsSection');
+        container.innerHTML = `
+            <div class="alert alert-danger">
+                <i class="fas fa-exclamation-triangle me-2"></i>
+                Error loading jobs: ${error.message}
+                <button class="btn btn-sm btn-outline-danger ms-3" onclick="loadProjects()">
+                    <i class="fas fa-redo me-1"></i> Retry
+                </button>
+            </div>
+        `;
+    }
+}    
 
 function renderProjectsWithStages(projectsData) {
         const container = document.getElementById('allProjectsSection');
@@ -6024,8 +6486,6 @@ async function handleProjectSubmit(e) {
     // ✅ STEP 3: Prepare data to send
     const data = {
         name: document.getElementById('projectName').value,
-        client_name: document.getElementById('clientName').value,         
-        project_manager: document.getElementById('projectManager').value,        
         start_date: document.getElementById('projectStartDate').value,
         stages,  // This REPLACES all the old stages
         members: selectedMembers,
@@ -7434,30 +7894,19 @@ async function handleReschedule(e) {
         .slice(0, stageIndex)
         .some(s => s.status === 'completed');
     
-    // Find subsequent stages (for confirm message)
-    const subsequentStages = currentProjectData.stages
-        .filter((s, sIdx) => sIdx > stageIndex && s.status !== 'completed');
-
-    const stageName = currentProjectData.stages[stageIndex]?.name || 'this stage';
-    const direction = days > 0 ? `forward` : `backward`;
-    let confirmMsg = `⏱ Reschedule Confirmation\n\n`;
-    confirmMsg += `Stage: "${stageName}"\n`;
-    confirmMsg += `Shift: ${Math.abs(days)} working day(s) ${direction}\n\n`;
+    let confirmMsg = `Are you sure you want to shift this stage by ${days} working days?\n\n`;
+    
     if (hasCompletedBefore) {
-        confirmMsg += `✅ Completed stages before this will NOT be changed.\n`;
+        confirmMsg += '✅ Completed stages will remain unchanged\n';
     }
-    if (subsequentStages.length > 0) {
-        confirmMsg += `🔗 Cascade: The following ${subsequentStages.length} stage(s) will also shift by ${Math.abs(days)} day(s):\n`;
-        subsequentStages.forEach(s => { confirmMsg += `   • ${s.name}\n`; });
-    }
-    confirmMsg += `\n✅ Weekends excluded from calculation.\n\nProceed?`;
+    confirmMsg += '✅ This stage and subsequent stages will be shifted\n';
+    confirmMsg += '✅ Weekends will be excluded from calculation';
     
     if (!confirm(confirmMsg)) {
         return;
     }
     
     try {
-        // ── Step 1: Reschedule the selected stage ──────────────────────────────
         const response = await fetch(`/api/projects/${projectId}/reschedule`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -7471,43 +7920,6 @@ async function handleReschedule(e) {
         });
         
         if (response.ok) {
-            // ── Step 2: Cascade to all subsequent non-completed stages ─────────
-            const cascadeStages = currentProjectData.stages
-                .filter(s => s.id !== stageId && s.status !== 'completed')
-                .filter((s, _, arr) => {
-                    const rescheduledStage = currentProjectData.stages.find(x => x.id === stageId);
-                    if (!rescheduledStage) return false;
-                    const rIdx = currentProjectData.stages.indexOf(rescheduledStage);
-                    const sIdx = currentProjectData.stages.indexOf(s);
-                    return sIdx > rIdx;
-                });
-
-            if (cascadeStages.length > 0) {
-                showNotification(`Shifting ${cascadeStages.length} subsequent stage(s)...`, 'info');
-                
-                // Reschedule each one sequentially so the backend recalculates dates correctly
-                for (const stage of cascadeStages) {
-                    try {
-                        const cascadeResp = await fetch(`/api/projects/${projectId}/reschedule`, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                stage_id: stage.id,
-                                days: days,
-                                reason: `Cascaded from stage shift: ${reason || 'rescheduled'}`,
-                                include_saturday: includeSaturdayAsWorkingDay,
-                                working_saturdays: Array.from(currentProjectData.saturdayWorkingDays || [])
-                            })
-                        });
-                        if (!cascadeResp.ok) {
-                            console.warn(`Cascade reschedule failed for stage "${stage.name}"`);
-                        }
-                    } catch (cascadeErr) {
-                        console.warn(`Could not cascade reschedule for stage ${stage.name}:`, cascadeErr);
-                    }
-                }
-            }
-
             showNotification('Stage rescheduled successfully!', 'success');
             rescheduleModal.hide();
             
@@ -7810,15 +8222,12 @@ function adjustRescheduleDays(delta) {
         if (!days || days === 0) {
             document.getElementById('rescheduleNewDatesPreview').style.display = 'none';
             document.getElementById('rescheduleImpactWarning').style.display = 'none';
-            document.getElementById('cascadePreviewBox').style.display = 'none';
             return;
         }
         
         const startDate = new Date(document.getElementById('rescheduleStageStartDate').value);
         const endDate = new Date(document.getElementById('rescheduleStageEndDate').value);
-        const stageId = parseInt(document.getElementById('rescheduleStageId').value);
         
-        // New dates for THIS stage
         const newStart = addWorkingDays(startDate, days);
         const newEnd = addWorkingDays(endDate, days);
         
@@ -7826,46 +8235,11 @@ function adjustRescheduleDays(delta) {
             `${newStart.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})} - ${newEnd.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'})}`;
         document.getElementById('rescheduleNewDatesPreview').style.display = 'block';
         
-        // Find subsequent stages
-        const rIdx = currentProjectData.stages ? currentProjectData.stages.findIndex(s => s.id === stageId) : -1;
-        const subsequentStages = (currentProjectData.stages || []).filter((s, sIdx) => {
-            return sIdx > rIdx && s.status !== 'completed';
-        });
-
-        const direction = days > 0 ? 'forward' : 'backward';
-        const absDays = Math.abs(days);
-        const impactText = subsequentStages.length > 0
-            ? `This stage + ${subsequentStages.length} subsequent stage(s) will shift ${direction} by ${absDays} working day(s)`
-            : `Only this stage will shift ${direction} by ${absDays} working day(s)`;
+        const impactText = days > 0 
+            ? `All subsequent stages will be pushed forward by ${days} working day(s)`
+            : `All subsequent stages will be pulled backward by ${Math.abs(days)} working day(s)`;
         document.getElementById('rescheduleImpactText').textContent = impactText;
         document.getElementById('rescheduleImpactWarning').style.display = 'block';
-
-        // Build cascade preview list
-        if (subsequentStages.length > 0) {
-            const stageColors = ['#667eea','#764ba2','#f093fb','#f5576c','#4facfe','#00f2fe','#43e97b','#38f9d7','#fa709a','#fee140'];
-            let listHTML = '';
-            subsequentStages.forEach((s, i) => {
-                const origStart = s.start_date ? new Date(s.start_date) : null;
-                const origEnd = s.end_date ? new Date(s.end_date) : null;
-                const shiftedStart = origStart ? addWorkingDays(origStart, days) : null;
-                const shiftedEnd = origEnd ? addWorkingDays(origEnd, days) : null;
-                const color = stageColors[(rIdx + 1 + i) % stageColors.length];
-                const fmt = d => d ? d.toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : '—';
-                const arrow = days > 0 ? '→' : '←';
-                listHTML += `
-                <div style="display:flex; align-items:center; gap:8px; padding:6px 8px; margin-bottom:4px; background:white; border-radius:7px; border-left:3px solid ${color}; font-size:0.78rem;">
-                    <div style="width:8px; height:8px; border-radius:50%; background:${color}; flex-shrink:0;"></div>
-                    <div style="flex:1; font-weight:600; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
-                    <div style="color:#6c757d; white-space:nowrap;">${fmt(origStart)} – ${fmt(origEnd)}</div>
-                    <div style="color:#667eea; font-weight:700;">${arrow}</div>
-                    <div style="color:#28a745; font-weight:700; white-space:nowrap;">${fmt(shiftedStart)} – ${fmt(shiftedEnd)}</div>
-                </div>`;
-            });
-            document.getElementById('cascadePreviewList').innerHTML = listHTML;
-            document.getElementById('cascadePreviewBox').style.display = 'block';
-        } else {
-            document.getElementById('cascadePreviewBox').style.display = 'none';
-        }
     }
 
 function enhanceCalendarWithWeekends() {
@@ -8216,23 +8590,96 @@ function openRescheduleDayModal(taskId, dayNumber, currentDate) {
     document.getElementById('rescheduleTaskId').value = taskId;
     document.getElementById('rescheduleTaskProjectId').value = currentStageForDailyTasks.projectId;
     document.getElementById('rescheduleTaskStageId').value = currentStageForDailyTasks.stageId;
+    document.getElementById('rdmCurrentDate').value = currentDate;
+
+    // Reset all fields
     document.getElementById('dayShiftAmount').value = 0;
+    document.getElementById('extendShiftAmount').value = 1;
+    document.getElementById('extendDaysAmount').value = 0;
+    document.getElementById('rdmTargetDate').value = '';
+    document.getElementById('rdmDateExtendDays').value = 0;
     document.getElementById('dayRescheduleReason').value = '';
     document.getElementById('dayReschedulePreview').style.display = 'none';
-    
-    const dateStr = new Date(currentDate).toLocaleDateString('en-US', {
-        weekday: 'long',
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric'
+    document.getElementById('rdmDatePreview').style.display = 'none';
+
+    // Reset mode to 'shift'
+    rdmSetMode('shift');
+
+    const dateStr = new Date(currentDate + 'T00:00:00').toLocaleDateString('en-US', {
+        weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
     });
-    
+
     document.getElementById('dayRescheduleInfo').innerHTML = `
-        <strong>Day ${dayNumber}</strong><br>
-        Current date: ${dateStr}
+        <div class="d-flex align-items-center gap-2">
+            <span class="badge rounded-pill" style="background:linear-gradient(135deg,#667eea,#764ba2);">Day ${dayNumber}</span>
+            <span style="font-size:0.9rem;"><strong>Current date:</strong> ${dateStr}</span>
+        </div>
     `;
-    
+
     rescheduleDayModal.show();
+}
+
+// ── Mode switcher ─────────────────────────────────────────────────────────────
+function rdmSetMode(mode) {
+    document.getElementById('rdmCurrentMode').value = mode;
+    ['shift', 'extend', 'date'].forEach(m => {
+        document.getElementById('rdmBtn_' + m).classList.toggle('active', m === mode);
+        document.getElementById('rdmPanel_' + m).classList.toggle('active', m === mode);
+    });
+}
+
+// ── Extend panel helpers ──────────────────────────────────────────────────────
+function adjustExtendShiftDays(delta) {
+    const input = document.getElementById('extendShiftAmount');
+    input.value = Math.max(1, parseInt(input.value || 1) + delta);
+    updateExtendPreview();
+}
+function adjustExtendDays(delta) {
+    const input = document.getElementById('extendDaysAmount');
+    input.value = Math.max(0, parseInt(input.value || 0) + delta);
+    updateExtendPreview();
+}
+function updateExtendPreview() {
+    const shiftDays = parseInt(document.getElementById('extendShiftAmount').value || 1);
+    const addDays   = parseInt(document.getElementById('extendDaysAmount').value || 0);
+    document.getElementById('extendPreviewShift').textContent = '+' + shiftDays;
+    const addSpan = document.getElementById('extendPreviewAddSpan');
+    const addEl   = document.getElementById('extendPreviewAdd');
+    if (addDays > 0) {
+        addEl.textContent = addDays;
+        addSpan.style.display = '';
+    } else {
+        addSpan.style.display = 'none';
+    }
+}
+
+// ── Date panel helpers ────────────────────────────────────────────────────────
+function adjustDateExtendDays(delta) {
+    const input = document.getElementById('rdmDateExtendDays');
+    input.value = Math.max(0, parseInt(input.value || 0) + delta);
+    updateDatePreview();
+}
+function updateDatePreview() {
+    const targetDateStr = document.getElementById('rdmTargetDate').value;
+    const extraDays = parseInt(document.getElementById('rdmDateExtendDays').value || 0);
+    const previewEl = document.getElementById('rdmDatePreview');
+    const currentDateStr = document.getElementById('rdmCurrentDate').value;
+
+    if (!targetDateStr) { previewEl.style.display = 'none'; return; }
+
+    const current = new Date(currentDateStr + 'T00:00:00');
+    const target = new Date(targetDateStr + 'T00:00:00');
+    const diffDays = Math.round((target - current) / 86400000);
+    const direction = diffDays > 0 ? 'forward' : (diffDays < 0 ? 'backward' : 'no change');
+    const fmtTarget = target.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+
+    previewEl.style.display = 'block';
+    previewEl.innerHTML = `
+        <i class="fas fa-arrow-right me-1"></i>
+        New date: <strong>${fmtTarget}</strong>
+        ${diffDays !== 0 ? `&nbsp;(${Math.abs(diffDays)} calendar days ${direction})` : ''}
+        ${extraDays > 0 ? `<br><i class="fas fa-plus me-1"></i>Then extend by <strong>${extraDays}</strong> more working day(s)` : ''}
+    `;
 }
 
 // Adjust day shift
@@ -8253,134 +8700,114 @@ function updateDayReschedulePreview() {
     }
     
     preview.style.display = 'block';
-    preview.textContent = `This day will be shifted ${Math.abs(days)} working day(s) ${days > 0 ? 'forward' : 'backward'}`;
+    preview.innerHTML = `<i class="fas fa-info-circle me-1"></i>This day will shift <strong>${Math.abs(days)}</strong> working day(s) <strong>${days > 0 ? 'forward' : 'backward'}</strong>. All subsequent days shift too.`;
 }
 
 
-// Confirm day reschedule
+// Confirm day reschedule — handles all 3 modes
 async function confirmDayReschedule() {
     const taskId = document.getElementById('rescheduleTaskId').value;
     const projectId = document.getElementById('rescheduleTaskProjectId').value;
     const stageId = document.getElementById('rescheduleTaskStageId').value;
-    const days = parseInt(document.getElementById('dayShiftAmount').value || 0);
-    const reason = document.getElementById('dayRescheduleReason').value;
-    
-    if (days === 0) {
-        alert('Please enter a number of days to shift');
+    const reason = document.getElementById('dayRescheduleReason').value.trim();
+    const mode = document.getElementById('rdmCurrentMode').value || 'shift';
+
+    if (!reason) {
+        alert('Please enter a reason for rescheduling.');
         return;
     }
-    
+
+    let endpoint = '';
+    let body = { reason, working_saturdays: Array.from(currentProjectData?.saturdayWorkingDays || []) };
+
+    if (mode === 'shift') {
+        const days = parseInt(document.getElementById('dayShiftAmount').value || 0);
+        if (days === 0) { alert('Please enter a number of days to shift.'); return; }
+        endpoint = `/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/reschedule`;
+        body.mode = 'shift_by_days';
+        body.days = days;
+
+    } else if (mode === 'extend') {
+        const shiftDays  = parseInt(document.getElementById('extendShiftAmount').value || 1);
+        const extendDays = parseInt(document.getElementById('extendDaysAmount').value  || 0);
+        if (shiftDays <= 0) { alert('Please enter a positive number of days to shift.'); return; }
+        endpoint = `/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/reschedule`;
+        body.mode        = 'extend_and_reschedule';
+        body.days        = shiftDays;   // how far to push the selected day & later days
+        body.extend_days = extendDays;  // how many brand-new days to append to the stage
+
+    } else if (mode === 'date') {
+        const targetDate = document.getElementById('rdmTargetDate').value;
+        if (!targetDate) { alert('Please select a target date.'); return; }
+        const dateExtend = parseInt(document.getElementById('rdmDateExtendDays').value || 0);
+        endpoint = `/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/reschedule`;
+        body.mode        = 'to_specific_date';
+        body.target_date = targetDate;
+        body.extend_days = dateExtend;
+    }
+
     try {
-        console.log('🔄 Rescheduling daily task...');
-        
-        const response = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks/${taskId}/reschedule`, {
+        console.log(`🔄 Rescheduling [${mode}]...`);
+
+        const response = await fetch(endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                days: days,
-                reason: reason,
-                working_saturdays: Array.from(currentProjectData?.saturdayWorkingDays || [])
-            })
+            body: JSON.stringify(body)
         });
-        
+
         if (response.ok) {
-            showNotification('✅ Day rescheduled successfully!', 'success');
-            
-            // Close the reschedule day modal
+            const modeLabels = { shift: 'Day rescheduled', extend: 'Stage extended & rescheduled', date: 'Day pinned to new date' };
+            showNotification(`✅ ${modeLabels[mode] || 'Done'}!`, 'success');
+
             rescheduleDayModal.hide();
-            
-            // ✅ CRITICAL: Wait LONGER for database transaction to FULLY commit
-            console.log('⏳ Waiting for database commit (4 seconds)...');
+
+            console.log('⏳ Waiting for DB commit...');
             await new Promise(resolve => setTimeout(resolve, 4000));
-            
+
             console.log('🔥 Fetching updated task list...');
-            
-            // Reload tasks in the daily task modal
             const tasksResponse = await fetch(`/api/projects/${projectId}/stages/${stageId}/daily-tasks?_t=${Date.now()}`, {
-                cache: 'no-store',
-                headers: { 'Cache-Control': 'no-cache' }
+                cache: 'no-store', headers: { 'Cache-Control': 'no-cache' }
             });
             const tasks = await tasksResponse.json();
             renderDailyTasks(tasks);
-            
-            console.log('✅ Task list updated');
-            
-            // ✅ Close the daily task modal so user can see the calendar
-            console.log('📊 Closing daily task modal...');
+
             dailyTaskModal.hide();
-            
-            // ✅ Additional wait before calendar rebuild
             await new Promise(resolve => setTimeout(resolve, 500));
-            
-            // ✅ Force COMPLETE calendar rebuild with ALL history
+
             if (calendar && currentProjectForCalendar === parseInt(projectId)) {
-                showNotification('🔄 Rebuilding calendar with ghost events...', 'info');
-                
+                showNotification('🔄 Rebuilding calendar...', 'info');
                 console.log('🔨 Starting calendar rebuild...');
-                
-                // ✅ CRITICAL: Fetch history FIRST before rebuild
                 try {
                     const timestamp = Date.now();
                     const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_t=${timestamp}`, {
                         cache: 'no-store',
-                        headers: { 
-                            'Cache-Control': 'no-cache, no-store, must-revalidate',
-                            'Pragma': 'no-cache'
-                        }
+                        headers: { 'Cache-Control': 'no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' }
                     });
-                    
+
                     if (historyResponse.ok) {
                         const historyData = await historyResponse.json();
-                        console.log(`📜 Loaded ${historyData.length} history records (including daily tasks)`);
-                        
-                        // Update currentProjectData with fresh history
-                        if (!currentProjectData) {
-                            console.error('❌ currentProjectData is null!');
-                        } else {
-                            currentProjectData.rescheduleHistory = historyData;
-                            console.log('✅ Updated currentProjectData.rescheduleHistory');
-                        }
+                        console.log(`📜 Loaded ${historyData.length} history records`);
+
+                        currentProjectData = currentProjectData || {};
+                        currentProjectData.rescheduleHistory = historyData;
+
+                        await openCalendarView(currentProjectForCalendar);
+                        showNotification('✅ Calendar updated with reschedule history!', 'success');
                     } else {
-                        console.warn('⚠️ Failed to fetch history:', historyResponse.status);
+                        await openCalendarView(currentProjectForCalendar);
                     }
-                } catch (error) {
-                    console.error('❌ Error fetching history:', error);
+                } catch (histErr) {
+                    console.error('Error fetching history:', histErr);
+                    await openCalendarView(currentProjectForCalendar);
                 }
-                
-                // Now rebuild calendar with updated history
-                await forceCompleteCalendarRebuild(parseInt(projectId));
-                
-                // ✅ FORCE CALENDAR REFRESH TO FIX LAYOUT
-                console.log('🔄 Forcing calendar refresh after day reschedule...');
-                if (calendar) {
-                    try {
-                        calendar.destroy();
-                        calendar = null;
-                        const calendarEl = document.getElementById('calendar');
-                        if (calendarEl) {
-                            calendarEl.innerHTML = '';
-                            calendarEl.className = '';
-                            calendarEl.offsetHeight; // Force reflow
-                        }
-                        await new Promise(resolve => setTimeout(resolve, 150));
-                        await openCalendarView(parseInt(projectId));
-                        console.log('✅ Calendar rebuilt successfully');
-                    } catch (e) {
-                        console.error('Error rebuilding calendar:', e);
-                    }
-                }
-                
-                showNotification('✅ Calendar updated! Ghost event shows original location.', 'success');
-            } else {
-                console.warn('⚠️ Calendar not available for rebuild');
             }
         } else {
-            const error = await response.json();
-            alert('Error: ' + error.error);
+            const err = await response.json();
+            alert(`Error: ${err.error || 'Unknown error'}`);
         }
-    } catch (error) {
-        console.error('❌ Reschedule error:', error);
-        alert('Error: ' + error.message);
+    } catch (e) {
+        console.error('❌ Reschedule error:', e);
+        alert('Failed to reschedule. Please try again.');
     }
 }
 
@@ -8703,54 +9130,89 @@ function createStageEventWithStatus(stage, index, start, end, color, dateStageMa
     };
 }
 
-
-
 // UPDATED showExcelPreview function - EXACTLY matches Excel export
-
 async function showExcelPreview(projectId) {
     try {
+        // ✅ REMOVE ANY EXISTING MODALS FIRST
         document.querySelectorAll('#exportPreviewModal').forEach(m => m.remove());
+        
         showNotification('Loading Excel preview...', 'info');
         
+        // ✅ Fetch project details with cache-busting
         const timestamp = new Date().getTime();
         const projResponse = await fetch(`/api/projects/${projectId}/details?_=${timestamp}`, {
-            cache: 'no-store', headers: {'Cache-Control': 'no-cache', 'Pragma': 'no-cache'}
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
         });
         const projData = await projResponse.json();
-        if (!projData || !projData.id) throw new Error('Project not found');
         
+        if (!projData || !projData.id) {
+            throw new Error('Project not found');
+        }
+        
+        console.log('✅ Project data loaded:', projData);
+        console.log('✅ Stages found:', projData.stages?.length || 0);
+        
+        // ✅ Fetch reschedule history
         let rescheduleHistory = [];
         try {
             const historyResponse = await fetch(`/api/projects/${projectId}/complete-reschedule-history?_=${timestamp}`);
             rescheduleHistory = historyResponse.ok ? await historyResponse.json() : [];
-        } catch (error) {}
+            console.log('✅ Reschedule history loaded:', rescheduleHistory.length, 'records');
+        } catch (error) {
+            console.warn('⚠️ Could not load reschedule history:', error);
+        }
         
+        // ✅ Fetch daily tasks (for actual completion data) - MATCHING BACKEND
         let dailyTasks = [];
         try {
             const dailyTasksResponse = await fetch(`/api/projects/${projectId}/daily-tasks?_=${timestamp}`);
             dailyTasks = dailyTasksResponse.ok ? await dailyTasksResponse.json() : [];
-        } catch (error) {}
+            console.log('✅ Daily tasks loaded:', dailyTasks.length, 'tasks');
+        } catch (error) {
+            console.warn('⚠️ Could not load daily tasks:', error);
+        }
         
+        // ✅ Fetch hold dates from database
         let holdDates = [];
         try {
             const holdDatesResponse = await fetch(`/api/projects/${projectId}/hold-dates?_=${timestamp}`);
             holdDates = holdDatesResponse.ok ? await holdDatesResponse.json() : [];
-        } catch (error) {}
+            console.log('✅ Hold dates loaded:', holdDates.length, 'hold records');
+        } catch (error) {
+            console.warn('⚠️ Could not load hold dates:', error);
+        }
         
+        // ✅ CALCULATE ACTUAL END DATE FROM STAGES (safety check)
         const stages = projData.stages || [];
         let calculatedEndDate = new Date(projData.start_date);
         
-        stages.forEach((stage) => {
+        console.log('🔍 DEBUG - Number of stages:', stages.length);
+        stages.forEach((stage, idx) => {
+            console.log(`🔍 Stage ${idx + 1}: ${stage.name}`);
+            console.log(`   Start: ${stage.start_date}, End: ${stage.end_date}`);
             if (stage.end_date) {
                 const stageEnd = new Date(stage.end_date);
-                if (stageEnd > calculatedEndDate) calculatedEndDate = stageEnd;
+                if (stageEnd > calculatedEndDate) {
+                    calculatedEndDate = stageEnd;
+                    console.log(`   ✅ This is now the latest end date: ${stageEnd.toISOString().split('T')[0]}`);
+                }
             }
         });
         
+        // Use the minimum of stored end_date and calculated end_date
         const storedEndDate = new Date(projData.end_date);
         const actualEndDate = calculatedEndDate < storedEndDate ? calculatedEndDate : storedEndDate;
+        
+        console.log('🔍 DEBUG - Stored End Date:', projData.end_date, storedEndDate.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Calculated End Date from Stages:', calculatedEndDate.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Using End Date (minimum):', actualEndDate.toISOString().split('T')[0]);
+        
         const startDate = new Date(projData.start_date);
-        const endDate = actualEndDate;
+        const endDate = actualEndDate;  // ✅ USE CALCULATED END DATE
         const allDates = [];
         
         let currentDate = new Date(startDate);
@@ -8759,210 +9221,230 @@ async function showExcelPreview(projectId) {
             currentDate.setDate(currentDate.getDate() + 1);
         }
         
+        console.log('🔍 DEBUG - Total dates generated:', allDates.length);
+        console.log('🔍 DEBUG - First date:', allDates[0]?.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Last date:', allDates[allDates.length - 1]?.toISOString().split('T')[0]);
+        console.log('🔍 DEBUG - Date range:', allDates[0]?.getDate(), 'to', allDates[allDates.length - 1]?.getDate());
+        
+        // stages already declared above on line 5894
         const workingSaturdays = new Set(projData.saturdayWorkingDays || []);
+        console.log('Working Saturdays:', workingSaturdays);
         
+        // Build Excel-like preview
         let html = '<div style="overflow: auto; max-height: 75vh; background: white; padding: 15px; font-family: Calibri, Arial, sans-serif;">';
-        html += '<table style="border-collapse: collapse; font-size: 11px; table-layout: auto; min-width: 100%;">';
+        html += '<!-- 🔥 FIXED VERSION - Check console for debug logs -->';
+        html += '<table style="border-collapse: collapse; font-size: 11px; table-layout: auto;">';
         
-        let totalCols = allDates.length + 1;
-        let extraCols = totalCols > 13 ? totalCols - 13 : 0;
+        // ==========================================
+        // STAGE DETAILS SECTION (5-column table at top)
+        // ==========================================
+        if (stages.length > 0) {
+            const stageNames = stages.map(s => {
+                const parts = s.name.split('-');
+                if (parts.length >= 2) {
+                    const category = parts.slice(0, -1).join('-').trim();
+                    const abbr = parts[parts.length - 1].trim();
+                    return `${category} -${abbr}`;
+                }
+                return s.name;
+            });
+            
+            let stageIdx = 0;
+            while (stageIdx < stageNames.length) {
+                html += '<tr>';
+                for (let col = 0; col < 5; col++) {
+                    if (stageIdx < stageNames.length) {
+                        html += `<td style="border: 1px solid #000; padding: 8px; background: white; font-weight: bold; font-size: 10px; min-width: 180px;">${stageNames[stageIdx]}</td>`;
+                        stageIdx++;
+                    } else {
+                        html += '<td style="border: 1px solid #000; padding: 8px; background: white; min-width: 180px;"></td>';
+                    }
+                }
+                html += '</tr>';
+            }
+            
+            html += '<tr><td colspan="5" style="border: none; height: 20px;"></td></tr>';
+        }
         
-
         // ==========================================
-        // HEADER - MATCHES IMAGE EXACTLY
+        // MAIN SCHEDULE TABLE
         // ==========================================
-        html += '<tr>';
-        html += '<td rowspan="4" style="border: 1px solid #000; width: 150px; min-width: 150px; text-align: center; vertical-align: middle; background: white; padding: 5px;">';
         
-        // 👇 CHANGE 5: Added the actual <img> tag here
-        // Note: Using /static/ path which is standard for Flask apps. Adjust if needed.
-        html += '<img src="/static/sienna_logo.png" alt="Sienna Ecad Logo" style="max-width: 150px; max-height: 100px; object-fit: contain;">';
-        html += '</td>';
+        // Headers
+        html += '<tr>';
+        html += `<td rowspan="2" style="border: 1px solid #000; padding: 8px; background: #B4C7E7; font-weight: bold; font-size: 12px; text-align: center; vertical-align: middle; min-width: 180px;">${projData.name}</td>`;
+        html += '<td rowspan="2" style="border: 1px solid #000; padding: 8px; background: #B4C7E7; font-weight: bold; font-size: 11px; text-align: center; vertical-align: middle; min-width: 150px;">Date</td>';
         
-        //  CHANGE 6: Top Main Title Box
-        html += '<td colspan="12" style="border: 1px solid #000; background: #FFC000; color: white; font-weight: bold; font-size: 18px; text-align: center; padding: 8px;">Sienna Ecad Technologies</td>';
-        if(extraCols > 0) html += `<td colspan="${extraCols}" style="border: none;"></td>`;
-        html += '</tr>';
-
-        html += '<tr>';
-        html += '<td colspan="5" style="border: 1px solid #000; text-align: left; padding: 4px;">JOB NO.</td>';
-        html += `<td colspan="7" style="border: 1px solid #000; text-align: left; padding: 4px;">${projData.name || 'XYZ'}</td>`;
-        if(extraCols > 0) html += `<td colspan="${extraCols}" style="border: none;"></td>`;
-        html += '</tr>';
-
-        html += '<tr>';
-        html += '<td colspan="5" style="border: 1px solid #000; text-align: left; padding: 4px;">CLINT NAME</td>';
-        html += `<td colspan="7" style="border: 1px solid #000; text-align: left; padding: 4px;">${projData.client_name || 'XYZ'}</td>`;
-        if(extraCols > 0) html += `<td colspan="${extraCols}" style="border: none;"></td>`;
-        html += '</tr>';
-
-        html += '<tr>';
-        html += '<td colspan="5" style="border: 1px solid #000; text-align: left; padding: 4px;">PROJECT MANEGER</td>';
-        html += `<td colspan="7" style="border: 1px solid #000; text-align: left; padding: 4px;">${projData.project_manager || 'XYZ'}</td>`;
-        if(extraCols > 0) html += `<td colspan="${extraCols}" style="border: none;"></td>`;
-        html += '</tr>';
-
-        html += `<tr><td colspan="${totalCols}" style="height: 20px; border: none;"></td></tr>`;
-
-        // ==========================================
-        // MAIN TIMELINE
-        // ==========================================
-        html += '<tr>';
-        html += '<td rowspan="2" style="border: 1px solid #000; background: #9BC2E6; font-weight: bold; font-size: 12px; text-align: center; vertical-align: middle;">Date</td>';
         const monthYear = startDate.toLocaleDateString('en-US', { month: 'short', year: '2-digit' });
-        html += `<td colspan="${allDates.length}" style="border: 1px solid #000; background: #9BC2E6; padding: 4px; font-weight: bold; text-align: center;">${monthYear}</td>`;
+        html += `<td colspan="${allDates.length}" style="border: 1px solid #000; padding: 8px; background: #FFA500; font-weight: bold; font-size: 11px; text-align: center;">${monthYear}</td>`;
         html += '</tr>';
-
+        
+        // Day numbers
         html += '<tr>';
         allDates.forEach(date => {
-            const isWeekend = !_isWD(date);
-            // ✅ Dynamically shrink width and padding for weekends
-            const widthStyle = isWeekend ? "min-width: 15px; width: 15px; padding: 1px;" : "min-width: 35px; padding: 4px;";
-            html += `<td style="border: 1px solid #000; background: #FFC000; font-weight: bold; text-align: center; ${widthStyle}">${date.getDate()}</td>`;
+            html += `<td style="border: 1px solid #000; padding: 6px; background: #B4C7E7; font-weight: bold; font-size: 11px; text-align: center; min-width: 50px;">${date.getDate()}</td>`;
         });
         html += '</tr>';
         
-        // Planned Row Logic
+        // ==========================================
+        // PLANNED ROW - Build from stage dates
+        // ==========================================
+        html += '<tr style="height: 40px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; font-weight: bold; text-align: center;">Planned</td>';
+        
         const plannedMap = {};
-        const stageRescheduleShifts = new Map();
-        rescheduleHistory.forEach(h => {
-            if (h.type !== 'daily_task') {
-                const shift = h.direction === 'forward' ? (h.days_shifted || 0) : -(h.days_shifted || 0);
-                stageRescheduleShifts.set(h.stage_id, (stageRescheduleShifts.get(h.stage_id) || 0) + shift);
-            }
-        });
-
-        function _isWD(date) {
-            const day = date.getDay();
-            if (day === 0) return false;
-            if (day === 6) return workingSaturdays.has(date.toISOString().split('T')[0]);
-            return true;
-        }
-        function _addWD(d, n) {
-            if (n === 0) return new Date(d);
-            const dir = n > 0 ? 1 : -1;
-            let cur = new Date(d); let rem = Math.abs(n);
-            while (rem > 0) { cur.setDate(cur.getDate() + dir); if (_isWD(cur)) rem--; }
-            return cur;
-        }
-
-        let _cascadeEnd = null;
-        const plannedStageDates = [...stages].sort((a, b) => (a.order || 0) - (b.order || 0)).map(stage => {
-            if (!stage.start_date || !stage.end_date) return { stage, start: null, end: null };
-            let start = new Date(stage.start_date + 'T12:00:00');
-            let end   = new Date(stage.end_date   + 'T12:00:00');
-            const dur = stage.duration_days || 1;
-
-            if (stageRescheduleShifts.has(stage.id)) {
-                if (!_cascadeEnd || end > _cascadeEnd) _cascadeEnd = new Date(end);
-            } else if (_cascadeEnd && start <= _cascadeEnd) {
-                start = _addWD(_cascadeEnd, 1);
-                end   = _addWD(start, dur - 1);
-                if (!_cascadeEnd || end > _cascadeEnd) _cascadeEnd = new Date(end);
-            }
-            return { stage, start, end };
-        });
-
-        plannedStageDates.forEach(({ stage, start, end }) => {
-            if (!start || !end) return;
+        stages.forEach(stage => {
             const parts = stage.name.split('-');
             const abbr  = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
-            let d = new Date(start);
-            while (d <= end) {
-                const dateStr = d.toISOString().split('T')[0];
-                if (_isWD(d)) {
+            const stageTasks = dailyTasks.filter(t => t.stage_id === stage.id);
+            if (stageTasks.length > 0) {
+                stageTasks.forEach(t => {
+                    const orig = t.original_date ? t.original_date : t.scheduled_date;
+                    const dateStr = orig.split('T')[0];
                     if (!plannedMap[dateStr]) plannedMap[dateStr] = [];
                     if (!plannedMap[dateStr].includes(abbr)) plannedMap[dateStr].push(abbr);
+                });
+            } else {
+                if (stage.start_date && stage.end_date) {
+                    let d = new Date(stage.start_date + 'T12:00:00');
+                    const end = new Date(stage.end_date + 'T12:00:00');
+                    while (d <= end) {
+                        const dow = d.getDay(); const ds = d.toISOString().split('T')[0];
+                        if (dow !== 0 && (dow !== 6 || workingSaturdays.has(ds))) {
+                            if (!plannedMap[ds]) plannedMap[ds] = [];
+                            if (!plannedMap[ds].includes(abbr)) plannedMap[ds].push(abbr);
+                        }
+                        d.setDate(d.getDate() + 1);
+                    }
                 }
-                d.setDate(d.getDate() + 1);
             }
         });
-
-        html += '<tr style="height: 30px;">';
-        // ✅ Added white-space: nowrap;
-        html += '<td style="border: 1px solid #000; padding: 4px; font-weight: bold; text-align: center; white-space: nowrap;">Planned</td>';
+        
         allDates.forEach(date => {
+            const dayOfWeek = date.getDay();
             const dateStr = date.toISOString().split('T')[0];
-            const isWeekend = !_isWD(date);
+            const isSunday = dayOfWeek === 0;
+            const isSaturday = dayOfWeek === 6;
+            const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+            const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+            
             const bgColor = isWeekend ? '#FFFF00' : 'white';
             const value = plannedMap[dateStr] ? plannedMap[dateStr].sort().join(' , ') : '';
-            // ✅ Reduce padding if it's a weekend
-            const padStyle = isWeekend ? "padding: 0px;" : "padding: 4px;";
-            html += `<td style="border: 1px solid #000; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; vertical-align: middle; ${padStyle}">${value}</td>`;
+            
+            html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; min-width: 50px; vertical-align: middle;">${value}</td>`;
         });
         html += '</tr>';
         
-        // Reschedule Rows
+        // ==========================================
+        // RESCHEDULE ROWS (1-4) - MATCHING BACKEND LOGIC
+        // ==========================================
         const stageRescheduleMap = {1: {}, 2: {}, 3: {}, 4: {}};
+
+        // Build a GLOBAL mapping: reschedule_number → row (1-4)
+        // Ensures all stages cascaded in the same reschedule event share the same row.
+        const dailyTaskHistory = rescheduleHistory.filter(r => r.type === 'daily_task' && r.reschedule_number);
+        const globalRNums = [...new Set(dailyTaskHistory.map(r => r.reschedule_number))].sort((a, b) => a - b);
+        const globalRnumToRow = {};
+        globalRNums.forEach((rNum, idx) => { globalRnumToRow[rNum] = idx + 1; });
+
         stages.forEach(stage => {
             const parts = stage.name.split('-');
             const stageAbbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
-            const taskReschedules = rescheduleHistory.filter(r => r.stage_id === stage.id);
-            const uniqueNums = [...new Set(taskReschedules.map(r => r.reschedule_number).filter(n => n))].sort((a, b) => a - b);
-            
-            uniqueNums.forEach((rNum, idx) => {
-                const targetRow = idx + 1;
-                if (targetRow > 4) return;
-                const eventTasks = taskReschedules.filter(t => t.reschedule_number === rNum);
-                eventTasks.forEach(t => {
-                    const dateStr = t.new_date.split('T')[0];
-                    if (!stageRescheduleMap[targetRow][dateStr]) stageRescheduleMap[targetRow][dateStr] = [];
-                    if (!stageRescheduleMap[targetRow][dateStr].includes(stageAbbr)) stageRescheduleMap[targetRow][dateStr].push(stageAbbr);
-                });
+
+            const taskReschedules = rescheduleHistory.filter(r => r.stage_id === stage.id && r.type === 'daily_task' && r.reschedule_number);
+
+            taskReschedules.forEach(t => {
+                const targetRow = globalRnumToRow[t.reschedule_number];
+                if (!targetRow || targetRow > 4) return;
+                const dateStr = t.new_date.split('T')[0];
+                if (!stageRescheduleMap[targetRow][dateStr]) stageRescheduleMap[targetRow][dateStr] = [];
+                if (!stageRescheduleMap[targetRow][dateStr].includes(stageAbbr)) {
+                    stageRescheduleMap[targetRow][dateStr].push(stageAbbr);
+                }
             });
         });
         
+        // Render reschedule rows
         for (let rNum = 1; rNum <= 4; rNum++) {
             html += '<tr style="height: 30px;">';
-            // ✅ Added white-space: nowrap;
-            html += `<td style="border: 1px solid #000; padding: 4px; font-weight: bold; text-align: center; white-space: nowrap;">Reschedule -${rNum}</td>`;            const rData = stageRescheduleMap[rNum] || {};
+            html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+            html += `<td style="border: 1px solid #000; padding: 8px; font-weight: bold; text-align: center;">Reschedule -${rNum}</td>`;
+            
+            const rData = stageRescheduleMap[rNum] || {};
+            
             allDates.forEach(date => {
+                const dayOfWeek = date.getDay();
                 const dateStr = date.toISOString().split('T')[0];
-                const isWeekend = !_isWD(date);
+                const isSunday = dayOfWeek === 0;
+                const isSaturday = dayOfWeek === 6;
+                const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+                const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+                
                 const bgColor = isWeekend ? '#FFFF00' : 'white';
                 const value = rData[dateStr] ? rData[dateStr].sort().join(' , ') : '';
-                html += `<td style="border: 1px solid #000; padding: 4px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; vertical-align: middle;">${value}</td>`;
+                
+                html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; min-width: 50px; vertical-align: middle;">${value}</td>`;
             });
             html += '</tr>';
         }
         
-        // Actual Row
-        html += '<tr style="height: 30px;">';
-        html += '<td style="border: 1px solid #000; padding: 4px; background: #D9D9D9; font-weight: bold; text-align: center;">Actual</td>';
+        // ==========================================
+        // ACTUAL ROW - MATCHING BACKEND LOGIC
+        // ==========================================
+        html += '<tr style="height: 40px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: #C0C0C0; font-weight: bold; text-align: center;">Actual</td>';
         
         const actualMap = {};
         const holdDatesMap = {};
         
+        // Step 1: Build holdDatesMap from database HoldDate records
         holdDates.forEach(holdRecord => {
-            const dateStr = holdRecord.hold_date;
+            const dateStr = holdRecord.hold_date; // Already in YYYY-MM-DD format
             const stageName = holdRecord.stage_name;
             const parts = stageName.split('-');
             const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stageName.substring(0, 6);
+            
             if (!holdDatesMap[dateStr]) holdDatesMap[dateStr] = [];
-            if (!holdDatesMap[dateStr].includes(abbr)) holdDatesMap[dateStr].push(abbr);
+            if (!holdDatesMap[dateStr].includes(abbr)) {
+                holdDatesMap[dateStr].push(abbr);
+                console.log(`📌 HOLD: ${dateStr} -> ${abbr} (${stageName})`);
+            }
         });
         
+        // Step 2: Build actualMap from real daily task records
         stages.forEach(stage => {
             const parts = stage.name.split('-');
             const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
             const tasks = dailyTasks.filter(t => t.stage_id === stage.id);
+
             tasks.forEach(t => {
                 const ds = t.scheduled_date.split('T')[0];
+
                 if (t.status === 'hold') {
+                    // HOLD task: add to holdDatesMap on its scheduled_date (backup in case not in HoldDate table)
                     if (!holdDatesMap[ds]) holdDatesMap[ds] = [];
                     if (!holdDatesMap[ds].includes(abbr)) holdDatesMap[ds].push(abbr);
                 } else {
+                    // All other statuses (pending/completed/rescheduled): add to actualMap
                     if (!actualMap[ds]) actualMap[ds] = [];
                     actualMap[ds].push({abbr, status: t.status});
                 }
-                if (t.original_date && t.original_date !== t.scheduled_date) {
+                
+                if (t.original_date && t.original_date !== t.scheduled_date && t.status === 'rescheduled') {
                     const hds = t.original_date.split('T')[0];
                     if (!holdDatesMap[hds]) holdDatesMap[hds] = [];
-                    if (!holdDatesMap[hds].includes(abbr)) holdDatesMap[hds].push(abbr);
+                    if (!holdDatesMap[hds].includes(abbr)) {
+                        holdDatesMap[hds].push(abbr);
+                        console.log(`📌 HOLD from reschedule: ${hds} -> ${abbr} (original date)`);
+                    }
                 }
             });
         });
 
+        // Step 3: Fallback for planned stages with no task record yet (e.g. DLBS on day 12)
+        // Only add if NOT already in actualMap AND NOT already in holdDatesMap
         Object.keys(plannedMap).forEach(ds => {
             plannedMap[ds].forEach(abbr => {
                 const inActual = (actualMap[ds] || []).some(x => x.abbr === abbr);
@@ -8973,105 +9455,141 @@ async function showExcelPreview(projectId) {
                 }
             });
         });
+
         
         allDates.forEach(date => {
+            const dayOfWeek = date.getDay();
             const dateStr = date.toISOString().split('T')[0];
-            const isWeekend = !_isWD(date);
+            const isSunday = dayOfWeek === 0;
+            const isSaturday = dayOfWeek === 6;
+            const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+            const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+            
             const active = actualMap[dateStr] || [];
             const activeAbbrs = new Set(active.map(x => x.abbr));
             const holdAbbrs = new Set(holdDatesMap[dateStr] || []);
+            
+            // Filter out holds that overlap with active tasks (matches backend app.py line 454)
             const realHolds = [...holdAbbrs].filter(h => !activeAbbrs.has(h));
             
             const parts = [];
-            if (realHolds.length > 0) parts.push(`${realHolds.sort().join(' , ')}=HOLD`);
-            if (activeAbbrs.size > 0) parts.push([...activeAbbrs].sort().join(' , '));
+            if (realHolds.length > 0) {
+                parts.push(`${realHolds.sort().join(' , ')}=HOLD`);
+            }
+            if (activeAbbrs.size > 0) {
+                parts.push([...activeAbbrs].sort().join(' , '));
+            }
+            
             const value = parts.join(' , ');
             
+            // Determine background color
+            // Priority: Weekend > Hold > Completed > Rescheduled > Default
             let bgColor = 'white';
-            if (isWeekend) bgColor = '#FFFF00'; 
-            else if (holdAbbrs.size > 0) bgColor = '#FF9900'; 
-            else if (activeAbbrs.size > 0) {
+            
+            if (isWeekend) {
+                bgColor = '#FFFF00'; // Yellow for weekends (highest priority)
+            } else if (holdAbbrs.size > 0) {
+                bgColor = '#FFA500'; // Orange for hold (second priority - ANY hold dates make it orange)
+            } else if (activeAbbrs.size > 0) {
                 const stats = new Set(active.map(x => x.status));
-                if (stats.has('rescheduled')) bgColor = '#00FFFF';
+                if (stats.has('completed')) {
+                    bgColor = '#00FF00'; // Green for completed
+                } else if (stats.has('rescheduled')) {
+                    bgColor = '#00FFFF'; // Cyan for rescheduled
+                }
             }
-            html += `<td style="border: 1px solid #000; padding: 4px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; vertical-align: middle;">${value}</td>`;
+            
+            html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: center; font-weight: bold; font-size: 9px; min-width: 50px; vertical-align: middle;">${value}</td>`;
         });
         html += '</tr>';
         
-        // Remarks Row
-        html += '<tr style="height: 40px;">';
-        html += '<td style="border: 1px solid #000; padding: 4px; font-weight: bold; font-style: italic; text-align: center;">Remarks</td>';
+        // ==========================================
+        // REMARKS ROW - NEW ADDITION TO MATCH EXCEL
+        // ==========================================
+        html += '<tr style="height: 60px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; font-weight: bold; font-style: italic; text-align: center;">Remarks</td>';
         
         allDates.forEach(date => {
+            const dayOfWeek = date.getDay();
             const dateStr = date.toISOString().split('T')[0];
-            const isWeekend = !_isWD(date);
+            const isSunday = dayOfWeek === 0;
+            const isSaturday = dayOfWeek === 6;
+            const isWorkingSaturday = isSaturday && workingSaturdays.has(dateStr);
+            const isWeekend = isSunday || (isSaturday && !isWorkingSaturday);
+            
             const active = actualMap[dateStr] || [];
             const activeAbbrs = new Set(active.map(x => x.abbr));
             const holdAbbrs = new Set(holdDatesMap[dateStr] || []);
             const realHolds = [...holdAbbrs].filter(h => !activeAbbrs.has(h));
             
             let remark = '';
-            let bgColor = isWeekend ? '#FFFF00' : 'white';
+            let bgColor = 'white';
             
             if (realHolds.length > 0) {
                 remark = "Waiting for issue tracker";
+                for (const stage of stages) {
+                    const parts = stage.name.split('-');
+                    const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
+                    if (realHolds.includes(abbr)) {
+                        const holdRecord = holdDates.find(h =>
+                            h.stage_id === stage.id && h.hold_date.split('T')[0] === dateStr && h.reason
+                        );
+                        if (holdRecord) { remark = holdRecord.reason; break; }
+                        const holdTask = dailyTasks.find(t =>
+                            t.stage_id === stage.id && t.scheduled_date.split('T')[0] === dateStr &&
+                            t.status === 'hold' && t.rescheduled_reason
+                        );
+                        if (holdTask) { remark = holdTask.rescheduled_reason; break; }
+                        const historyEntry = rescheduleHistory.find(h =>
+                            h.stage_id === stage.id &&
+                            h.original_date && h.original_date.split('T')[0] === dateStr &&
+                            h.reason && !h.reason.startsWith('Auto-') && !h.reason.startsWith('Cascaded')
+                        );
+                        if (historyEntry) { remark = historyEntry.reason; break; }
+                    }
+                }
+            } else if (isWeekend) {
+                bgColor = '#FFFF00';
             }
-            html += `<td style="border: 1px solid #000; padding: 4px; background: ${bgColor}; text-align: left; vertical-align: top; font-size: 9px;">${remark}</td>`;
+            
+            html += `<td style="border: 1px solid #000; padding: 6px; background: ${bgColor}; text-align: left; vertical-align: top; font-size: 9px; min-width: 50px; word-wrap: break-word;">${remark}</td>`;
         });
         html += '</tr>';
         
-        html += `<tr><td colspan="${totalCols}" style="height: 20px; border: none;"></td></tr>`;
-
         // ==========================================
-        // BOTTOM STAGE TABLE & LEGEND
+        // SPACING BEFORE LEGEND
         // ==========================================
-        if (stages.length > 0) {
-            const stageNames = stages.map(s => {
-                const parts = s.name.split('-');
-                return parts.length >= 2 ? `${parts.slice(0, -1).join('-').trim()} -${parts[parts.length - 1].trim()}` : s.name;
-            });
-            
-            // Define colspans matching Excel: A(1), B-D(3), E-G(3), H-K(4), L-N(3)
-            const colSpans = [1, 3, 3, 4, 3];
-            
-            let stageIdx = 0;
-            while (stageIdx < stageNames.length) {
-                html += '<tr>';
-                for (let col = 0; col < 5; col++) {
-                    if (stageIdx < stageNames.length) {
-                        html += `<td colspan="${colSpans[col]}" style="border: 1px solid #000; padding: 6px; font-weight: bold; font-size: 10px;">${stageNames[stageIdx]}</td>`;
-                        stageIdx++;
-                    } else {
-                        // Empty cells to complete the grid box
-                        html += `<td colspan="${colSpans[col]}" style="border: 1px solid #000;"></td>`;
-                    }
-                }
-                
-                // Add blank space for the remaining calendar days if the timeline is wide
-                if (totalCols > 14) {
-                    html += `<td colspan="${totalCols - 14}" style="border:none;"></td>`;
-                }
-                html += '</tr>';
-            }
-        }
-        html += `<tr><td colspan="${totalCols}" style="height: 20px; border: none;"></td></tr>`;
-
-        // Legend Table
-        html += '<tr><td style="border: 1px solid #000; background: #FF9900;"></td><td style="border: 1px solid #000; text-align: center; font-size:10px;">Hold</td><td colspan="3" style="border: 1px solid #000; text-align: center; font-size:10px;">If project goes on hold from Customer</td>';
-        if (totalCols > 5) html += `<td colspan="${totalCols - 5}" style="border:none;"></td>`;
+        html += `<tr><td colspan="${allDates.length + 2}" style="border: none; height: 20px;"></td></tr>`;
+        
+        // ==========================================
+        // LEGEND SECTION - MATCHING EXCEL EXACTLY
+        // ==========================================
+        html += '<tr style="height: 25px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: #FFA500; min-width: 180px;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px; min-width: 150px;">Hold</td>';
+        html += '<td colspan="2" style="border: 1px solid #000; padding: 8px;">If project goes on hold from Customer</td>';
         html += '</tr>';
         
-        html += '<tr><td style="border: 1px solid #000; background: white;"></td><td style="border: 1px solid #000; text-align: center; font-size:10px;">Changes</td><td colspan="3" style="border: 1px solid #000;"></td>';
-        if (totalCols > 5) html += `<td colspan="${totalCols - 5}" style="border:none;"></td>`;
+        html += '<tr style="height: 25px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: white;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px;">Changes</td>';
+        html += '<td colspan="2" style="border: 1px solid #000; padding: 8px;"></td>';
         html += '</tr>';
-
-        html += '<tr><td style="border: 1px solid #000; background: #FFFF00;"></td><td style="border: 1px solid #000; text-align: center; font-size:10px;">Holidays</td><td colspan="3" style="border: 1px solid #000;"></td>';
-        if (totalCols > 5) html += `<td colspan="${totalCols - 5}" style="border:none;"></td>`;
+        
+        html += '<tr style="height: 25px;">';
+        html += '<td style="border: 1px solid #000; padding: 8px; background: #FFFF00;"></td>';
+        html += '<td style="border: 1px solid #000; padding: 8px;">Holidays</td>';
+        html += '<td colspan="2" style="border: 1px solid #000; padding: 8px;"></td>';
         html += '</tr>';
         
         html += '</table></div>';
         
-        // Output to Modal
+        // ==========================================
+        // CREATE MODAL
+        // ==========================================
+        const completedTasksCount = dailyTasks.filter(t => t.status === 'completed').length;
+        
         const modalHTML = `
             <div class="modal fade" id="exportPreviewModal" tabindex="-1">
                 <div class="modal-dialog modal-fullscreen">
@@ -9096,15 +9614,24 @@ async function showExcelPreview(projectId) {
             </div>
         `;
         
+        const existingModal = document.getElementById('exportPreviewModal');
+        if (existingModal) existingModal.remove();
+        
         document.body.insertAdjacentHTML('beforeend', modalHTML);
-        new bootstrap.Modal(document.getElementById('exportPreviewModal')).show();
-        document.getElementById('exportPreviewModal').addEventListener('hidden.bs.modal', function () { this.remove(); });
+        const modal = new bootstrap.Modal(document.getElementById('exportPreviewModal'));
+        modal.show();
+        
+        document.getElementById('exportPreviewModal').addEventListener('hidden.bs.modal', function () {
+            this.remove();
+        });
+        
+        showNotification(`✅ Preview loaded with ${stages.length} stages!`, 'success');
         
     } catch (error) {
+        console.error('Preview error:', error);
         showNotification('❌ Preview error: ' + error.message, 'error');
     }
 }
-
 
 // Keep these at the end
 window.showExportPreview = showExcelPreview;
@@ -9196,31 +9723,20 @@ console.log('✅ Export function fixed!');
 
 // Load projects with caching
 async function loadProjects() {
-    const container = document.getElementById('allProjectsSection');
     try {
-        container.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"></div><p class="mt-2 text-muted">Loading jobs...</p></div>';
-        
         const response = await fetch(`/api/projects?_t=${Date.now()}`, {
             cache: 'no-store',
             headers: {'Cache-Control': 'no-cache'}
         });
-        
-        if (!response.ok) throw new Error(`Server error: ${response.status}`);
-        
         projects = await response.json();
         allProjectsCache = projects;
         
-        if (projects.length === 0) {
-            container.innerHTML = '<p class="text-muted text-center py-4"><i class="fas fa-folder-open me-2"></i>No jobs yet. Create your first job!</p>';
-            document.getElementById('resultsCount').textContent = 'Showing 0 jobs';
-            return;
-        }
-        
         // Initial filter and display
-        performSearch();
+        handleProjectSearch();
         
     } catch (error) {
         console.error('Error loading projects:', error);
+        const container = document.getElementById('allProjectsSection');
         container.innerHTML = `
             <div class="alert alert-danger">
                 <i class="fas fa-exclamation-triangle me-2"></i>
@@ -9351,10 +9867,6 @@ async function displayPaginatedProjects() {
         projectsToDisplay.map(async (project) => {
             try {
                 const response = await fetch(`/api/projects/${project.id}/details`);
-                if (!response.ok) {
-                    console.error(`Failed to fetch details for project ${project.id}: ${response.status}`);
-                    return null;
-                }
                 return await response.json();
             } catch (error) {
                 console.error(`Error loading project ${project.id}:`, error);
@@ -9365,20 +9877,6 @@ async function displayPaginatedProjects() {
     
     // Filter out failed requests
     const validProjects = projectsWithDetails.filter(p => p !== null);
-    
-    if (validProjects.length === 0) {
-        container.innerHTML = `
-            <div class="alert alert-warning text-center">
-                <i class="fas fa-exclamation-triangle me-2"></i>
-                Could not load job details. 
-                <button class="btn btn-sm btn-outline-warning ms-2" onclick="loadProjects()">
-                    <i class="fas fa-redo me-1"></i> Retry
-                </button>
-            </div>
-        `;
-        updatePaginationControls();
-        return;
-    }
     
     // Render projects
     renderProjectsWithStages(validProjects);
@@ -9461,8 +9959,6 @@ async function openEditProjectModal(projectId, event) {
         document.querySelector('#projectForm button[type="submit"]').textContent = 'Update Job';
         
         document.getElementById('projectName').value = project.name;
-        document.getElementById('clientName').value = project.client_name || '';         
-        document.getElementById('projectManager').value = project.project_manager || '';        
         document.getElementById('projectStartDate').value = project.start_date;
         
         workingSaturdays.clear();
@@ -9490,27 +9986,22 @@ async function openEditProjectModal(projectId, event) {
         document.getElementById('stagesContainer').innerHTML = '';
         
         // === SMART DETECTION LOGIC START ===
-        let currentExpectedStart = getNextWorkingDay(new Date(project.start_date));
-        
+        let prevStageEnd = null;
         for (const stage of project.stages) {
-            let isCustom = true; 
-            
-            if (stage.start_date) {
-                const actualStart = new Date(stage.start_date);
-                // Check if actual start matches the expected sequential start
-                const isSameDate = actualStart.toISOString().split('T')[0] === currentExpectedStart.toISOString().split('T')[0];
-                
-                if (isSameDate) {
-                    isCustom = false; // No gap detected, treat as auto-flow
+            let isCustom = false;
+            if (stage.start_date && prevStageEnd !== null) {
+                const actualStart = new Date(stage.start_date + 'T12:00:00');
+                const expectedStart = addWorkingDays(prevStageEnd, 1);
+                if (actualStart.toISOString().split('T')[0] !== expectedStart.toISOString().split('T')[0]) {
+                    isCustom = true;
                 }
-                
-                // Calculate where the NEXT stage is expected to start
-                const baseStart = isCustom ? actualStart : currentExpectedStart;
-                const duration = stage.duration_days || 1;
-                const stageEnd = addWorkingDays(baseStart, duration - 1);
-                currentExpectedStart = addWorkingDays(stageEnd, 1);
             }
-            
+            if (stage.end_date) {
+                prevStageEnd = new Date(stage.end_date + 'T12:00:00');
+            } else if (stage.start_date) {
+                const s = new Date(stage.start_date + 'T12:00:00');
+                prevStageEnd = addWorkingDays(s, (stage.duration_days || 1) - 1);
+            }
             addEditStage(stage, isCustom);
         }
         // === SMART DETECTION LOGIC END ===
@@ -9683,8 +10174,6 @@ function stopAllProgressLineAutoRefresh() {
 // Helper function to reset form
 function resetProjectForm() {
     document.getElementById('projectForm').reset();
-    document.getElementById('clientName').value = '';
-    document.getElementById('projectManager').value = '';
     document.getElementById('stagesContainer').innerHTML = '';
     document.getElementById('selectedMembers').innerHTML = '';
     document.querySelector('#projectModal .modal-title').textContent = 'Create New Job';
