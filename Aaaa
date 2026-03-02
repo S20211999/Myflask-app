@@ -315,26 +315,16 @@ def generate_excel_file(project_id, save_to_backend=True):
         
         planned_map = {}
 
-        all_history_task_ids = set(h.task_id for h in all_history if h.task_id is not None)
-        extended_task_ids = set(
-            t.id for t in StageDailyTask.query.filter_by(project_id=project_id).filter(StageDailyTask.planned_date == None).all()
-            if t.id in all_history_task_ids
-        )
-
         for stage in stages:
             parts = stage.name.split('-')
             abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
             stage_tasks = StageDailyTask.query.filter_by(project_id=project_id, stage_id=stage.id).all()
             if stage_tasks:
                 for t in stage_tasks:
-                    if t.id in extended_task_ids:
-                        continue
-                    if t.planned_date: orig = t.planned_date
-                    elif t.original_date: orig = t.original_date
-                    else: orig = t.scheduled_date
-                    ds = orig.strftime('%Y-%m-%d')
-                    if ds not in planned_map: planned_map[ds] = []
-                    if abbr not in planned_map[ds]: planned_map[ds].append(abbr)
+                    if t.planned_date:
+                        ds = t.planned_date.strftime('%Y-%m-%d')
+                        if ds not in planned_map: planned_map[ds] = []
+                        if abbr not in planned_map[ds]: planned_map[ds].append(abbr)
             else:
                 if stage.start_date and stage.end_date:
                     d = stage.start_date
@@ -387,7 +377,19 @@ def generate_excel_file(project_id, save_to_backend=True):
         ws.cell(current_row, 1).font = Font(bold=True)
         ws.cell(current_row, 1).alignment = Alignment(horizontal='center', vertical='center')
 
-        actual_map, hold_dates_map = {}, {}
+        actual_map, hold_dates_map = {}, {}        
+        
+        # Load explicit hold dates from HoldDate table
+        hold_records = HoldDate.query.filter_by(project_id=project_id).all()
+        for hr in hold_records:
+            ds = hr.hold_date.strftime('%Y-%m-%d')
+            stage_rec = ProjectStage.query.get(hr.stage_id)
+            if stage_rec:
+                parts = stage_rec.name.split('-')
+                abbr = parts[-1].strip() if len(parts) > 1 else stage_rec.name[:6]
+                if ds not in hold_dates_map: hold_dates_map[ds] = []
+                if abbr not in hold_dates_map[ds]: hold_dates_map[ds].append(abbr)
+
         for stage in stages:
             parts = stage.name.split('-')
             abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
@@ -400,11 +402,6 @@ def generate_excel_file(project_id, save_to_backend=True):
                 else:
                     if ds not in actual_map: actual_map[ds] = []
                     actual_map[ds].append((abbr, t.status))
-                
-                if t.original_date and t.original_date != t.scheduled_date and t.status == 'rescheduled':
-                    hds = t.original_date.strftime('%Y-%m-%d')
-                    if hds not in hold_dates_map: hold_dates_map[hds] = []
-                    if abbr not in hold_dates_map[hds]: hold_dates_map[hds].append(abbr)
                         
         for i, d in enumerate(all_dates):
             cell = ws.cell(current_row, i+2)
@@ -1553,7 +1550,9 @@ def reschedule_stage(project_id):
             project.working_saturdays = json.dumps(list(working_saturdays))
         
         # Snapshot original_dates BEFORE deleting tasks.
+        # Snapshot original_dates AND planned_dates BEFORE deleting tasks.
         original_date_snapshot = {}
+        planned_date_snapshot = {}
         existing_tasks = StageDailyTask.query.filter_by(project_id=project_id).all()
         for et in existing_tasks:
             key = (et.stage_id, et.day_number)
@@ -1561,6 +1560,9 @@ def reschedule_stage(project_id):
             candidate = et.original_date if et.original_date else et.scheduled_date
             if stored is None or candidate < stored:
                 original_date_snapshot[key] = candidate
+            
+            # Snapshot planned date exactly as it is
+            planned_date_snapshot[key] = et.planned_date if et.planned_date else candidate
 
         old_tasks_count = len(existing_tasks)
         StageDailyTask.query.filter_by(project_id=project_id).delete()
@@ -1571,12 +1573,15 @@ def reschedule_stage(project_id):
         db.session.flush()
         new_tasks = StageDailyTask.query.filter_by(project_id=project_id).all()
         for nt in new_tasks:
-            if nt.stage_id == stage_id:
-                continue
             key = (nt.stage_id, nt.day_number)
             if key in original_date_snapshot:
-                nt.original_date = original_date_snapshot[key]
-        print(f'   ✅ Restored original_dates for {len(new_tasks)} regenerated tasks')
+                if nt.stage_id != stage_id:
+                    nt.original_date = original_date_snapshot[key]
+                # Restore planned_date for ALL tasks, including the rescheduled stage
+                nt.planned_date = planned_date_snapshot[key]
+            else:
+                nt.planned_date = None # Extended days from shift shouldn't appear in Planned
+        print(f'   ✅ Restored original_dates and planned_dates for {len(new_tasks)} regenerated tasks')
         
         # ✅ COMMIT EVERYTHING
         db.session.commit()
@@ -1712,7 +1717,7 @@ def get_stage_daily_tasks(project_id, stage_id):
             'day_number': t.day_number,
             'scheduled_date': t.scheduled_date.isoformat(),
             'original_date': t.original_date.isoformat() if t.original_date else None,
-            'planned_date': t.planned_date.isoformat() if t.planned_date else (t.original_date.isoformat() if t.original_date else t.scheduled_date.isoformat()),
+            'planned_date': t.planned_date.isoformat() if t.planned_date else None,
             'status': t.status,
             'completed_at': t.completed_at.strftime('%Y-%m-%d %H:%M') if t.completed_at else None,
             'rescheduled_reason': t.rescheduled_reason,
@@ -1827,6 +1832,10 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         
         if not task.original_date:
             task.original_date = task.scheduled_date
+
+        # Snapshot original dates of this stage to calculate HOLDS later
+        original_stage_dates = set(t.scheduled_date for t in StageDailyTask.query.filter_by(stage_id=stage_id).all())
+
 
         # ============================================================
         # EXTEND & RESCHEDULE MODE
@@ -1960,6 +1969,22 @@ def reschedule_daily_task(project_id, stage_id, task_id):
         if all_tasks_in_stage:
             stage.start_date = min(t.scheduled_date for t in all_tasks_in_stage)
             stage.end_date = max(t.scheduled_date for t in all_tasks_in_stage)
+
+        # Generate HoldDates for vacated days ONLY for the primary stage
+        db.session.flush()
+        new_stage_dates = set(t.scheduled_date for t in StageDailyTask.query.filter_by(stage_id=stage_id).all())
+        vacated_dates = original_stage_dates - new_stage_dates
+        
+        if days_to_shift > 0 or extend_days > 0:
+            for vd in vacated_dates:
+                hold = HoldDate(
+                    project_id=project_id,
+                    stage_id=stage_id,
+                    hold_date=vd,
+                    reason=reason if reason else "Vacated during task reschedule",
+                    created_by=get_current_user().id
+                )
+                db.session.add(hold)
 
         # ── CASCADE TO SUBSEQUENT STAGES ──────────────────────────────────────────
         cascade_shift = days_to_shift + extend_days if mode == 'extend_and_reschedule' else days_to_shift
@@ -2155,7 +2180,7 @@ def get_all_project_daily_tasks(project_id):
             'day_number': task.day_number,
             'scheduled_date': task.scheduled_date.isoformat() if task.scheduled_date else None,
             'original_date': task.original_date.isoformat() if task.original_date else None,
-            'planned_date': task.planned_date.isoformat() if task.planned_date else (task.original_date.isoformat() if task.original_date else task.scheduled_date.isoformat()),
+            'planned_date': task.planned_date.isoformat() if task.planned_date else None,
             'status': task.status,
             'completed_at': task.completed_at.isoformat() if task.completed_at else None,
             'reschedule_count': task.reschedule_count or 0
@@ -2478,17 +2503,28 @@ def get_excel_preview_html(project_id):
         # Build PLANNED row data (exact same logic as Excel)
         planned_map = {}
         for stage in stages:
-            if stage.start_date and stage.end_date:
-                parts = stage.name.split('-')
-                abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
-                d = stage.start_date
-                while d <= stage.end_date:
-                    ds = d.strftime('%Y-%m-%d')
-                    if ds not in planned_map:
-                        planned_map[ds] = []
-                    if is_working_day(d, False, working_saturdays):
-                        planned_map[ds].append(abbr)
-                    d += timedelta(days=1)
+            parts = stage.name.split('-')
+            abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
+            stage_tasks = StageDailyTask.query.filter_by(project_id=project_id, stage_id=stage.id).all()
+            
+            if stage_tasks:
+                for t in stage_tasks:
+                    if t.planned_date: 
+                        ds = t.planned_date.strftime('%Y-%m-%d')
+                        if ds not in planned_map:
+                            planned_map[ds] = []
+                        if abbr not in planned_map[ds]:
+                            planned_map[ds].append(abbr)
+            else:
+                if stage.start_date and stage.end_date:
+                    d = stage.start_date
+                    while d <= stage.end_date:
+                        ds = d.strftime('%Y-%m-%d')
+                        if ds not in planned_map:
+                            planned_map[ds] = []
+                        if is_working_day(d, False, working_saturdays):
+                            planned_map[ds].append(abbr)
+                        d += timedelta(days=1)
 
         # Build RESCHEDULE row data (exact same logic as Excel)
         stage_reschedule_map = {1: {}, 2: {}, 3: {}, 4: {}}
@@ -2517,42 +2553,35 @@ def get_excel_preview_html(project_id):
                     if stage_abbr not in stage_reschedule_map[target_row][date_str]:
                         stage_reschedule_map[target_row][date_str].append(stage_abbr)
 
+
         # Build ACTUAL row data (exact same logic as Excel)
         actual_map = {}
         hold_dates_map = {}
         
+        # Load explicit hold dates from HoldDate table
+        hold_records = HoldDate.query.filter_by(project_id=project_id).all()
+        for hr in hold_records:
+            ds = hr.hold_date.strftime('%Y-%m-%d')
+            stage_rec = ProjectStage.query.get(hr.stage_id)
+            if stage_rec:
+                parts = stage_rec.name.split('-')
+                abbr = parts[-1].strip() if len(parts) > 1 else stage_rec.name[:6]
+                if ds not in hold_dates_map: hold_dates_map[ds] = []
+                if abbr not in hold_dates_map[ds]: hold_dates_map[ds].append(abbr)
+                
         for stage in stages:
             parts = stage.name.split('-')
             abbr = parts[-1].strip() if len(parts) > 1 else stage.name[:6]
             
             tasks = StageDailyTask.query.filter_by(stage_id=stage.id).all()
-            task_map = {t.scheduled_date.strftime('%Y-%m-%d'): t for t in tasks}
-            
-            if stage.start_date and stage.end_date:
-                d = stage.start_date
-                while d <= stage.end_date:
-                    if is_working_day(d, False, working_saturdays):
-                        ds = d.strftime('%Y-%m-%d')
-                        
-                        if ds in task_map:
-                            task = task_map[ds]
-                            
-                            if task.status == 'hold':
-                                if ds not in hold_dates_map:
-                                    hold_dates_map[ds] = []
-                                if abbr not in hold_dates_map[ds]:
-                                    hold_dates_map[ds].append(abbr)
-                            elif task.status in ['pending', 'completed']:
-                                if ds not in actual_map:
-                                    actual_map[ds] = []
-                                actual_map[ds].append((abbr, task.status))
-                        else:
-                            if ds not in actual_map:
-                                actual_map[ds] = []
-                            actual_map[ds].append((abbr, 'pending'))
-                    
-                    d += timedelta(days=1)
-
+            for t in tasks:
+                ds = t.scheduled_date.strftime('%Y-%m-%d')
+                if t.status == 'hold':
+                    if ds not in hold_dates_map: hold_dates_map[ds] = []
+                    if abbr not in hold_dates_map[ds]: hold_dates_map[ds].append(abbr)
+                else:
+                    if ds not in actual_map: actual_map[ds] = []
+                    actual_map[ds].append((abbr, t.status))
         # Organize into weeks for display
         weeks = []
         current_week = []
@@ -2817,8 +2846,6 @@ def init_db():
 if __name__ == '__main__':
     init_db()
     app.run(debug=True, host='0.0.0.0', port=5000)
-
-
 
 
 
@@ -9068,60 +9095,48 @@ async function showExcelPreview(projectId) {
         html += '</tr>';
         
         // Planned Row Logic
-        const plannedMap = {};
-        const stageRescheduleShifts = new Map();
-        rescheduleHistory.forEach(h => {
-            if (h.type !== 'daily_task') {
-                const shift = h.direction === 'forward' ? (h.days_shifted || 0) : -(h.days_shifted || 0);
-                stageRescheduleShifts.set(h.stage_id, (stageRescheduleShifts.get(h.stage_id) || 0) + shift);
-            }
-        });
 
+        // Planned Row Logic
+        const plannedMap = {};
+        
         function _isWD(date) {
             const day = date.getDay();
             if (day === 0) return false;
             if (day === 6) return workingSaturdays.has(date.toISOString().split('T')[0]);
             return true;
         }
-        function _addWD(d, n) {
-            if (n === 0) return new Date(d);
-            const dir = n > 0 ? 1 : -1;
-            let cur = new Date(d); let rem = Math.abs(n);
-            while (rem > 0) { cur.setDate(cur.getDate() + dir); if (_isWD(cur)) rem--; }
-            return cur;
-        }
 
-        let _cascadeEnd = null;
-        const plannedStageDates = [...stages].sort((a, b) => (a.order || 0) - (b.order || 0)).map(stage => {
-            if (!stage.start_date || !stage.end_date) return { stage, start: null, end: null };
-            let start = new Date(stage.start_date + 'T12:00:00');
-            let end   = new Date(stage.end_date   + 'T12:00:00');
-            const dur = stage.duration_days || 1;
-
-            if (stageRescheduleShifts.has(stage.id)) {
-                if (!_cascadeEnd || end > _cascadeEnd) _cascadeEnd = new Date(end);
-            } else if (_cascadeEnd && start <= _cascadeEnd) {
-                start = _addWD(_cascadeEnd, 1);
-                end   = _addWD(start, dur - 1);
-                if (!_cascadeEnd || end > _cascadeEnd) _cascadeEnd = new Date(end);
-            }
-            return { stage, start, end };
-        });
-
-        plannedStageDates.forEach(({ stage, start, end }) => {
-            if (!start || !end) return;
+        stages.forEach(stage => {
             const parts = stage.name.split('-');
-            const abbr  = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
-            let d = new Date(start);
-            while (d <= end) {
-                const dateStr = d.toISOString().split('T')[0];
-                if (_isWD(d)) {
-                    if (!plannedMap[dateStr]) plannedMap[dateStr] = [];
-                    if (!plannedMap[dateStr].includes(abbr)) plannedMap[dateStr].push(abbr);
+            const abbr = parts.length > 1 ? parts[parts.length - 1].trim() : stage.name.substring(0, 6);
+            const tasks = dailyTasks.filter(t => t.stage_id === stage.id);
+            
+            if (tasks && tasks.length > 0) {
+                tasks.forEach(t => {
+                    // Strictly use planned_date from API
+                    if (t.planned_date) {
+                        const ds = t.planned_date.split('T')[0];
+                        if (!plannedMap[ds]) plannedMap[ds] = [];
+                        if (!plannedMap[ds].includes(abbr)) plannedMap[ds].push(abbr);
+                    }
+                });
+            } else {
+                // Fallback for stages without daily tasks
+                if (stage.start_date && stage.end_date) {
+                    let d = new Date(stage.start_date + 'T12:00:00');
+                    const end = new Date(stage.end_date + 'T12:00:00');
+                    while (d <= end) {
+                        const dateStr = d.toISOString().split('T')[0];
+                        if (_isWD(d)) {
+                            if (!plannedMap[dateStr]) plannedMap[dateStr] = [];
+                            if (!plannedMap[dateStr].includes(abbr)) plannedMap[dateStr].push(abbr);
+                        }
+                        d.setDate(d.getDate() + 1);
+                    }
                 }
-                d.setDate(d.getDate() + 1);
             }
         });
+
 
         html += '<tr style="height: 30px;">';
         // ✅ Added white-space: nowrap;
@@ -9199,22 +9214,6 @@ async function showExcelPreview(projectId) {
                 } else {
                     if (!actualMap[ds]) actualMap[ds] = [];
                     actualMap[ds].push({abbr, status: t.status});
-                }
-                if (t.original_date && t.original_date !== t.scheduled_date) {
-                    const hds = t.original_date.split('T')[0];
-                    if (!holdDatesMap[hds]) holdDatesMap[hds] = [];
-                    if (!holdDatesMap[hds].includes(abbr)) holdDatesMap[hds].push(abbr);
-                }
-            });
-        });
-
-        Object.keys(plannedMap).forEach(ds => {
-            plannedMap[ds].forEach(abbr => {
-                const inActual = (actualMap[ds] || []).some(x => x.abbr === abbr);
-                const inHold   = (holdDatesMap[ds] || []).includes(abbr);
-                if (!inActual && !inHold) {
-                    if (!actualMap[ds]) actualMap[ds] = [];
-                    actualMap[ds].push({abbr, status: 'pending'});
                 }
             });
         });
