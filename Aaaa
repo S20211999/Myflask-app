@@ -1,547 +1,554 @@
-import base64
-import sys
-import os
-import json
-import math
-import os
-from pathlib import Path
-import tempfile
-import requests
-from datetime import datetime
-from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,QDialog,QListWidget,
-                            QHBoxLayout, QGridLayout, QLabel, QLineEdit, QSizePolicy, QMenu,
-                            QComboBox, QPushButton, QScrollArea, QFrame,QListWidgetItem,QGraphicsDropShadowEffect,
-                            QSpinBox, QDoubleSpinBox, QFileDialog, QMessageBox, QCheckBox,
-                            QSplitter, QGroupBox, QToolBar,QDateEdit, QTabWidget,QStackedWidget)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QRectF, QPointF,QDate,QAbstractTableModel, Qt, QModelIndex,QEvent
-from PyQt6.QtGui import QPainter, QPen, QBrush, QColor, QFont, QPalette, QPolygonF, QAction, QPainterPath
-from PyQt6.QtSvgWidgets import QSvgWidget
-from PyQt6.QtSvg import QSvgRenderer
-from openpyxl import Workbook
-import struct
-import traceback
-import decimal
-from decimal import Decimal, getcontext, ROUND_HALF_UP, InvalidOperation
+    # ============================================
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activity Tracker Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root{
+  --bg:#0d1117;--surface:#161b22;--card:#1c2128;--border:#30363d;
+  --accent:#58a6ff;--green:#3fb950;--orange:#f0883e;--red:#f85149;
+  --purple:#bc8cff;--cyan:#39d353;
+  --text:#e6edf3;--muted:#7d8590;--radius:10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;min-height:100vh;display:flex}
+.sidebar{width:220px;min-height:100vh;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100;overflow-y:auto}
+.sidebar-logo{padding:20px 18px 14px;border-bottom:1px solid var(--border)}
+.sidebar-logo .title{font-size:15px;font-weight:700;color:var(--accent)}
+.sidebar-logo .sub{font-size:11px;color:var(--muted);margin-top:3px}
+.nav-section{padding:12px 10px 4px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+.nav-link{display:flex;align-items:center;gap:9px;padding:8px 14px;margin:1px 6px;border-radius:6px;font-size:13px;color:var(--muted);cursor:pointer;text-decoration:none;transition:all .15s}
+.nav-link:hover{background:rgba(88,166,255,.08);color:var(--text)}
+.nav-link.active{background:rgba(88,166,255,.15);color:var(--accent);font-weight:600}
+.nav-link .icon{font-size:15px;width:20px;text-align:center}
+.nav-divider{height:1px;background:var(--border);margin:8px 14px}
+.nav-apps,.nav-users{max-height:200px;overflow-y:auto;padding-bottom:4px}
+.nav-apps::-webkit-scrollbar,.nav-users::-webkit-scrollbar{width:3px}
+.nav-apps::-webkit-scrollbar-thumb,.nav-users::-webkit-scrollbar-thumb{background:var(--border)}
+.main{margin-left:220px;flex:1;min-width:0}
+.topbar{position:sticky;top:0;z-index:50;background:rgba(13,17,23,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:14px 28px;display:flex;align-items:center;gap:12px}
+.topbar .page-title{font-size:17px;font-weight:700;flex:1}
+.topbar .breadcrumb{font-size:11px;color:var(--muted)}
+.refresh-btn{background:var(--accent);color:#0d1117;border:none;border-radius:7px;padding:7px 16px;font-size:12px;font-weight:700;cursor:pointer;transition:opacity .2s}
+.refresh-btn:hover{opacity:.85}
+.live-dot{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.content{padding:24px 28px}
+.kpi-row{display:grid;grid-template-columns:repeat(auto-fill,minmax(185px,1fr));gap:14px;margin-bottom:24px}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;position:relative;overflow:hidden}
+.kpi::after{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:var(--accent)}
+.kpi.green::after{background:var(--green)}
+.kpi.orange::after{background:var(--orange)}
+.kpi.purple::after{background:var(--purple)}
+.kpi.red::after{background:var(--red)}
+.kpi-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:8px}
+.kpi-value{font-size:26px;font-weight:700;line-height:1}
+.kpi-sub{font-size:11px;color:var(--muted);margin-top:5px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:20px}
+@media(max-width:900px){.grid-2{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:20px}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card-title{font-size:13px;font-weight:600}
+.card-sub{font-size:11px;color:var(--muted)}
+.chart-wrap{padding:18px;height:260px;position:relative}
+.chart-wrap.tall{height:320px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+thead th{background:var(--surface);padding:10px 14px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+tbody tr{border-bottom:1px solid rgba(48,54,61,.6);transition:background .1s}
+tbody tr:hover{background:rgba(88,166,255,.04)}
+tbody td{padding:10px 14px;vertical-align:middle}
+.tbl-scroll{max-height:340px;overflow-y:auto}
+.tbl-scroll::-webkit-scrollbar{width:4px}
+.tbl-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:99px}
+.mbar{display:flex;align-items:center;gap:7px}
+.mbar-bg{flex:1;height:5px;background:var(--border);border-radius:99px;min-width:50px}
+.mbar-fill{height:100%;border-radius:99px;background:var(--accent)}
+.mbar-fill.g{background:var(--green)}
+.mbar-fill.o{background:var(--orange)}
+.badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap}
+.badge-blue{background:rgba(88,166,255,.15);color:var(--accent)}
+.badge-green{background:rgba(63,185,80,.15);color:var(--green)}
+.badge-orange{background:rgba(240,136,62,.15);color:var(--orange)}
+.badge-purple{background:rgba(188,140,255,.15);color:var(--purple)}
+.badge-red{background:rgba(248,81,73,.15);color:var(--red)}
+.entity-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;margin-bottom:24px}
+.entity-card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:18px 20px;cursor:pointer;transition:all .15s;position:relative;overflow:hidden}
+.entity-card:hover{border-color:var(--accent);transform:translateY(-1px);box-shadow:0 4px 20px rgba(88,166,255,.12)}
+.entity-card .ec-icon{font-size:26px;margin-bottom:10px}
+.entity-card .ec-name{font-size:14px;font-weight:700;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.entity-card .ec-sub{font-size:11px;color:var(--muted);margin-bottom:12px}
+.entity-card .ec-stat{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px}
+.entity-card .ec-stat span:first-child{color:var(--muted)}
+.entity-card .ec-stat span:last-child{color:var(--green);font-weight:600}
+.entity-card .ec-bar{height:3px;background:var(--border);border-radius:99px;margin-top:10px;overflow:hidden}
+.entity-card .ec-bar-fill{height:100%;background:var(--accent);border-radius:99px}
+.empty{text-align:center;padding:50px 20px;color:var(--muted)}
+.empty .eicon{font-size:40px;margin-bottom:10px;opacity:.5}
+.filter-row{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+.filter-row label{font-size:11px;color:var(--muted)}
+.filter-row select,.filter-row input[type=date]{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:5px 10px;font-size:12px}
+.page{display:none}
+.page.active{display:block}
+.hms{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
 
-# Set decimal precision (adjust as needed for your application)
-getcontext().prec = 5
-getcontext().rounding = ROUND_HALF_UP
-# Package types data structure with SVG paths
-PACKAGE_TYPES = {
-    'SOJ (Small Outline Package) - J Leads': 'svg_files/Wizard-IPCFootprintType-soj.svg',
-    'SON (Small Outline No-Lead)': 'svg_files/Wizard-IPCFootprintType-son.svg',
-    'SOP (Small Outline Package) - Gullwing Leads': 'svg_files/Wizard-IPCFootprintType-sop.svg',
-    'SOT23 (Small Outline Transistor)': 'svg_files/Wizard-IPCFootprintType-sot23.svg',
-    'SOT89 (Small Outline Transistor)': 'svg_files/Wizard-IPCFootprintType-sot89.svg',
-    'SOT143_343 (Small Outline Transistor)': 'svg_files/Wizard-IPCFootprintType-sot143.svg',
-    'SOT223 (Small Outline Transistor)': 'svg_files/Wizard-IPCFootprintType-sot223.svg',
-    'SOTFL (Small Outline Transistor Flat-Lead)': 'svg_files/Wizard-IPCFootprintType-sotfl.svg',
-    'BGA (Ball Grid Array)': 'svg_files/Wizard-IPCFootprintType-bga.svg',
-    'BQFP (Bumpered Quad Flat Pack)': 'svg_files/Wizard-IPCFootprintType-bqfp.svg',
-    'CAN (Thru-hole Metal Can)': 'svg_files/Wizard-IPCFootprintType-can.svg',
-    'CAN-FM (Thru-hole Flange Mount CAN)': 'svg_files/Wizard-IPCFootprintType-can_fm.svg',
-    'CAPAE (Electrolytic Aluminum Capacitor)': 'svg_files/Wizard-IPCFootprintType-capae.svg',
-    'CFP (Dual Flat Pack)': 'svg_files/Wizard-IPCFootprintType-cfp.svg',
-    'Chip Array (Chip Array)': 'svg_files/Wizard-IPCFootprintType-chip_array.svg',
-    'Chip Components': 'svg_files/Wizard-IPCFootprintType-chip_components.svg',
-    'CQFP (Ceramic Quad Flat Pack)': 'svg_files/Wizard-IPCFootprintType-cqfp.svg',
-    'DFN (Dual Flat No-Lead)': 'svg_files/Wizard-IPCFootprintType-dfn.svg',
-    'DIP (Thru-hole Dual-In-Line)': 'svg_files/Wizard-IPCFootprintType-dip.svg',
-    'DPAK (Transistor outline)': 'svg_files/Wizard-IPCFootprintType-dpak.svg',
-    'FM (Flange Mount)': 'svg_files/Wizard-IPCFootprintType-fm.svg',
-    'LCC (Leadless Chip Carrier)': 'svg_files/Wizard-IPCFootprintType-lcc.svg',
-    'LGA (Land Grid Array)': 'svg_files/Wizard-IPCFootprintType-lga.svg',
-    'MELF': 'svg_files/Wizard-IPCFootprintType-melf.svg',
-    'Molded Components (Capacitor Inductor Diode)': 'svg_files/Wizard-IPCFootprintType-molded.svg',
-    'PCY (Thru-hole Plastic Cylinder Flat Index)': 'svg_files/Wizard-IPCFootprintType-pcy.svg',
-    'PLCC (Leaded Chip Carrier)': 'svg_files/Wizard-IPCFootprintType-plcc.svg',
-    'PQFN (Quad Flat No-Lead Pullback)': 'svg_files/Wizard-IPCFootprintType-pqfn.svg',
-    'PQFP (Plastic Quad Flat Pack)': 'svg_files/Wizard-IPCFootprintType-pqfp.svg',
-    'Precision Wire Wound_Inductor': 'svg_files/Wizard-IPCFootprintType-wire_wound.svg',
-    'PSON (Small Outline No-lead Pullback)': 'svg_files/Wizard-IPCFootprintType-pson.svg',
-    'QFN (Quad Flat No-Leads)': 'svg_files/Wizard-IPCFootprintType-qfn.svg',
-    'QFN-2Rows (Quad Flat No-leads, 2 Rows, Square)': 'svg_files/Wizard-IPCFootprintType-qfn_2rows.svg',
-    'SIP (Single Inline Package)': 'svg_files/Wizard-IPCFootprintType-sip.svg',
-    'SODFL (Small Outline Diode Flat-Lead)': 'svg_files/Wizard-IPCFootprintType-sodfl.svg',
-    'SOF (Small Outline Flat Leads)': 'svg_files/Wizard-IPCFootprintType-sof.svg',
-    'SOIC (Small Outline Integrated Package)': 'svg_files/Wizard-IPCFootprintType-soic.svg',
+<nav class="sidebar">
+  <div class="sidebar-logo">
+    <div class="title">&#9201; Activity Tracker</div>
+    <div class="sub">Multi-App Dashboard</div>
+  </div>
+  <div class="nav-section">Overview</div>
+  <a class="nav-link active" data-page="overview" onclick="nav('overview')">
+    <span class="icon">&#128202;</span> Overall Dashboard
+  </a>
+  <div class="nav-divider"></div>
+  <div class="nav-section">Applications</div>
+  <a class="nav-link" data-page="apps" onclick="nav('apps')">
+    <span class="icon">&#128187;</span> All Apps
+  </a>
+  <div class="nav-apps" id="nav-apps"></div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">Users</div>
+  <a class="nav-link" data-page="users" onclick="nav('users')">
+    <span class="icon">&#128101;</span> All Users
+  </a>
+  <div class="nav-users" id="nav-users"></div>
+  <div style="flex:1"></div>
+  <div style="padding:12px 14px;font-size:10px;color:var(--muted);border-top:1px solid var(--border)">
+    Auto-refresh 30s &nbsp;<span class="live-dot"></span>
+  </div>
+</nav>
+
+<div class="main">
+  <div class="topbar">
+    <div>
+      <div class="breadcrumb" id="breadcrumb">Dashboard</div>
+      <div class="page-title" id="topbar-title">Overall Dashboard</div>
+    </div>
+    <button class="refresh-btn" onclick="loadData()">&#8635; Refresh</button>
+  </div>
+  <div class="content">
+
+    <!-- OVERVIEW -->
+    <div class="page active" id="page-overview">
+      <div class="kpi-row">
+        <div class="kpi green"><div class="kpi-label">Active Today</div><div class="kpi-value hms" id="ov-active-today">--</div><div class="kpi-sub" id="ov-active-sub">all apps</div></div>
+        <div class="kpi orange"><div class="kpi-label">Idle Today</div><div class="kpi-value hms" id="ov-idle-today">--</div><div class="kpi-sub">excluded from active</div></div>
+        <div class="kpi"><div class="kpi-label">Active Users Today</div><div class="kpi-value" id="ov-users-today">--</div><div class="kpi-sub">unique users</div></div>
+        <div class="kpi"><div class="kpi-label">Active Apps Today</div><div class="kpi-value" id="ov-apps-today">--</div><div class="kpi-sub">distinct apps</div></div>
+        <div class="kpi purple"><div class="kpi-label">7-Day Active</div><div class="kpi-value hms" id="ov-week">--</div><div class="kpi-sub">all apps combined</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><span class="card-title">Daily Active Time — All Apps (14 days)</span></div><div class="chart-wrap"><canvas id="ov-chart-daily"></canvas></div></div>
+        <div class="card"><div class="card-header"><span class="card-title">Active Time by App (today)</span></div><div class="chart-wrap"><canvas id="ov-chart-apps-today"></canvas></div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><span class="card-title">Active vs Idle by User (today)</span></div><div class="chart-wrap"><canvas id="ov-chart-users-today"></canvas></div></div>
+        <div class="card"><div class="card-header"><span class="card-title">App Usage Share (7 days)</span></div><div class="chart-wrap"><canvas id="ov-chart-pie"></canvas></div></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><span class="card-title">Recent Sessions</span><span class="card-sub" id="ov-raw-count"></span></div>
+        <div class="tbl-scroll"><table><thead><tr><th>Date</th><th>Time</th><th>App</th><th>User</th><th>Machine</th><th>Active</th><th>Idle</th><th>Type</th></tr></thead><tbody id="ov-raw-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- APPS LIST -->
+    <div class="page" id="page-apps">
+      <div class="filter-row">
+        <label>Date range</label>
+        <select id="apps-range" onchange="renderAppsPage()">
+          <option value="1">Today</option><option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option><option value="0">All time</option>
+        </select>
+      </div>
+      <div class="entity-grid" id="apps-grid"></div>
+      <div class="card"><div class="card-header"><span class="card-title">App Comparison — Active Time (minutes)</span></div><div class="chart-wrap tall"><canvas id="apps-bar-chart"></canvas></div></div>
+    </div>
+
+    <!-- APP DETAIL -->
+    <div class="page" id="page-app-detail">
+      <div class="kpi-row">
+        <div class="kpi green"><div class="kpi-label">Total Active</div><div class="kpi-value hms" id="ad-total-active">--</div><div class="kpi-sub">all time</div></div>
+        <div class="kpi orange"><div class="kpi-label">Total Idle</div><div class="kpi-value hms" id="ad-total-idle">--</div><div class="kpi-sub">all time</div></div>
+        <div class="kpi"><div class="kpi-label">Unique Users</div><div class="kpi-value" id="ad-users">--</div><div class="kpi-sub">ever used this app</div></div>
+        <div class="kpi purple"><div class="kpi-label">Active Today</div><div class="kpi-value hms" id="ad-active-today">--</div><div class="kpi-sub">all users combined</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><span class="card-title">Daily Active Time (14 days)</span></div><div class="chart-wrap"><canvas id="ad-chart-daily"></canvas></div></div>
+        <div class="card"><div class="card-header"><span class="card-title">Users — Active vs Idle</span></div><div class="chart-wrap"><canvas id="ad-chart-users"></canvas></div></div>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">User Breakdown</span></div>
+        <table><thead><tr><th>User</th><th>Machine</th><th>Active</th><th>Share</th><th>Idle</th><th>Sessions</th></tr></thead><tbody id="ad-user-table"></tbody></table>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">Session Log</span></div>
+        <div class="tbl-scroll"><table><thead><tr><th>Date</th><th>Time</th><th>User</th><th>Machine</th><th>Active</th><th>Idle</th><th>Type</th></tr></thead><tbody id="ad-raw-body"></tbody></table></div>
+      </div>
+    </div>
+
+    <!-- USERS LIST -->
+    <div class="page" id="page-users">
+      <div class="filter-row">
+        <label>Date range</label>
+        <select id="users-range" onchange="renderUsersPage()">
+          <option value="1">Today</option><option value="7" selected>Last 7 days</option>
+          <option value="30">Last 30 days</option><option value="0">All time</option>
+        </select>
+      </div>
+      <div class="entity-grid" id="users-grid"></div>
+      <div class="card"><div class="card-header"><span class="card-title">User Comparison — Active Time (minutes)</span></div><div class="chart-wrap tall"><canvas id="users-bar-chart"></canvas></div></div>
+    </div>
+
+    <!-- USER DETAIL -->
+    <div class="page" id="page-user-detail">
+      <div class="kpi-row">
+        <div class="kpi green"><div class="kpi-label">Total Active</div><div class="kpi-value hms" id="ud-total-active">--</div><div class="kpi-sub">all time</div></div>
+        <div class="kpi orange"><div class="kpi-label">Total Idle</div><div class="kpi-value hms" id="ud-total-idle">--</div><div class="kpi-sub">all time</div></div>
+        <div class="kpi"><div class="kpi-label">Apps Used</div><div class="kpi-value" id="ud-apps">--</div><div class="kpi-sub">distinct apps</div></div>
+        <div class="kpi purple"><div class="kpi-label">Active Today</div><div class="kpi-value hms" id="ud-active-today">--</div><div class="kpi-sub">all apps</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-header"><span class="card-title">Daily Active Time (14 days)</span></div><div class="chart-wrap"><canvas id="ud-chart-daily"></canvas></div></div>
+        <div class="card"><div class="card-header"><span class="card-title">App Usage Share (all time)</span></div><div class="chart-wrap"><canvas id="ud-chart-apps"></canvas></div></div>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">App Breakdown</span></div>
+        <table><thead><tr><th>App</th><th>Active</th><th>Share</th><th>Idle</th><th>Sessions</th></tr></thead><tbody id="ud-app-table"></tbody></table>
+      </div>
+      <div class="card"><div class="card-header"><span class="card-title">Session Log</span></div>
+        <div class="tbl-scroll"><table><thead><tr><th>Date</th><th>Time</th><th>App</th><th>Machine</th><th>Active</th><th>Idle</th><th>Type</th></tr></thead><tbody id="ud-raw-body"></tbody></table></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var summaries=[],raw=[],apps=[],users=[],currentPage='overview',currentApp='',currentUser='';
+var charts={};
+var PALETTE=['#58a6ff','#3fb950','#f0883e','#bc8cff','#39d353','#f85149','#79c0ff','#56d364','#ffa657','#d2a8ff'];
+
+function hms(sec){
+  if(!sec||sec<0)return '0s';
+  var h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;
+  if(h>0)return h+'h '+m+'m';
+  if(m>0)return m+'m '+s+'s';
+  return s+'s';
+}
+function todayStr(){return new Date().toISOString().slice(0,10);}
+function last14(){var d=[];for(var i=13;i>=0;i--){var x=new Date();x.setDate(x.getDate()-i);d.push(x.toISOString().slice(0,10));}return d;}
+function dateNDaysAgo(n){if(n===0)return '0000-01-01';var d=new Date();d.setDate(d.getDate()-(n-1));return d.toISOString().slice(0,10);}
+function fmtTime(s){if(!s)return '--';try{return new Date(s).toLocaleTimeString();}catch(e){return s;}}
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function badgeCls(i){var c=['badge-blue','badge-green','badge-orange','badge-purple','badge-red'];return c[i%c.length];}
+
+function mkChart(id,cfg){
+  if(charts[id])charts[id].destroy();
+  var el=document.getElementById(id);
+  if(!el)return;
+  charts[id]=new Chart(el,cfg);
 }
 
-IPC_CLASSES = ['Land Pattern', 'IPC Class A', 'IPC Class B', 'IPC Class C' ]
-
-# ALTIUM LAYER MAPPING DICTIONARY
-ALTIUM_LAYER_MAP = {
-    # Copper Layers
-    "Top Layer": "TopLayer",
-    "Mid Layer 1": "MidLayer1",
-    "Mid Layer 2": "MidLayer2",
-    "Mid Layer 3": "MidLayer3",
-    "Mid Layer 4": "MidLayer4",
-    "Mid Layer 5": "MidLayer5",
-    "Mid Layer 6": "MidLayer6",
-    "Mid Layer 7": "MidLayer7",
-    "Mid Layer 8": "MidLayer8",
-    "Mid Layer 9": "MidLayer9",
-    "Mid Layer 10": "MidLayer10",
-    "Mid Layer 11": "MidLayer11",
-    "Mid Layer 12": "MidLayer12",
-    "Mid Layer 13": "MidLayer13",
-    "Mid Layer 14": "MidLayer14",
-    "Mid Layer 15": "MidLayer15",
-    "Mid Layer 16": "MidLayer16",
-    "Mid Layer 17": "MidLayer17",
-    "Mid Layer 18": "MidLayer18",
-    "Mid Layer 19": "MidLayer19",
-    "Mid Layer 20": "MidLayer20",
-    "Mid Layer 21": "MidLayer21",
-    "Mid Layer 22": "MidLayer22",
-    "Mid Layer 23": "MidLayer23",
-    "Mid Layer 24": "MidLayer24",
-    "Mid Layer 25": "MidLayer25",
-    "Mid Layer 26": "MidLayer26",
-    "Mid Layer 27": "MidLayer27",
-    "Mid Layer 28": "MidLayer28",
-    "Mid Layer 29": "MidLayer29",
-    "Mid Layer 30": "MidLayer30",
-    "Bottom Layer": "BottomLayer",
-
-    # Overlay / Text
-    "Top Overlay": "TopOverlay",
-    "Bottom Overlay": "BottomOverlay",
-
-    # Paste
-    "Top Paste": "TopPaste",
-    "Bottom Paste": "BottomPaste",
-
-    # Solder Mask
-    "Top Solder": "TopSolder",
-    "Bottom Solder": "BottomSolder",
-
-    # Internal Planes
-    "Internal Plane 1": "InternalPlane1",
-    "Internal Plane 2": "InternalPlane2",
-    "Internal Plane 3": "InternalPlane3",
-    "Internal Plane 4": "InternalPlane4",
-    "Internal Plane 5": "InternalPlane5",
-    "Internal Plane 6": "InternalPlane6",
-    "Internal Plane 7": "InternalPlane7",
-    "Internal Plane 8": "InternalPlane8",
-    "Internal Plane 9": "InternalPlane9",
-    "Internal Plane 10": "InternalPlane10",
-    "Internal Plane 11": "InternalPlane11",
-    "Internal Plane 12": "InternalPlane12",
-    "Internal Plane 13": "InternalPlane13",
-    "Internal Plane 14": "InternalPlane14",
-    "Internal Plane 15": "InternalPlane15",
-    "Internal Plane 16": "InternalPlane16",
-
-    # Drill / Holes
-    "Drill Guide": "DrillGuide",
-    "Drill Drawing": "DrillDrawing",
-    "Pad Hole": "PadHoleLayer",
-    "Via Hole": "ViaHoleLayer",
-
-    # Multi-layer / special
-    "Multi Layer": "MultiLayer",
-    "Connect Layer": "ConnectLayer",
-
-    # Keepout
-    "Keep-Out Layer": "KeepOutLayer",
-
-    # Background / Graphics
-    "Background Layer": "BackGroundLayer",
-    "Highlight Layer": "HighlightLayer",
-    "DRC Error Layer": "DRCErrorLayer",
-
-    # Grid Layers
-    "Grid Color 1": "GridColor1",
-    "Grid Color 10": "GridColor10",
-
-    # Mechanical Layers (full set)
-    "Mechanical 1": "Mechanical1",
-    "Mechanical 2": "Mechanical2",
-    "Mechanical 3": "Mechanical3",
-    "Mechanical 4": "Mechanical4",
-    "Mechanical 5": "Mechanical5",
-    "Mechanical 6": "Mechanical6",
-    "Mechanical 7": "Mechanical7",
-    "Mechanical 8": "Mechanical8",
-    "Mechanical 9": "Mechanical9",
-    "Mechanical 10": "Mechanical10",
-    "Mechanical 11": "Mechanical11",
-    "Mechanical 12": "Mechanical12",
-    "Mechanical 13": "Mechanical13",
-    "Mechanical 14": "Mechanical14",
-    "Mechanical 15": "Mechanical15",
-    "Mechanical 16": "Mechanical16",
-    "Mechanical 17": "Mechanical17",
-    "Mechanical 18": "Mechanical18",
-    "Mechanical 19": "Mechanical19",
-    "Mechanical 20": "Mechanical20",
-    "Mechanical 21": "Mechanical21",
-    "Mechanical 22": "Mechanical22",
-    "Mechanical 23": "Mechanical23",
-    "Mechanical 24": "Mechanical24",
-    "Mechanical 25": "Mechanical25",
-    "Mechanical 26": "Mechanical26",
-    "Mechanical 27": "Mechanical27",
-    "Mechanical 28": "Mechanical28",
-    "Mechanical 29": "Mechanical29",
-    "Mechanical 30": "Mechanical30",
-    "Mechanical 31": "Mechanical31",
-    "Mechanical 32": "Mechanical32",
-    "Mechanical 33": "Mechanical33",
-    "Mechanical 34": "Mechanical34",
-    "Mechanical 35": "Mechanical35",
-    "Mechanical 36": "Mechanical36",
-    "Mechanical 37": "Mechanical37",
-    "Mechanical 38": "Mechanical38",
-    "Mechanical 39": "Mechanical39",
-    "Mechanical 40": "Mechanical40",
-    "Mechanical 41": "Mechanical41",
-    "Mechanical 42": "Mechanical42",
-    "Mechanical 43": "Mechanical43",
-    "Mechanical 44": "Mechanical44",
-    "Mechanical 45": "Mechanical45",
-    "Mechanical 46": "Mechanical46",
-    "Mechanical 47": "Mechanical47",
-    "Mechanical 48": "Mechanical48",
-    "Mechanical 49": "Mechanical49",
-    "Mechanical 50": "Mechanical50",
-
-
-    # Assembly
-    "Top Assembly": "TopAssembly",
-    "Bottom Assembly": "BottomAssembly",
-
-    # Courtyard
-    "Top Courtyard": "TopCourtyard",
-    "Bottom Courtyard": "BottomCourtyard",
+function barCfg(labels,datasets,opts){
+  opts=opts||{};
+  return{type:'bar',data:{labels:labels,datasets:datasets},options:{
+    responsive:true,maintainAspectRatio:false,
+    indexAxis:opts.h?'y':'x',
+    plugins:{legend:{display:datasets.length>1,labels:{color:'#7d8590',font:{size:11}}}},
+    scales:{
+      x:{stacked:!!opts.stacked,grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#7d8590',font:{size:10}}},
+      y:{stacked:!!opts.stacked,grid:{color:'rgba(255,255,255,0.05)'},ticks:{color:'#7d8590',font:{size:10}}}
+    }
+  }};
 }
 
+function doughCfg(labels,data,colors){
+  return{type:'doughnut',data:{labels:labels,datasets:[{data:data,backgroundColor:colors||PALETTE,borderWidth:0,hoverOffset:4}]},
+    options:{responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{position:'right',labels:{color:'#7d8590',font:{size:11},boxWidth:12}}}}};
+}
 
-def map_layer_to_altium(layer_name):
-    """Map UI layer name to Altium script layer name"""
-    if layer_name in ALTIUM_LAYER_MAP:
-        return ALTIUM_LAYER_MAP[layer_name]
-    
-    # Fallback for Mechanical layers
-    if "Mechanical" in layer_name:
-        parts = layer_name.split()
-        if len(parts) == 2 and parts[1].isdigit():
-            return f"eMechanical{parts[1]}"
-    
-    return layer_name
+function nav(page,param){
+  currentPage=page;
+  if(page==='app-detail')currentApp=param||'';
+  if(page==='user-detail')currentUser=param||'';
+  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active');});
+  document.getElementById('page-'+page).classList.add('active');
+  document.querySelectorAll('.nav-link').forEach(function(l){
+    l.classList.remove('active');
+    var lp=l.getAttribute('data-page');
+    if(lp===page||(page==='app-detail'&&lp==='app/'+param)||(page==='user-detail'&&lp==='user/'+param))
+      l.classList.add('active');
+  });
+  var titles={overview:'Overall Dashboard',apps:'All Applications',users:'All Users','app-detail':currentApp,'user-detail':currentUser};
+  var bc={overview:'Dashboard',apps:'Dashboard / Apps',users:'Dashboard / Users','app-detail':'Dashboard / Apps / '+currentApp,'user-detail':'Dashboard / Users / '+currentUser};
+  document.getElementById('topbar-title').textContent=titles[page]||page;
+  document.getElementById('breadcrumb').textContent=bc[page]||'';
+  if(page==='overview')renderOverview();
+  if(page==='apps')renderAppsPage();
+  if(page==='users')renderUsersPage();
+  if(page==='app-detail')renderAppDetail(currentApp);
+  if(page==='user-detail')renderUserDetail(currentUser);
+  window.location.hash=page+(param?'/'+encodeURIComponent(param):'');
+}
 
-def to_decimal(value, default=0):
-    """Convert various input types to Decimal safely"""
-    if value is None or value == "":
-        return Decimal(str(default))
-    try:
-        if isinstance(value, str):
-            if value.strip() == "":
-                return Decimal(str(default))
-            return Decimal(value)
-        elif isinstance(value, (int, float)):
-            return Decimal(str(value))
-        elif isinstance(value, Decimal):
-            return value
-        else:
-            return Decimal(str(default))
-    except (ValueError, TypeError, decimal.InvalidOperation):
-        return Decimal(str(default))
+async function loadData(){
+  try{
+    // FIX: Switched from an absolute path ('/api/stats') to relative ('./api/stats').
+    // This allows the proxy gateway to accurately map and forward this request.
+    var res=await fetch('./api/stats');
+    var data=await res.json();
+    summaries=data.summaries||[];
+    raw=(data.raw||[]).slice().reverse();
+    apps=data.apps||[];
+    users=data.users||[];
+    buildSidebar();
+    nav(currentPage,currentPage==='app-detail'?currentApp:currentPage==='user-detail'?currentUser:undefined);
+  }catch(e){console.error(e);}
+}
 
-def convert_floats_to_decimals(data):
-    """Recursively convert all float values in nested data structures to Decimal"""
-    if isinstance(data, dict):
-        return {k: convert_floats_to_decimals(v) for k, v in data.items()}
-    elif isinstance(data, list):
-        return [convert_floats_to_decimals(x) for x in data]
-    elif isinstance(data, float):
-        return Decimal(str(data))
-    else:
-        return data
-    
+function buildSidebar(){
+  var ac=document.getElementById('nav-apps');
+  ac.innerHTML='';
+  apps.forEach(function(a){
+    var el=document.createElement('a');
+    el.className='nav-link';el.setAttribute('data-page','app/'+a);
+    el.style.fontSize='12px';
+    el.innerHTML='<span class="icon" style="font-size:11px;color:var(--accent)">&#9632;</span>'+esc(a);
+    el.onclick=function(){nav('app-detail',a);};
+    ac.appendChild(el);
+  });
+  var uc=document.getElementById('nav-users');
+  uc.innerHTML='';
+  users.forEach(function(u){
+    var el=document.createElement('a');
+    el.className='nav-link';el.setAttribute('data-page','user/'+u);
+    el.style.fontSize='12px';
+    el.innerHTML='<span class="icon" style="font-size:11px;color:var(--purple)">&#9679;</span>'+esc(u);
+    el.onclick=function(){nav('user-detail',u);};
+    uc.appendChild(el);
+  });
+}
+
+/* ---- OVERVIEW ---- */
+function renderOverview(){
+  var t=todayStr();
+  var td=summaries.filter(function(s){return s.date===t;});
+  var at=td.reduce(function(a,r){return a+r.active_seconds;},0);
+  var it=td.reduce(function(a,r){return a+r.idle_seconds;},0);
+  var ut=new Set(td.map(function(r){return r.username;})).size;
+  var apt=new Set(td.map(function(r){return r.app;})).size;
+  var ws=dateNDaysAgo(7);
+  var wa=summaries.filter(function(s){return s.date>=ws;}).reduce(function(a,r){return a+r.active_seconds;},0);
+  document.getElementById('ov-active-today').textContent=hms(at);
+  document.getElementById('ov-idle-today').textContent=hms(it);
+  document.getElementById('ov-users-today').textContent=ut||'0';
+  document.getElementById('ov-apps-today').textContent=apt||'0';
+  document.getElementById('ov-week').textContent=hms(wa);
+  document.getElementById('ov-active-sub').textContent=td.length+' sessions today';
+  var dates=last14();
+  var allApps=apps.length?apps:[...new Set(summaries.map(function(s){return s.app;}))].sort();
+  mkChart('ov-chart-daily',barCfg(
+    dates.map(function(d){return d.slice(5);}),
+    allApps.map(function(app,i){return{label:app,data:dates.map(function(d){
+      return Math.round(summaries.filter(function(s){return s.date===d&&s.app===app;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);
+    }),backgroundColor:PALETTE[i%PALETTE.length],borderRadius:3,borderWidth:0};}),
+    {stacked:true}
+  ));
+  mkChart('ov-chart-apps-today',barCfg(allApps,[{label:'Active (min)',
+    data:allApps.map(function(app){return Math.round(td.filter(function(s){return s.app===app;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);}),
+    backgroundColor:allApps.map(function(_,i){return PALETTE[i%PALETTE.length];}),borderRadius:3,borderWidth:0}]
+  ));
+  var us=[...new Set(td.map(function(s){return s.username;}))].sort();
+  mkChart('ov-chart-users-today',barCfg(us,[
+    {label:'Active (min)',data:us.map(function(u){return Math.round(td.filter(function(s){return s.username===u;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);}),backgroundColor:'rgba(63,185,80,.75)',borderRadius:3,borderWidth:0},
+    {label:'Idle (min)',data:us.map(function(u){return Math.round(td.filter(function(s){return s.username===u;}).reduce(function(a,r){return a+r.idle_seconds;},0)/60);}),backgroundColor:'rgba(240,136,62,.5)',borderRadius:3,borderWidth:0}
+  ],{stacked:true}));
+  mkChart('ov-chart-pie',doughCfg(
+    allApps,
+    allApps.map(function(app){return Math.round(summaries.filter(function(s){return s.date>=ws&&s.app===app;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);})
+  ));
+  document.getElementById('ov-raw-count').textContent=raw.length+' records';
+  document.getElementById('ov-raw-body').innerHTML=raw.slice(0,100).map(function(r){
+    return '<tr><td>'+r.date+'</td><td style="color:var(--muted);font-size:11px">'+fmtTime(r.report_time)+'</td>'+
+      '<td><span class="badge badge-blue">'+esc(r.app||'--')+'</span></td>'+
+      '<td><span class="badge badge-purple">'+esc(r.username||'--')+'</span></td>'+
+      '<td style="font-size:11px;color:var(--muted)">'+esc(r.machine_id||'--')+'</td>'+
+      '<td class="hms" style="color:var(--green)">'+hms(r.active_seconds)+'</td>'+
+      '<td class="hms" style="color:var(--orange)">'+hms(r.idle_seconds)+'</td>'+
+      '<td>'+(r.is_final?'<span class="badge badge-red">closed</span>':'<span class="badge badge-green">hourly</span>')+'</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--muted)">No records yet</td></tr>';
+}
+
+/* ---- APPS LIST ---- */
+function renderAppsPage(){
+  var days=parseInt(document.getElementById('apps-range').value,10);
+  var since=dateNDaysAgo(days);
+  var rows=days===0?summaries:summaries.filter(function(s){return s.date>=since;});
+  var allApps=apps.length?apps:[...new Set(summaries.map(function(s){return s.app;}))].sort();
+  var mx=1;
+  var stats=allApps.map(function(app){
+    var r=rows.filter(function(s){return s.app===app;});
+    var a=r.reduce(function(x,y){return x+y.active_seconds;},0);
+    var id=r.reduce(function(x,y){return x+y.idle_seconds;},0);
+    if(a>mx)mx=a;
+    return{app:app,active:a,idle:id,users:new Set(r.map(function(x){return x.username;})).size,sessions:r.length};
+  }).sort(function(a,b){return b.active-a.active;});
+  document.getElementById('apps-grid').innerHTML=stats.map(function(s){
+    var pct=Math.round((s.active/mx)*100);
+    return '<div class="entity-card" onclick="nav(\'app-detail\',\''+esc(s.app)+'\')">' +
+      '<div class="ec-icon">&#128187;</div><div class="ec-name">'+esc(s.app)+'</div>'+
+      '<div class="ec-sub">'+s.users+' user(s) | '+s.sessions+' session(s)</div>'+
+      '<div class="ec-stat"><span>Active</span><span>'+hms(s.active)+'</span></div>'+
+      '<div class="ec-stat"><span>Idle</span><span style="color:var(--orange)">'+hms(s.idle)+'</span></div>'+
+      '<div class="ec-bar"><div class="ec-bar-fill" style="width:'+pct+'%"></div></div></div>';
+  }).join('')||'<div class="empty"><div class="eicon">&#128187;</div><div>No app data yet</div></div>';
+  mkChart('apps-bar-chart',barCfg(
+    stats.map(function(s){return s.app;}),
+    [{label:'Active (min)',data:stats.map(function(s){return Math.round(s.active/60);}),backgroundColor:'rgba(63,185,80,.75)',borderRadius:4,borderWidth:0},
+     {label:'Idle (min)',data:stats.map(function(s){return Math.round(s.idle/60);}),backgroundColor:'rgba(240,136,62,.5)',borderRadius:4,borderWidth:0}],
+    {stacked:true}
+  ));
+}
+
+/* ---- APP DETAIL ---- */
+function renderAppDetail(appName){
+  if(!appName)return;
+  var ar=summaries.filter(function(s){return s.app===appName;});
+  var rr=raw.filter(function(r){return r.app===appName;});
+  var t=todayStr();
+  var td=ar.filter(function(s){return s.date===t;});
+  document.getElementById('ad-total-active').textContent=hms(ar.reduce(function(a,r){return a+r.active_seconds;},0));
+  document.getElementById('ad-total-idle').textContent=hms(ar.reduce(function(a,r){return a+r.idle_seconds;},0));
+  document.getElementById('ad-users').textContent=new Set(ar.map(function(r){return r.username;})).size;
+  document.getElementById('ad-active-today').textContent=hms(td.reduce(function(a,r){return a+r.active_seconds;},0));
+  var dates=last14();
+  mkChart('ad-chart-daily',barCfg(dates.map(function(d){return d.slice(5);}),
+    [{label:'Active (min)',data:dates.map(function(d){return Math.round(ar.filter(function(s){return s.date===d;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);}),
+      backgroundColor:'rgba(88,166,255,.75)',borderRadius:3,borderWidth:0}]
+  ));
+  var us=[...new Set(ar.map(function(r){return r.username;}))].sort();
+  mkChart('ad-chart-users',barCfg(us,[
+    {label:'Active (min)',data:us.map(function(u){return Math.round(ar.filter(function(r){return r.username===u;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);}),backgroundColor:'rgba(63,185,80,.75)',borderRadius:3,borderWidth:0},
+    {label:'Idle (min)',data:us.map(function(u){return Math.round(ar.filter(function(r){return r.username===u;}).reduce(function(a,r){return a+r.idle_seconds;},0)/60);}),backgroundColor:'rgba(240,136,62,.5)',borderRadius:3,borderWidth:0}
+  ],{stacked:true}));
+  var mx=Math.max(1,...us.map(function(u){return ar.filter(function(r){return r.username===u;}).reduce(function(a,r){return a+r.active_seconds;},0);}));
+  document.getElementById('ad-user-table').innerHTML=us.map(function(u,i){
+    var ur=ar.filter(function(r){return r.username===u;});
+    var a=ur.reduce(function(x,r){return x+r.active_seconds;},0);
+    var id=ur.reduce(function(x,r){return x+r.idle_seconds;},0);
+    var mc=ur.length?(ur[ur.length-1].machine_id||'--'):'--';
+    var pct=Math.round((a/mx)*100);
+    return '<tr><td><span class="badge '+badgeCls(i)+'">'+esc(u)+'</span></td>'+
+      '<td style="font-size:11px;color:var(--muted)">'+esc(mc)+'</td>'+
+      '<td class="hms">'+hms(a)+'</td>'+
+      '<td><div class="mbar"><div class="mbar-bg"><div class="mbar-fill g" style="width:'+pct+'%"></div></div><span style="font-size:10px;color:var(--muted)">'+pct+'%</span></div></td>'+
+      '<td class="hms" style="color:var(--orange)">'+hms(id)+'</td><td>'+ur.length+'</td></tr>';
+  }).join('')||'<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">No data</td></tr>';
+  document.getElementById('ad-raw-body').innerHTML=rr.slice(0,100).map(function(r){
+    return '<tr><td>'+r.date+'</td><td style="color:var(--muted);font-size:11px">'+fmtTime(r.report_time)+'</td>'+
+      '<td><span class="badge badge-purple">'+esc(r.username||'--')+'</span></td>'+
+      '<td style="font-size:11px;color:var(--muted)">'+esc(r.machine_id||'--')+'</td>'+
+      '<td class="hms" style="color:var(--green)">'+hms(r.active_seconds)+'</td>'+
+      '<td class="hms" style="color:var(--orange)">'+hms(r.idle_seconds)+'</td>'+
+      '<td>'+(r.is_final?'<span class="badge badge-red">closed</span>':'<span class="badge badge-green">hourly</span>')+'</td></tr>';
+  }).join('')||'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">No records</td></tr>';
+}
+
+/* ---- USERS LIST ---- */
+function renderUsersPage(){
+  var days=parseInt(document.getElementById('users-range').value,10);
+  var since=dateNDaysAgo(days);
+  var rows=days===0?summaries:summaries.filter(function(s){return s.date>=since;});
+  var allUsers=users.length?users:[...new Set(summaries.map(function(s){return s.username;}))].sort();
+  var mx=1;
+  var stats=allUsers.map(function(u){
+    var r=rows.filter(function(s){return s.username===u;});
+    var a=r.reduce(function(x,y){return x+y.active_seconds;},0);
+    var id=r.reduce(function(x,y){return x+y.idle_seconds;},0);
+    if(a>mx)mx=a;
+    return{user:u,active:a,idle:id,apps:new Set(r.map(function(x){return x.app;})).size,sessions:r.length};
+  }).sort(function(a,b){return b.active-a.active;});
+  document.getElementById('users-grid').innerHTML=stats.map(function(s){
+    var pct=Math.round((s.active/mx)*100);
+    return '<div class="entity-card" onclick="nav(\'user-detail\',\''+esc(s.user)+'\')">' +
+      '<div class="ec-icon">&#128100;</div><div class="ec-name">'+esc(s.user)+'</div>'+
+      '<div class="ec-sub">'+s.apps+' app(s) | '+s.sessions+' session(s)</div>'+
+      '<div class="ec-stat"><span>Active</span><span>'+hms(s.active)+'</span></div>'+
+      '<div class="ec-stat"><span>Idle</span><span style="color:var(--orange)">'+hms(s.idle)+'</span></div>'+
+      '<div class="ec-bar"><div class="ec-bar-fill" style="width:'+pct+'%;background:var(--purple)"></div></div></div>';
+  }).join('')||'<div class="empty"><div class="eicon">&#128100;</div><div>No user data yet</div></div>';
+  mkChart('users-bar-chart',barCfg(
+    stats.map(function(s){return s.user;}),
+    [{label:'Active (min)',data:stats.map(function(s){return Math.round(s.active/60);}),backgroundColor:'rgba(188,140,255,.75)',borderRadius:4,borderWidth:0},
+     {label:'Idle (min)',data:stats.map(function(s){return Math.round(s.idle/60);}),backgroundColor:'rgba(240,136,62,.5)',borderRadius:4,borderWidth:0}],
+    {stacked:true}
+  ));
+}
+
+/* ---- USER DETAIL ---- */
+function renderUserDetail(userName){
+  if(!userName)return;
+  var ur=summaries.filter(function(s){return s.username===userName;});
+  var rr=raw.filter(function(r){return r.username===userName;});
+  var t=todayStr();
+  var td=ur.filter(function(s){return s.date===t;});
+  document.getElementById('ud-total-active').textContent=hms(ur.reduce(function(a,r){return a+r.active_seconds;},0));
+  document.getElementById('ud-total-idle').textContent=hms(ur.reduce(function(a,r){return a+r.idle_seconds;},0));
+  document.getElementById('ud-apps').textContent=new Set(ur.map(function(r){return r.app;})).size;
+  document.getElementById('ud-active-today').textContent=hms(td.reduce(function(a,r){return a+r.active_seconds;},0));
+  var dates=last14();
+  mkChart('ud-chart-daily',barCfg(dates.map(function(d){return d.slice(5);}),
+    [{label:'Active (min)',data:dates.map(function(d){return Math.round(ur.filter(function(s){return s.date===d;}).reduce(function(a,r){return a+r.active_seconds;},0)/60);}),
+      backgroundColor:'rgba(188,140,255,.75)',borderRadius:3,borderWidth:0}]
+  ));
+  var allApps=[...new Set(ur.map(function(r){return r.app;}))].sort();
+  var appSec=allApps.map(function(app){return ur.filter(function(r){return r.app===app;}).reduce(function(a,r){return a+r.active_seconds;},0);});
+  mkChart('ud-chart-apps',doughCfg(allApps,appSec.map(function(s){return Math.round(s/60);})));
+  var mx=Math.max(1,...appSec);
+  document.getElementById('ud-app-table').innerHTML=allApps.map(function(app,i){
+    var ar=ur.filter(function(r){return r.app===app;});
+    var a=ar.reduce(function(x,r){return x+r.active_seconds;},0);
+    var id=ar.reduce(function(x,r){return x+r.idle_seconds;},0);
+    var pct=Math.round((a/mx)*100);
+    return '<tr><td><span class="badge '+badgeCls(i)+'">'+esc(app)+'</span></td>'+
+      '<td class="hms">'+hms(a)+'</td>'+
+      '<td><div class="mbar"><div class="mbar-bg"><div class="mbar-fill" style="width:'+pct+'%"></div></div><span style="font-size:10px;color:var(--muted)">'+pct+'%</span></div></td>'+
+      '<td class="hms" style="color:var(--orange)">'+hms(id)+'</td><td>'+ar.length+'</td></tr>';
+  }).join('')||'<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--muted)">No data</td></tr>';
+  document.getElementById('ud-raw-body').innerHTML=rr.slice(0,100).map(function(r){
+    return '<tr><td>'+r.date+'</td><td style="color:var(--muted);font-size:11px">'+fmtTime(r.report_time)+'</td>'+
+      '<td><span class="badge badge-blue">'+esc(r.app||'--')+'</span></td>'+
+      '<td style="font-size:11px;color:var(--muted)">'+esc(r.machine_id||'--')+'</td>'+
+      '<td class="hms" style="color:var(--green)">'+hms(r.active_seconds)+'</td>'+
+      '<td class="hms" style="color:var(--orange)">'+hms(r.idle_seconds)+'</td>'+
+      '<td>'+(r.is_final?'<span class="badge badge-red">closed</span>':'<span class="badge badge-green">hourly</span>')+'</td></tr>';
+  }).join('')||'<tr><td colspan="7" style="text-align:center;padding:20px;color:var(--muted)">No records</td></tr>';
+}
+
+/* ---- INIT ---- */
+function initFromHash(){
+  var hash=window.location.hash.replace('#','');
+  if(!hash){nav('overview');return;}
+  var parts=hash.split('/');
+  var page=parts[0];
+  var param=parts.slice(1).map(decodeURIComponent).join('/');
+  if(['overview','apps','users','app-detail','user-detail'].indexOf(page)>=0)
+    nav(page,param||undefined);
+  else nav('overview');
+}
+
+loadData().then(initFromHash);
+setInterval(loadData,30000);
+</script>
+</body>
+</html>
 
 
-class ServerConnection:
-    """Handles communication with Gateway (8081) and Central Server (8082)"""
-    
-    def __init__(self, gateway_url="http://localhost:8081", central_url="http://localhost:8082"):
-        self.gateway_url = gateway_url
-        self.gateway_api = f"{gateway_url}/api"
-        self.central_url = central_url
-        self.central_api = f"{central_url}/api"
-        
-        # ✅ FIX 2: Add backward compatibility for 'api_url'
-        self.api_url = self.central_api 
-        
-        self.session = requests.Session()
-        self.session_token = None
-        self.current_user = None
-        self.user_role = None
-        self.credentialsfile = os.path.expanduser("~/.libsienna/credentials.json")
-        
-        print(f"🔧 ServerConnection initialized: Gateway={gateway_url}, Central={central_url}")
-
-    # ============================================
-    # CREDENTIALS MANAGEMENT
-    # ============================================
-
-    def save_credentials(self, username, password): # Changed token to password
-        """Save credentials locally for auto-login using simple obfuscation"""
-        try:
-            creddir = os.path.dirname(self.credentialsfile)
-            os.makedirs(creddir, exist_ok=True)
-            
-            credentials = {
-                "username": username,
-                "password": password, # Saving password instead of token
-                "timestamp": datetime.now().isoformat() 
-            }
-            
-            # Simple XOR encryption + Base64 so it's not plain text
-            json_str = json.dumps(credentials)
-            key = "SiennaECAD_2026_SecureKey"
-            encrypted = "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(json_str))
-            encoded = base64.b64encode(encrypted.encode()).decode()
-            
-            with open(self.credentialsfile, 'w') as f:
-                f.write(encoded)
-            print(f"✅ Credentials saved securely to: {self.credentialsfile}")
-        except Exception as e:
-            print(f"❌ Failed to save credentials: {e}") 
-
-    def load_saved_credentials(self):
-        """Load saved credentials for auto-login"""
-        try:
-            if os.path.exists(self.credentialsfile):
-                with open(self.credentialsfile, 'r') as f:
-                    data = f.read()
-                
-                # Decrypt the new format
-                try:
-                    import base64
-                    key = "SiennaECAD_2026_SecureKey"
-                    encrypted = base64.b64decode(data.encode()).decode()
-                    json_str = "".join(chr(ord(c) ^ ord(key[i % len(key)])) for i, c in enumerate(encrypted))
-                    creds = json.loads(json_str)
-                    print(f"✅ Secure credentials loaded.")
-                    return creds
-                except:
-                    # Fallback for the old unencrypted token format
-                    creds = json.loads(data)
-                    return creds
-        except Exception as e:
-            print(f"❌ Failed to load credentials: {e}")
-        return None
-
-    def clear_credentials(self):
-        """Clear saved credentials file so the user is fully logged out"""
-        import os
-        try:
-            if hasattr(self, 'credentialsfile') and os.path.exists(self.credentialsfile):
-                os.remove(self.credentialsfile)
-                print(f"✅ Credentials cleared from: {self.credentialsfile}")
-        except Exception as e:
-            print(f"❌ Failed to clear credentials: {e}")
-            
-        # Also clear the session state in memory
-        self.session_token = None
-        self.current_user = None
-        self.user_role = None
-
-    def login(self, username, password, rememberme=False):
-        """Login via Gateway (8081)"""
-        try:
-            payload = {
-                "username": username,
-                "password": password,
-                "remember_me": rememberme
-            }
-            
-            response = self.session.post(
-                f"{self.gateway_api}/login",
-                json=payload,
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if 'session_token' in response.cookies:
-                    self.session_token = response.cookies['session_token']
-                    self.session.cookies.set('session_token', self.session_token, domain='localhost', path='/')
-                else:
-                    return False, "No session token received"
-                
-                user_info = data.get('user', {})
-                self.current_user = user_info.get('username', username)
-                self.user_role = user_info.get('level', 'engineer')
-                
-                print(f"✅ Login successful: user={self.current_user}, role={self.user_role}")
-                
-                # ✅ FIX: Save the actual password, not the temporary token
-                if rememberme and self.session_token:
-                    self.save_credentials(self.current_user, password)
-                else:
-                    self.clear_credentials()
-                    
-                return True, self.user_role
-            else:
-                return False, response.json().get("error", "Login failed")
-                
-        except Exception as e:
-            print(f"❌ Login exception: {e}")
-            return False, f"Connection error: {str(e)}"
-
-    def verify_token(self, token):
-        """Verify saved token via Gateway"""
-        try:
-            # ✅ Set the token
-            self.session_token = token
-            
-            # ✅ Set cookie for localhost
-            self.session.cookies.set(
-                'session_token', 
-                token, 
-                domain='localhost',
-                path='/'
-            )
-            
-            print(f"🔍 Verifying token: {token[:20]}...")
-            print(f"✅ Cookies in jar after verify_token: {list(self.session.cookies)}")
-            
-            success, role = self.verify_session()
-            
-            if success:
-                print(f"✅ Token verified successfully")
-                return success, role
-            else:
-                print(f"❌ Token verification failed")
-                self.session_token = None
-                self.clear_credentials()
-                return False, "Invalid token"
-                
-        except Exception as e:
-            print(f"❌ verify_token exception: {e}")
-            import traceback
-            traceback.print_exc()
-            return False, f"Connection error: {str(e)}"
-
-    def verify_session(self):
-        """Verify session via Gateway"""
-        try:
-            print(f"🔍 Making verify-session request...")
-            
-            response = self.session.get(
-                f"{self.gateway_api}/verify-session",
-                timeout=5
-            )
-            
-            print(f"🔍 Response status: {response.status_code}")
-            
-            if response.status_code == 200:
-                data = response.json()
-                self.current_user = data.get("username")
-                self.user_role = data.get("level")
-                print(f"✅ Session verified: user={self.current_user}, role={self.user_role}")
-                return True, self.user_role
-            else:
-                print(f"❌ Session verification failed: {response.status_code}")
-                return False, "Session expired"
-                
-        except Exception as e:
-            print(f"❌ Session verification error: {e}")
-            import traceback
-            traceback.print_exc()
-            return False, f"Connection error: {str(e)}"
-
-    def logout(self):
-        """Logout via Gateway"""
-        try:
-            if self.session_token:
-                self.session.post(f"{self.gateway_api}/logout", timeout=5)
-            self.session_token = None
-            self.current_user = None
-            self.user_role = None
-            self.clear_credentials()
-            return True, "Logged out"
-        except Exception as e:
-            return False, f"Error: {str(e)}"
-    
-    # ============================================
-    # AUTHENTICATED REQUEST HELPER - FOOLPROOF
-    # ============================================
-    
-    def _make_authenticated_request(self, method, url, **kwargs):
-        """
-        FOOLPROOF helper to ensure session token is ALWAYS sent with requests.
-        This method has multiple fallback mechanisms.
-        """
-        print(f"\n{'='*60}")
-        print(f"🔍 AUTHENTICATED REQUEST DEBUG")
-        print(f"{'='*60}")
-        print(f"Method: {method}")
-        print(f"URL: {url}")
-        print(f"Session token exists: {bool(self.session_token)}")
-        
-        if self.session_token:
-            print(f"Token value: {self.session_token[:20]}...")
-            
-            # ✅ STEP 1: Set cookie in session jar
-            self.session.cookies.set(
-                'session_token',
-                self.session_token,
-                domain='localhost',
-                path='/'
-            )
-            print(f"✅ Step 1: Cookie set in jar")
-        else:
-            print(f"❌ WARNING: No session token available!")
-            print(f"❌ This request will likely fail with 401 Unauthorized")
-        
-        # ✅ STEP 2: Check cookies in jar
-        print(f"Cookies in jar: {list(self.session.cookies)}")
-        for cookie in self.session.cookies:
-            print(f"  - Cookie: name={cookie.name}, domain={cookie.domain}, path={cookie.path}")
-        
-        # ✅ STEP 3: Extract timeout from kwargs (it's not a Request parameter)
-        timeout = kwargs.pop('timeout', 10)
-        
-        # ✅ STEP 4: Prepare request (without timeout)
-        req = requests.Request(method, url, **kwargs)
-        prepared = self.session.prepare_request(req)
-        
-        # ✅ STEP 5: Check if cookie is in headers
-        cookie_header = prepared.headers.get('Cookie', '')
-        print(f"Cookie header before fallback: '{cookie_header}'")
-        
-        # ✅ STEP 6: FALLBACK - Manually add cookie if not present
-        if self.session_token:
-            if 'session_token' not in cookie_header:
-                print(f"⚠️  FALLBACK ACTIVATED: Cookie not in header, adding manually")
-                if cookie_header:
-                    prepared.headers['Cookie'] = f"{cookie_header}; session_token={self.session_token}"
-                else:
-                    prepared.headers['Cookie'] = f"session_token={self.session_token}"
-                print(f"✅ Cookie header after fallback: '{prepared.headers['Cookie']}'")
-            else:
-                print(f"✅ Cookie already in header (no fallback needed)")
-        
-        # ✅ STEP 7: Make the request (with timeout)
-        print(f"🚀 Sending request...")
-        response = self.session.send(prepared, timeout=timeout)
-        
-        print(f"📥 Response status: {response.status_code}")
-        print(f"{'='*60}\n")
-        
-        return response
-    
-    # ============================================
-    # FOOTPRINT OPERATIONS
-    # ============================================
-    
+  
     def savefootprint(self, footprintdata, partnumber, footprintname="", packagetype="", 
                     manufacturer="", componenttype="", pincount=0, dimensionslength="",
                     dimensionswidth="", dimensionsheight="", description="", datasheeturl="",
