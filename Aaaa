@@ -1,1 +1,80 @@
+import math
+from build123d import *
+
+# --- 1. Package Parameters ---
+pin_pitch = 1.27        
+pin_width = 0.4         
+body_width = 3.9        
+top_width = 3.6         
+body_length = 4.9       
+body_height = 1.5       
+standoff = 0.2          
+
+inset = (body_width - top_width) / 2
+half_height = body_height / 2
+draft_angle = math.degrees(math.atan(inset / half_height)) 
+
+components = [] 
+
+# --- 2. Define a "Pin Factory" Function ---
+def create_silver_pin():
+    with BuildPart() as single_pin:
+        with BuildSketch(Plane.XZ):
+            with BuildLine() as pin_path:
+                p = Polyline((0, 0.8), (0.5, 0.8), (1.0, 0), (1.6, 0))
+                fillet(p.vertices()[1:-1], radius=0.15)
+            make_face(offset(pin_path.wire(), amount=0.1))
+        extrude(amount=pin_width / 2, both=True)
+        
+    pin = single_pin.part
+    pin.color = Color("silver")
+    return pin
+
+
+# --- 3. Build the Black Plastic Body ---
+with BuildPart() as plastic_body:
+    with BuildSketch(Plane.XY):
+        Rectangle(body_width, body_length)
+    extrude(amount=half_height, taper=draft_angle)
+    mirror(about=Plane.XY)
+    
+    # NEW: Apply a 0.05mm micro-fillet to ALL sharp edges of the body
+    fillet(plastic_body.edges(), radius=0.05)
+    
+    # Cut the dimple AFTER the fillet so the dimple hole stays crisp
+    with Locations((-top_width / 2 + 0.3, body_length / 2 - 0.6, half_height)):
+        Cylinder(radius=0.25, height=0.2, mode=Mode.SUBTRACT)
+
+body_solid = plastic_body.part
+body_solid.color = Color(0.15, 0.15, 0.15) 
+body_solid = body_solid.locate(Location((0, 0, standoff + half_height)))
+components.append(body_solid)
+
+
+# --- 4. Build the White Pin 1 Indicator (Paint Dot) ---
+with BuildPart() as paint_dot:
+    Cylinder(radius=0.24, height=0.05)
+
+dot_solid = paint_dot.part
+dot_solid.color = Color("white")
+dot_loc = Location((-top_width / 2 + 0.3, body_length / 2 - 0.6, standoff + body_height - 0.05))
+dot_solid = dot_solid.locate(dot_loc)
+components.append(dot_solid)
+
+
+# --- 5. Assemble the Pins ---
+y_locs = [1.5 * pin_pitch, 0.5 * pin_pitch, -0.5 * pin_pitch, -1.5 * pin_pitch]
+pin_x_offset = (body_width / 2) - 0.2  
+
+for y in y_locs:
+    right_pin = create_silver_pin().locate(Location((pin_x_offset, y, 0.15)))
+    components.append(right_pin)
+    
+    left_pin = create_silver_pin().rotate(Axis.Z, 180).locate(Location((-pin_x_offset, y, 0.15)))
+    components.append(left_pin)
+
+
+# --- 6. Export the Colored Assembly ---
+final_assembly = Compound(children=components)
+export_step(final_assembly, "SOP-8_Package_Filleted.step")
 
